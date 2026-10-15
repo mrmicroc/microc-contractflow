@@ -94,6 +94,7 @@ export interface ContractTerms {
   overtimePercent: number;
   mobilisationFee: number | null;
   expenseMarkupPercent: number;
+  minBillableHoursPerDay: number | null;
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;
@@ -116,6 +117,7 @@ export interface ContractTermsRequestBody {
   overtimePercent: number;
   mobilisationFee: number | null;
   expenseMarkupPercent: number;
+  minBillableHoursPerDay: number | null;
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;

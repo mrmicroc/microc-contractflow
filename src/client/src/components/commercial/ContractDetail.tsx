@@ -12,6 +12,8 @@ import {
 } from '@/components/forms';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+const grpCls =
+  'mb-1.5 mt-3 border-b border-slate-200 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500';
 
 export function ContractDetail({
   contractId,
@@ -31,8 +33,8 @@ export function ContractDetail({
   const [tf, setTf] = useState({
     effectiveFrom: '', currency: 'SEK', padRate: '', hourlyRate: '', saturdayRate: '',
     sundayRate: '', holidayRate: '', overtimeAfterHours: '8', overtimePercent: '150',
-    mobilisationFee: '', expenseMarkupPercent: '0', padHoursPerDay: '8',
-    minPadPerBookedDay: '1', carryOverMaxPercent: '20',
+    mobilisationFee: '', expenseMarkupPercent: '0', minBillableHoursPerDay: '',
+    padHoursPerDay: '8', minPadPerBookedDay: '1', carryOverMaxPercent: '20',
     cancellationDeadlineBusinessDays: '4', holidayCalendar: 'SE',
     travelExpensePolicy: '', indexation: '', notes: '',
   });
@@ -63,6 +65,7 @@ export function ContractDetail({
       overtimePercent: Number(tf.overtimePercent) || 150,
       mobilisationFee: numOrNull(tf.mobilisationFee),
       expenseMarkupPercent: Number(tf.expenseMarkupPercent) || 0,
+      minBillableHoursPerDay: numOrNull(tf.minBillableHoursPerDay),
       padHoursPerDay: Number(tf.padHoursPerDay) || 8,
       minPadPerBookedDay: Number(tf.minPadPerBookedDay) || 1,
       carryOverMaxPercent: Number(tf.carryOverMaxPercent) || 20,
@@ -119,6 +122,7 @@ export function ContractDetail({
 
         {termsFormOpen && (
           <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
+            <h4 className={grpCls}>{t('terms.groupGeneral')}</h4>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Field label={t('common.effectiveFrom')}>
                 <input type="date" className={inputCls} value={tf.effectiveFrom}
@@ -128,10 +132,10 @@ export function ContractDetail({
                 <input className={inputCls} value={tf.currency} maxLength={3}
                   onChange={(e) => setTf({ ...tf, currency: e.target.value })} />
               </Field>
-              <Field label={t('terms.padRate')}>
-                <input className={inputCls} inputMode="decimal" value={tf.padRate}
-                  onChange={(e) => setTf({ ...tf, padRate: e.target.value })} />
-              </Field>
+            </div>
+
+            <h4 className={grpCls}>{t('terms.groupRates')}</h4>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Field label={t('terms.hourlyRate')}>
                 <input className={inputCls} inputMode="decimal" value={tf.hourlyRate}
                   onChange={(e) => setTf({ ...tf, hourlyRate: e.target.value })} />
@@ -148,10 +152,6 @@ export function ContractDetail({
                 <input className={inputCls} inputMode="decimal" value={tf.holidayRate}
                   onChange={(e) => setTf({ ...tf, holidayRate: e.target.value })} />
               </Field>
-              <Field label={t('terms.mobilisationFee')}>
-                <input className={inputCls} inputMode="decimal" value={tf.mobilisationFee}
-                  onChange={(e) => setTf({ ...tf, mobilisationFee: e.target.value })} />
-              </Field>
               <Field label={t('terms.overtimeAfterHours')}>
                 <input className={inputCls} inputMode="numeric" value={tf.overtimeAfterHours}
                   onChange={(e) => setTf({ ...tf, overtimeAfterHours: e.target.value })} />
@@ -160,22 +160,46 @@ export function ContractDetail({
                 <input className={inputCls} inputMode="decimal" value={tf.overtimePercent}
                   onChange={(e) => setTf({ ...tf, overtimePercent: e.target.value })} />
               </Field>
+              <Field label={t('terms.mobilisationFee')}>
+                <input className={inputCls} inputMode="decimal" value={tf.mobilisationFee}
+                  onChange={(e) => setTf({ ...tf, mobilisationFee: e.target.value })} />
+              </Field>
               <Field label={t('terms.expenseMarkupPercent')}>
                 <input className={inputCls} inputMode="decimal" value={tf.expenseMarkupPercent}
                   onChange={(e) => setTf({ ...tf, expenseMarkupPercent: e.target.value })} />
               </Field>
-              <Field label={t('terms.padHoursPerDay')}>
-                <input className={inputCls} inputMode="decimal" value={tf.padHoursPerDay}
-                  onChange={(e) => setTf({ ...tf, padHoursPerDay: e.target.value })} />
+              <Field label={t('terms.minBillableHoursPerDay')}>
+                <input className={inputCls} inputMode="decimal" value={tf.minBillableHoursPerDay}
+                  onChange={(e) => setTf({ ...tf, minBillableHoursPerDay: e.target.value })} />
               </Field>
-              <Field label={t('terms.minPadPerBookedDay')}>
-                <input className={inputCls} inputMode="decimal" value={tf.minPadPerBookedDay}
-                  onChange={(e) => setTf({ ...tf, minPadPerBookedDay: e.target.value })} />
-              </Field>
-              <Field label={t('terms.carryOverMaxPercent')}>
-                <input className={inputCls} inputMode="decimal" value={tf.carryOverMaxPercent}
-                  onChange={(e) => setTf({ ...tf, carryOverMaxPercent: e.target.value })} />
-              </Field>
+            </div>
+
+            {contract.model === 'padBased' && (
+              <>
+                <h4 className={grpCls}>{t('terms.groupPad')}</h4>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Field label={t('terms.padRate')}>
+                    <input className={inputCls} inputMode="decimal" value={tf.padRate}
+                      onChange={(e) => setTf({ ...tf, padRate: e.target.value })} />
+                  </Field>
+                  <Field label={t('terms.padHoursPerDay')}>
+                    <input className={inputCls} inputMode="decimal" value={tf.padHoursPerDay}
+                      onChange={(e) => setTf({ ...tf, padHoursPerDay: e.target.value })} />
+                  </Field>
+                  <Field label={t('terms.minPadPerBookedDay')}>
+                    <input className={inputCls} inputMode="decimal" value={tf.minPadPerBookedDay}
+                      onChange={(e) => setTf({ ...tf, minPadPerBookedDay: e.target.value })} />
+                  </Field>
+                  <Field label={t('terms.carryOverMaxPercent')}>
+                    <input className={inputCls} inputMode="decimal" value={tf.carryOverMaxPercent}
+                      onChange={(e) => setTf({ ...tf, carryOverMaxPercent: e.target.value })} />
+                  </Field>
+                </div>
+              </>
+            )}
+
+            <h4 className={grpCls}>{t('terms.groupBooking')}</h4>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Field label={t('terms.cancellationDeadlineBusinessDays')}>
                 <input className={inputCls} inputMode="numeric" value={tf.cancellationDeadlineBusinessDays}
                   onChange={(e) => setTf({ ...tf, cancellationDeadlineBusinessDays: e.target.value })} />
@@ -185,7 +209,9 @@ export function ContractDetail({
                   onChange={(e) => setTf({ ...tf, holidayCalendar: e.target.value })} />
               </Field>
             </div>
-            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+
+            <h4 className={grpCls}>{t('terms.groupOther')}</h4>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <Field label={t('terms.travelExpensePolicy')}>
                 <input className={inputCls} value={tf.travelExpensePolicy}
                   onChange={(e) => setTf({ ...tf, travelExpensePolicy: e.target.value })} />
@@ -218,10 +244,10 @@ export function ContractDetail({
               <th className={thCls}>{t('common.version')}</th>
               <th className={thCls}>{t('common.effectiveFrom')}</th>
               <th className={thCls}>{t('common.currency')}</th>
-              <th className={thCls}>{t('terms.padRate')}</th>
+              {contract.model === 'padBased' && <th className={thCls}>{t('terms.padRate')}</th>}
               <th className={thCls}>{t('terms.hourlyRate')}</th>
               <th className={thCls}>{t('terms.mobilisationFee')}</th>
-              <th className={thCls}>{t('terms.carryOverMaxPercent')}</th>
+              {contract.model === 'padBased' && <th className={thCls}>{t('terms.carryOverMaxPercent')}</th>}
               <th className={thCls}>{t('terms.cancellationDeadlineBusinessDays')}</th>
               {isAdmin(me) && <th className={thCls}>{t('common.actions')}</th>}
             </tr>
@@ -239,10 +265,10 @@ export function ContractDetail({
                 </td>
                 <td className={tdCls}>{v.effectiveFrom}</td>
                 <td className={tdCls}>{v.currency}</td>
-                <td className={tdCls}>{fmt(v.padRate)}</td>
+                {contract.model === 'padBased' && <td className={tdCls}>{fmt(v.padRate)}</td>}
                 <td className={tdCls}>{fmt(v.hourlyRate)}</td>
                 <td className={tdCls}>{fmt(v.mobilisationFee)}</td>
-                <td className={tdCls}>{v.carryOverMaxPercent}%</td>
+                {contract.model === 'padBased' && <td className={tdCls}>{v.carryOverMaxPercent}%</td>}
                 <td className={tdCls}>{v.cancellationDeadlineBusinessDays}</td>
                 {isAdmin(me) && (
                   <td className={tdCls}>
