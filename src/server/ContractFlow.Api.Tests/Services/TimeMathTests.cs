@@ -112,6 +112,54 @@ public class TimeMathTests
     }
 
     [Fact]
+    public void DailyRate_FullDay_SplitsProportionallyAcrossProjects()
+    {
+        // Daily component: one flat day price regardless of hours, split by
+        // each project's share of the day (DayFraction is the bill quantity).
+        var result = TimeMath.CalculateDay(
+            new DateOnly(2026, 10, 12), // Monday
+            [(A, 2m), (B, 6m)],
+            new DayRateSet(10m, null, null, null, 8, 150m, null,
+                DayRate: 8000m));
+
+        Assert.Equal(8000m, result.Amount);
+        Assert.Equal(0.25m, result.Lines[0].DayFraction);
+        Assert.Equal(2000m, result.Lines[0].Amount);
+        Assert.Equal(0.75m, result.Lines[1].DayFraction);
+        Assert.Equal(6000m, result.Lines[1].Amount);
+        Assert.Contains("full day", result.Explanation);
+    }
+
+    [Fact]
+    public void DailyRate_ShortDay_BillsHalfDayRate()
+    {
+        var rates = new DayRateSet(null, null, null, null, 8, 150m, null,
+            DayRate: 8000m, HalfDayRate: 5000m, HalfDayMaxHours: 4m);
+
+        var half = TimeMath.CalculateDay(new DateOnly(2026, 10, 12), [(A, 4m)], rates);
+        Assert.Equal(5000m, half.Amount);
+        Assert.Contains("half day", half.Explanation);
+
+        var full = TimeMath.CalculateDay(new DateOnly(2026, 10, 12), [(A, 5m)], rates);
+        Assert.Equal(8000m, full.Amount);
+    }
+
+    [Fact]
+    public void DailyRate_NeitherOvertimeNorMinimumStacks()
+    {
+        // A fixed day price never grows: 10 h with OT-after-8 and min-hours
+        // configured still bills exactly the day rate.
+        var result = TimeMath.CalculateDay(
+            new DateOnly(2026, 10, 12), [(A, 10m)],
+            new DayRateSet(10m, null, null, null, 8, 150m, 8m, DayRate: 8000m));
+
+        Assert.Equal(0m, result.MinimumAdjustment);
+        Assert.Equal(8000m, result.Amount);
+        // (OT hours are still tracked for information — they just don't price.)
+        Assert.Equal(2m, result.OvertimeTotal);
+    }
+
+    [Fact]
     public void Recharge_AddsContractMarkup()
     {
         // Spec: expense 1 200 + 10 % mark-up → 1 320.

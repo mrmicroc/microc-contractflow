@@ -66,7 +66,6 @@ public class DeletesTests(ContractFlowWebApplicationFactory factory)
             customerId = ids.CustomerId,
             endClientId = ec!.Id,
             name = contract.GetProperty("name").GetString(),
-            model = "padBased",
             startDate = "2026-01-01",
         });
 

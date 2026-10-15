@@ -426,8 +426,10 @@ public class BookingsController(
                 .Where(t => t.ContractId == b.Project.ContractId && t.EffectiveFrom <= b.Date)
                 .OrderByDescending(t => t.EffectiveFrom).ThenByDescending(t => t.Version)
                 .FirstOrDefault();
-            var expectedPad = PadMath.CommitAmount(
-                b.PlannedHours, terms?.PadHoursPerDay ?? 8m, terms?.MinPadPerBookedDay ?? 1m);
+            decimal? expectedPad = terms?.PadEnabled == true
+                ? PadMath.CommitAmount(
+                    b.PlannedHours, terms.PadHoursPerDay, terms.MinPadPerBookedDay)
+                : null;
 
             var warnings = new List<string>();
             if (!Terminal.Contains(b.Status))

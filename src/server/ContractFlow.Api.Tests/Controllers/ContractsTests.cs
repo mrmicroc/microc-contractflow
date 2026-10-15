@@ -8,7 +8,7 @@ namespace ContractFlow.Api.Tests.Controllers;
 public class ContractsTests(ContractFlowWebApplicationFactory factory)
     : IClassFixture<ContractFlowWebApplicationFactory>
 {
-    public record ContractDto(Guid Id, Guid CustomerId, string Name, string Model,
+    public record ContractDto(Guid Id, Guid CustomerId, string Name, string[] Components,
         string StartDate, string? EndDate, bool IsActive);
     public record TermsDto(Guid Id, int Version, string EffectiveFrom,
         string Currency, decimal? PadRate, decimal? HourlyRate,
@@ -22,7 +22,6 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
         {
             customerId = customer!.Id,
             name = "Example Framework",
-            model = "padBased",
             startDate = "2026-01-01",
         });
         Assert.Equal(HttpStatusCode.Created, res.StatusCode);
@@ -39,7 +38,7 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
         var contract = await CreateContractAsync(client);
 
         Assert.Equal("Example Framework", contract.Name);
-        Assert.Equal("padBased", contract.Model);
+        Assert.Empty(contract.Components);
 
         var list = await client.GetFromJsonAsync<ContractDto[]>(
             $"/api/contracts?customerId={contract.CustomerId}");
@@ -54,7 +53,6 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
         {
             customerId = Guid.NewGuid(),
             name = "Ghost Contract",
-            model = "hourly",
             startDate = "2026-01-01",
         });
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
@@ -116,7 +114,7 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
         var client = factory.CreateUserClient(DevSeed.ManagerId);
         var res = await client.PostAsJsonAsync("/api/contracts", new
         {
-            customerId = Guid.NewGuid(), name = "Nope", model = "hourly", startDate = "2026-01-01",
+            customerId = Guid.NewGuid(), name = "Nope", startDate = "2026-01-01",
         });
         Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
     }
@@ -131,6 +129,33 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
         var terms = await finance.GetFromJsonAsync<TermsDto[]>(
             $"/api/contracts/{contract.Id}/terms");
         Assert.NotNull(terms);
+    }
+
+    [Fact]
+    public async Task Components_Derive_FromTermsVersionInForce()
+    {
+        var client = factory.CreateUserClient(DevSeed.AdminId);
+        var contract = await CreateContractAsync(client);
+
+        // Hourly + PAD + fixed price can all be on at once (§4 components).
+        await client.PostAsJsonAsync($"/api/contracts/{contract.Id}/terms",
+            new { effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+                  timeBilling = "hourly", padEnabled = true, padRate = 100m,
+                  fixedPriceEnabled = true, fixedPriceAmount = 5000m,
+                  fixedPriceDate = "2026-02-01" });
+
+        var detail = await client.GetFromJsonAsync<ContractDto>(
+            $"/api/contracts/{contract.Id}");
+        Assert.Equal(new[] { "hourly", "pad", "fixedPrice" }, detail!.Components);
+
+        // A later version flipping to daily-rate without PAD re-labels it.
+        await client.PostAsJsonAsync($"/api/contracts/{contract.Id}/terms",
+            new { effectiveFrom = DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"),
+                  currency = "SEK", holidayCalendar = "SE", timeBilling = "dailyRate",
+                  dayRate = 8000m, halfDayRate = 4000m });
+        var after = await client.GetFromJsonAsync<ContractDto>(
+            $"/api/contracts/{contract.Id}");
+        Assert.Equal(["dailyRate"], after!.Components);
     }
 
     [Fact]

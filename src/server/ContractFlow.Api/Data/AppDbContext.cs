@@ -53,7 +53,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(c => c.Name).HasMaxLength(200);
             e.Property(c => c.ExternalReference).HasMaxLength(100);
-            e.Property(c => c.Model).HasConversion<string>().HasMaxLength(20);
             e.HasOne(c => c.Customer).WithMany(cu => cu.Contracts)
                 .HasForeignKey(c => c.CustomerId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(c => c.EndClient).WithMany(ec => ec.Contracts)
@@ -68,7 +67,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(t => t.ContractId).OnDelete(DeleteBehavior.Cascade);
             e.Property(t => t.Currency).HasMaxLength(3);
             e.Property(t => t.HolidayCalendar).HasMaxLength(20);
+            e.Property(t => t.TimeBilling).HasConversion<string>().HasMaxLength(20);
             e.Property(t => t.PadRate).HasPrecision(18, 2);
+            e.Property(t => t.DayRate).HasPrecision(18, 2);
+            e.Property(t => t.HalfDayRate).HasPrecision(18, 2);
+            e.Property(t => t.HalfDayMaxHours).HasPrecision(9, 2);
+            e.Property(t => t.FixedPriceAmount).HasPrecision(18, 2);
             e.Property(t => t.HourlyRate).HasPrecision(18, 2);
             e.Property(t => t.SaturdayRate).HasPrecision(18, 2);
             e.Property(t => t.SundayRate).HasPrecision(18, 2);

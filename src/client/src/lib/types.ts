@@ -1,6 +1,9 @@
 // Mirrors the API DTOs in ContractFlow.Api/Models/Dto (camelCase JSON).
 
-export type ContractModel = 'padBased' | 'hourly';
+/** Billing-component keys on the terms version in force: 'hourly' |
+ * 'dailyRate' | 'pad' | 'fixedPrice'. A contract may carry several at once. */
+export type ContractComponent = 'hourly' | 'dailyRate' | 'pad' | 'fixedPrice';
+export type TimeBilling = 'none' | 'hourly' | 'dailyRate';
 export type ResourceType = 'employee' | 'subcontractor' | 'directlyContracted';
 export type LeaveType = 'vacation' | 'leave' | 'unavailable';
 export type PerDiemPolicy = 'none' | 'statutory' | 'custom';
@@ -45,7 +48,7 @@ export interface ContractSummary {
   customerId: string;
   name: string;
   externalReference: string | null;
-  model: ContractModel;
+  components: ContractComponent[];
   startDate: string;
   endDate: string | null;
   isActive: boolean;
@@ -59,7 +62,7 @@ export interface ContractDetail {
   endClientName: string | null;
   name: string;
   externalReference: string | null;
-  model: ContractModel;
+  components: ContractComponent[];
   startDate: string;
   endDate: string | null;
   isActive: boolean;
@@ -72,7 +75,6 @@ export interface ContractRequestBody {
   endClientId: string | null;
   name: string;
   externalReference: string | null;
-  model: ContractModel;
   startDate: string;
   endDate: string | null;
   isActive: boolean;
@@ -85,6 +87,10 @@ export interface ContractTerms {
   effectiveFrom: string;
   createdUtc: string;
   currency: string;
+  // ── Billing components ──
+  timeBilling: TimeBilling;
+  padEnabled: boolean;
+  fixedPriceEnabled: boolean;
   padRate: number | null;
   hourlyRate: number | null;
   saturdayRate: number | null;
@@ -95,6 +101,12 @@ export interface ContractTerms {
   mobilisationFee: number | null;
   expenseMarkupPercent: number;
   minBillableHoursPerDay: number | null;
+  dayRate: number | null;
+  halfDayRate: number | null;
+  halfDayMaxHours: number | null;
+  fixedPriceAmount: number | null;
+  fixedPriceDate: string | null;
+  fixedPriceNote: string | null;
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;
@@ -108,6 +120,9 @@ export interface ContractTerms {
 export interface ContractTermsRequestBody {
   effectiveFrom: string;
   currency: string;
+  timeBilling: TimeBilling;
+  padEnabled: boolean;
+  fixedPriceEnabled: boolean;
   padRate: number | null;
   hourlyRate: number | null;
   saturdayRate: number | null;
@@ -118,6 +133,12 @@ export interface ContractTermsRequestBody {
   mobilisationFee: number | null;
   expenseMarkupPercent: number;
   minBillableHoursPerDay: number | null;
+  dayRate: number | null;
+  halfDayRate: number | null;
+  halfDayMaxHours: number | null;
+  fixedPriceAmount: number | null;
+  fixedPriceDate: string | null;
+  fixedPriceNote: string | null;
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;

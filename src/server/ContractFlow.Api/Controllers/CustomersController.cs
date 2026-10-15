@@ -28,17 +28,19 @@ public class CustomersController(AppDbContext db) : ControllerBase
     public async Task<IActionResult> Get(Guid id, CancellationToken ct)
     {
         var customer = await db.Customers
-            .Include(c => c.Contracts)
+            .Include(c => c.Contracts).ThenInclude(c => c.TermsVersions)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (customer is null) return NotFound();
 
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return Ok(new CustomerDetailDto(
             customer.Id, customer.Name, customer.ExternalReference, customer.Notes,
             customer.IsActive,
             customer.Contracts
                 .OrderBy(c => c.Name)
                 .Select(c => new ContractSummaryDto(
-                    c.Id, c.CustomerId, c.Name, c.ExternalReference, c.Model,
+                    c.Id, c.CustomerId, c.Name, c.ExternalReference,
+                    ContractsController.ComponentsOf(c, today),
                     c.StartDate, c.EndDate, c.IsActive))
                 .ToList()));
     }

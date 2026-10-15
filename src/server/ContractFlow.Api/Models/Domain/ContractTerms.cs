@@ -1,6 +1,20 @@
 namespace ContractFlow.Api.Models.Domain;
 
 /// <summary>
+/// How booked time bills the customer (design: contract configuration — a
+/// contract combines billing components rather than being one fixed type).
+/// </summary>
+public enum TimeBilling
+{
+    /// <summary>Time is not billed (e.g. pure PAD or fixed-price contract).</summary>
+    None,
+    /// <summary>Rate × hours per day type, overtime rules, daily minimum.</summary>
+    Hourly,
+    /// <summary>Flat price per attendance day, optional half-day rate.</summary>
+    DailyRate,
+}
+
+/// <summary>
 /// Versioned commercial terms of a contract — rates, PAD rules, cancellation
 /// deadline, travel/expense policy, currency, indexation. Effective-dated and
 /// never rewritten: a change creates a new row with a higher
@@ -20,11 +34,34 @@ public class ContractTerms
     public DateOnly EffectiveFrom { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
+    // ── Billing components (contract configuration) ─────────────────────────
+    /// <summary>Whether and how time bills: hourly rates, per-day rate, or not
+    /// at all (e.g. pure PAD or fixed-price contracts).</summary>
+    public TimeBilling TimeBilling { get; set; } = TimeBilling.Hourly;
+    /// <summary>PAD component on — bookings commit PAD per the PAD rules below,
+    /// and the month bills utilised PAD × <see cref="PadRate"/>.</summary>
+    public bool PadEnabled { get; set; }
+    /// <summary>Fixed-price component — a one-off amount billed in the month
+    /// containing <see cref="FixedPriceDate"/>.</summary>
+    public bool FixedPriceEnabled { get; set; }
+    public decimal? FixedPriceAmount { get; set; }
+    /// <summary>The date the fixed price lands on an invoice specification.</summary>
+    public DateOnly? FixedPriceDate { get; set; }
+    public string? FixedPriceNote { get; set; }
+
     // ── Currency & customer rates ───────────────────────────────────────────
     /// <summary>ISO 4217 currency code, e.g. "SEK".</summary>
     public required string Currency { get; set; }
     /// <summary>Price per PAD (pre-allocated day), PAD-model contracts.</summary>
     public decimal? PadRate { get; set; }
+    /// <summary>Flat price per attendance day — the DailyRate component
+    /// (<see cref="TimeBilling"/> = DailyRate).</summary>
+    public decimal? DayRate { get; set; }
+    /// <summary>Price when the day's hours stay at or under
+    /// <see cref="HalfDayMaxHours"/>; null = always the full day rate.</summary>
+    public decimal? HalfDayRate { get; set; }
+    /// <summary>Day-length ceiling for the half-day rate.</summary>
+    public decimal? HalfDayMaxHours { get; set; }
     /// <summary>Ordinary weekday hourly rate; also base for OT multipliers.</summary>
     public decimal? HourlyRate { get; set; }
     public decimal? SaturdayRate { get; set; }

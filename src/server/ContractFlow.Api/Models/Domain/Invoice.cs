@@ -45,6 +45,10 @@ public enum InvoiceLineKind
     Expense,
     /// <summary>Fixed customer fee per confirmed mobilisation period.</summary>
     Mobilisation,
+    /// <summary>Utilised PAD × PAD rate (PAD-component contracts).</summary>
+    Pad,
+    /// <summary>One-off fixed price (lump-sum component) on its dated month.</summary>
+    FixedPrice,
     /// <summary>Free-text/manual line (adjustments stay explicit).</summary>
     Manual,
 }

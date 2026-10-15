@@ -11,7 +11,12 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Neutral seed data (no real company names or contract values)
 
 ## Phase 1 — Internal planning & PAD
-- [x] Customers / contracts / projects / locations with versioned terms
+- [x] Customers / contracts / projects / locations with versioned terms —
+      billing is component-based per terms version (time billing: hourly |
+      daily rate | none · PAD component · fixed price · mobilisation fee +
+      expense markup), replacing the original binary contract model
+- [x] Daily-rate component (full/half-day pricing, proportional split across
+      projects; no OT/minimum stacking on a fixed day price)
 - [x] Resource register + versioned compensation agreements
 - [x] Planning calendar (month grid + week/day views with resource & project lanes)
 - [x] Bookings + status flow (Forecast → … → Confirmed → … → Completed)

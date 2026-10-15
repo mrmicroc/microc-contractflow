@@ -22,7 +22,7 @@ public class ProjectsTests(ContractFlowWebApplicationFactory factory)
         var contract = await (await client.PostAsJsonAsync("/api/contracts", new
         {
             customerId = customer!.Id, name = "Host Contract",
-            model = "hourly", startDate = "2026-01-01",
+            startDate = "2026-01-01",
         })).Content.ReadFromJsonAsync<IdRef>();
         var res = await client.PostAsJsonAsync("/api/projects", new
         {

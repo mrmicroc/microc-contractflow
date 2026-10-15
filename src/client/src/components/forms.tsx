@@ -11,10 +11,22 @@ export const btnDangerCls =
 export const thCls = 'px-3 py-1.5 text-left text-xs font-semibold text-slate-500';
 export const tdCls = 'px-3 py-1.5 text-sm text-slate-700';
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, help, children }: {
+  label: string;
+  help?: string;
+  children: ReactNode;
+}) {
   return (
     <label className="block">
-      <span className="mb-0.5 block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mb-0.5 block text-xs font-medium text-slate-500">
+        {label}
+        {help && (
+          <span
+            title={help}
+            className="ml-1 inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-slate-300 align-middle text-[9px] font-semibold text-slate-400"
+          >?</span>
+        )}
+      </span>
       {children}
     </label>
   );

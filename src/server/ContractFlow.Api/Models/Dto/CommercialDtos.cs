@@ -36,12 +36,14 @@ public class EndClientRequest
 // ── Contracts & terms ───────────────────────────────────────────────────────
 
 public record ContractSummaryDto(
-    Guid Id, Guid CustomerId, string Name, string? ExternalReference, ContractModel Model,
+    Guid Id, Guid CustomerId, string Name, string? ExternalReference,
+    List<string> Components,
     DateOnly StartDate, DateOnly? EndDate, bool IsActive);
 
 public record ContractDetailDto(
     Guid Id, Guid CustomerId, string CustomerName, Guid? EndClientId, string? EndClientName,
-    string Name, string? ExternalReference, ContractModel Model,
+    string Name, string? ExternalReference,
+    List<string> Components,
     DateOnly StartDate, DateOnly? EndDate, bool IsActive,
     List<ContractTermsDto> TermsVersions, List<ProjectSummaryDto> Projects);
 
@@ -54,7 +56,6 @@ public class ContractRequest
     public required string Name { get; set; }
     [StringLength(100)]
     public string? ExternalReference { get; set; }
-    public ContractModel Model { get; set; } = ContractModel.PadBased;
     public DateOnly StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public bool IsActive { get; set; } = true;
@@ -62,9 +63,12 @@ public class ContractRequest
 
 public record ContractTermsDto(
     Guid Id, Guid ContractId, int Version, DateOnly EffectiveFrom, DateTime CreatedUtc,
-    string Currency, decimal? PadRate, decimal? HourlyRate, decimal? SaturdayRate,
+    string Currency, TimeBilling TimeBilling, bool PadEnabled, bool FixedPriceEnabled,
+    decimal? PadRate, decimal? HourlyRate, decimal? SaturdayRate,
     decimal? SundayRate, decimal? HolidayRate, int OvertimeAfterHours,
     decimal OvertimePercent, decimal? MobilisationFee, decimal ExpenseMarkupPercent,
+    decimal? DayRate, decimal? HalfDayRate, decimal? HalfDayMaxHours,
+    decimal? FixedPriceAmount, DateOnly? FixedPriceDate, string? FixedPriceNote,
     decimal PadHoursPerDay, decimal MinPadPerBookedDay, decimal CarryOverMaxPercent,
     int CancellationDeadlineBusinessDays, string HolidayCalendar,
     decimal? MinBillableHoursPerDay,
@@ -86,6 +90,18 @@ public class ContractTermsRequest
     public decimal OvertimePercent { get; set; } = 150m;
     public decimal? MobilisationFee { get; set; }
     public decimal ExpenseMarkupPercent { get; set; }
+
+    // ── Billing components (which models apply — may combine) ───────────────
+    public TimeBilling TimeBilling { get; set; } = TimeBilling.Hourly;
+    public bool PadEnabled { get; set; }
+    public bool FixedPriceEnabled { get; set; }
+    public decimal? DayRate { get; set; }
+    public decimal? HalfDayRate { get; set; }
+    public decimal? HalfDayMaxHours { get; set; }
+    public decimal? FixedPriceAmount { get; set; }
+    public DateOnly? FixedPriceDate { get; set; }
+    public string? FixedPriceNote { get; set; }
+
     public decimal PadHoursPerDay { get; set; } = 8m;
     public decimal MinPadPerBookedDay { get; set; } = 1m;
     public decimal CarryOverMaxPercent { get; set; } = 20m;

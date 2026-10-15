@@ -330,11 +330,6 @@ namespace ContractFlow.Api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
-                    b.Property<string>("Model")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -376,12 +371,37 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
+                    b.Property<decimal?>("DayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<DateOnly>("EffectiveFrom")
                         .HasColumnType("date");
 
                     b.Property<decimal>("ExpenseMarkupPercent")
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
+
+                    b.Property<decimal?>("FixedPriceAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateOnly?>("FixedPriceDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("FixedPriceEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("FixedPriceNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal?>("HalfDayMaxHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<decimal?>("HalfDayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("HolidayCalendar")
                         .IsRequired()
@@ -421,6 +441,9 @@ namespace ContractFlow.Api.Migrations
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
 
+                    b.Property<bool>("PadEnabled")
+                        .HasColumnType("bit");
+
                     b.Property<decimal>("PadHoursPerDay")
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
@@ -436,6 +459,11 @@ namespace ContractFlow.Api.Migrations
                     b.Property<decimal?>("SundayRate")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("TimeBilling")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<string>("TravelExpensePolicy")
                         .HasColumnType("nvarchar(max)");

@@ -194,6 +194,144 @@ public class BillingTests(ContractFlowWebApplicationFactory factory)
                 new { projectId = ids.ProjectId, year = 2028, month = 1 })).StatusCode);
     }
 
+    [Fact]
+    public async Task Invoice_PadComponent_BillsUtilisedTimesPadRate()
+    {
+        var ids = await Scaffold.CommercialGraphAsync(Admin, "inv-pad");
+        // PAD terms: utilised ledger rows × padRate — hours never bill twice.
+        await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "hourly", hourlyRate = 1000m,
+            padEnabled = true, padRate = 800m,
+        });
+        await factory.SeedAsync(async db =>
+        {
+            db.PadTransactions.Add(new PadTransaction
+            {
+                Id = Guid.NewGuid(), ProjectId = ids.ProjectId,
+                Year = 2028, Month = 8, Type = PadTransactionType.Utilise,
+                Amount = 3m, Note = "test",
+            });
+            await db.SaveChangesAsync();
+        });
+
+        var gen = await Admin.PostAsJsonAsync("/api/invoices/generate",
+            new { projectId = ids.ProjectId, year = 2028, month = 8 });
+        var detail = await Admin.GetFromJsonAsync<InvoiceDetail>(
+            $"/api/invoices/{(await gen.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
+
+        var pad = Assert.Single(detail!.Lines, l => l.Kind == "pad");
+        Assert.Equal(3m, pad.Quantity);
+        Assert.Equal(800m, pad.UnitPrice);
+        Assert.Equal(2400m, pad.Amount);
+        Assert.Equal(2400m, detail.Invoice.TotalAmount);
+    }
+
+    [Fact]
+    public async Task Invoice_PadComponent_BookedHoursDontDoubleBill()
+    {
+        var ids = await Scaffold.CommercialGraphAsync(Admin, "inv-pad2");
+        await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "hourly", hourlyRate = 1000m,
+            padEnabled = true, padRate = 800m,
+        });
+        var booking = await Scaffold.CreateBookingAsync(Admin, ids, "2028-08-07");
+
+        // An approved 8 h entry bound to the booking + 1 PAD utilised → the
+        // day is inside the PAD price, so only the PAD line may appear.
+        await factory.SeedAsync(async db =>
+        {
+            var sheet = new Timesheet
+            {
+                Id = Guid.NewGuid(), ResourceId = TimeReportingTests.LinkedId,
+                Year = 2028, IsoWeek = 32, Status = TimesheetStatus.Approved,
+            };
+            db.Timesheets.Add(sheet);
+            db.TimeEntries.Add(new TimeEntry
+            {
+                Id = Guid.NewGuid(), ResourceId = TimeReportingTests.LinkedId,
+                ProjectId = ids.ProjectId, BookingId = booking.Id,
+                Date = new DateOnly(2028, 8, 7),
+                Category = TimeEntryCategory.Work, ActualHours = 8m,
+                TimesheetId = sheet.Id,
+            });
+            db.PadTransactions.Add(new PadTransaction
+            {
+                Id = Guid.NewGuid(), ProjectId = ids.ProjectId,
+                BookingId = booking.Id,
+                Year = 2028, Month = 8, Type = PadTransactionType.Utilise,
+                Amount = 1m,
+            });
+            await db.SaveChangesAsync();
+        });
+
+        var gen = await Admin.PostAsJsonAsync("/api/invoices/generate",
+            new { projectId = ids.ProjectId, year = 2028, month = 8 });
+        var detail = await Admin.GetFromJsonAsync<InvoiceDetail>(
+            $"/api/invoices/{(await gen.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
+
+        Assert.Single(detail!.Lines);
+        Assert.Equal("pad", detail.Lines[0].Kind);
+        Assert.Equal(800m, detail.Lines[0].Amount);
+    }
+
+    [Fact]
+    public async Task Invoice_DailyRateComponent_BillsDayFractions()
+    {
+        var ids = await RatedGraphAsync("inv-daily");
+        // Terms v2: daily-rate component — full day 8 000, half day ≤ 4 h → 5 000.
+        await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "dailyRate", dayRate = 8000m,
+            halfDayRate = 5000m, halfDayMaxHours = 4m,
+            expenseMarkupPercent = 10m,
+        });
+        await ApprovedWeekAsync(ids, "2028-09-04"); // Monday — 8 h on site
+
+        var gen = await Admin.PostAsJsonAsync("/api/invoices/generate",
+            new { projectId = ids.ProjectId, year = 2028, month = 9 });
+        var detail = await Admin.GetFromJsonAsync<InvoiceDetail>(
+            $"/api/invoices/{(await gen.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
+
+        // 8 h on site → 1.0 day @ 8 000 (hours never enter the price).
+        var day = Assert.Single(detail!.Lines, l => l.Kind == "hours");
+        Assert.Equal(1m, day.Quantity);
+        Assert.Equal(8000m, day.Amount);
+        Assert.Equal(8000m + 1320m, detail.Invoice.TotalAmount); // + marked-up expense
+    }
+
+    [Fact]
+    public async Task Invoice_FixedPriceComponent_BillsOnItsMonth()
+    {
+        var ids = await Scaffold.CommercialGraphAsync(Admin, "inv-fp");
+        await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "none", fixedPriceEnabled = true,
+            fixedPriceAmount = 50000m, fixedPriceDate = "2028-10-15",
+        });
+
+        // The dated month carries the charge…
+        var oct = await Admin.PostAsJsonAsync("/api/invoices/generate",
+            new { projectId = ids.ProjectId, year = 2028, month = 10 });
+        var octDetail = await Admin.GetFromJsonAsync<InvoiceDetail>(
+            $"/api/invoices/{(await oct.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
+        var fp = Assert.Single(octDetail!.Lines, l => l.Kind == "fixedPrice");
+        Assert.Equal(50000m, fp.Amount);
+        Assert.Equal(50000m, octDetail.Invoice.TotalAmount);
+
+        // …other months don't.
+        var nov = await Admin.PostAsJsonAsync("/api/invoices/generate",
+            new { projectId = ids.ProjectId, year = 2028, month = 11 });
+        var novDetail = await Admin.GetFromJsonAsync<InvoiceDetail>(
+            $"/api/invoices/{(await nov.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
+        Assert.Empty(novDetail!.Lines);
+    }
+
     // ── Subcontractor statement ─────────────────────────────────────────────
 
     [Fact]

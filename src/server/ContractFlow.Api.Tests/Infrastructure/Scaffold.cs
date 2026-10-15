@@ -16,10 +16,12 @@ public static class Scaffold
         var contract = await (await admin.PostAsJsonAsync("/api/contracts", new
         {
             customerId = customer!.Id, name = $"Contract {tag}",
-            model = "padBased", startDate = "2026-01-01",
+            startDate = "2026-01-01",
         })).Content.ReadFromJsonAsync<IdRef>();
+        // PAD + hourly both on — matching the common hybrid contract shape.
         await admin.PostAsJsonAsync($"/api/contracts/{contract!.Id}/terms",
-            new { effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE" });
+            new { effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+                  timeBilling = "hourly", padEnabled = true, padRate = 100m });
         var project = await (await admin.PostAsJsonAsync("/api/projects", new
         {
             contractId = contract!.Id, name = $"Project {tag}",

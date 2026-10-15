@@ -1,14 +1,5 @@
 namespace ContractFlow.Api.Models.Domain;
 
-/// <summary>Which commercial model the contract bills under (design §4/§5).</summary>
-public enum ContractModel
-{
-    /// <summary>Pre-allocated days (PAD) per month with carry-over rules.</summary>
-    PadBased,
-    /// <summary>Pure hourly billing against the contract's rate set.</summary>
-    Hourly,
-}
-
 public class Contract
 {
     public Guid Id { get; set; }
@@ -20,7 +11,6 @@ public class Contract
     public required string Name { get; set; }
     /// <summary>The customer's own contract/framework reference.</summary>
     public string? ExternalReference { get; set; }
-    public ContractModel Model { get; set; }
     public DateOnly StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public bool IsActive { get; set; } = true;

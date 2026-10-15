@@ -53,6 +53,29 @@ public class BookingsTests(ContractFlowWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task Confirm_NoPadComponent_SkipsLedgerEntirely()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var ids = await NewGraphAsync("nopad");
+        // Flip the contract to plain hourly — this terms version (same
+        // effectiveFrom, higher version) wins over the scaffold's PAD version.
+        await admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms",
+            new { effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+                  timeBilling = "hourly", hourlyRate = 10m });
+
+        // No baseline at all — a non-PAD contract must not need one.
+        var booking = await Scaffold.CreateBookingAsync(admin, ids, "2027-06-08");
+        var res = await admin.PostAsync($"/api/bookings/{booking.Id}/confirm", null);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var dto = await res.Content.ReadFromJsonAsync<BookingDto>();
+        Assert.Equal("confirmed", dto!.Status);
+        Assert.Null(dto.ExpectedPad);
+
+        var dash = await DashboardAsync(admin, ids, 2027, 6);
+        Assert.Equal(0m, dash!.CommittedOpen);
+    }
+
+    [Fact]
     public async Task Confirm_ThenComplete_CommitsThenUtilises()
     {
         var admin = factory.CreateUserClient(DevSeed.AdminId);

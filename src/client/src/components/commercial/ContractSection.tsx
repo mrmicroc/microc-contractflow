@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   createContract, deleteContract, errorMessage, getContract, updateContract,
 } from '@/lib/api';
-import type { ContractModel, ContractSummary, CustomerDetail, EndClient } from '@/lib/types';
+import type { ContractSummary, CustomerDetail, EndClient } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -31,14 +31,14 @@ export function ContractSection({
   const [editId, setEditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [f, setF] = useState({
-    name: '', externalReference: '', model: 'padBased' as ContractModel,
+    name: '', externalReference: '',
     startDate: '', endDate: '', endClientId: '', isActive: true,
   });
 
   const openNew = () => {
     setEditId(null);
     setF({
-      name: '', externalReference: '', model: 'padBased',
+      name: '', externalReference: '',
       startDate: '', endDate: '', endClientId: '', isActive: true,
     });
     setFormOpen(true);
@@ -50,7 +50,6 @@ export function ContractSection({
     setF({
       name: c.name,
       externalReference: c.externalReference ?? '',
-      model: c.model,
       startDate: c.startDate,
       endDate: c.endDate ?? '',
       endClientId: c.endClientId ?? '',
@@ -65,7 +64,6 @@ export function ContractSection({
       endClientId: f.endClientId || null,
       name: f.name.trim(),
       externalReference: f.externalReference.trim() || null,
-      model: f.model,
       startDate: f.startDate,
       endDate: f.endDate || null,
       isActive: f.isActive,
@@ -108,13 +106,6 @@ export function ContractSection({
               <input className={inputCls} value={f.externalReference}
                 onChange={(e) => setF({ ...f, externalReference: e.target.value })} />
             </Field>
-            <Field label={t('contracts.model')}>
-              <select className={inputCls} value={f.model}
-                onChange={(e) => setF({ ...f, model: e.target.value as ContractModel })}>
-                <option value="padBased">{t('contracts.modelPadBased')}</option>
-                <option value="hourly">{t('contracts.modelHourly')}</option>
-              </select>
-            </Field>
             <Field label={t('contracts.startDate')}>
               <input type="date" className={inputCls} value={f.startDate}
                 onChange={(e) => setF({ ...f, startDate: e.target.value })} />
@@ -150,7 +141,7 @@ export function ContractSection({
           <tr className="border-b border-slate-200">
             <th className={cn(thCls, 'w-6')}></th>
             <th className={thCls}>{t('common.name')}</th>
-            <th className={thCls}>{t('contracts.model')}</th>
+            <th className={thCls}>{t('contracts.components')}</th>
             <th className={thCls}>{t('contracts.startDate')}</th>
             <th className={thCls}>{t('contracts.endDate')}</th>
             <th className={thCls}>{t('common.active')}</th>
@@ -172,7 +163,15 @@ export function ContractSection({
               </td>
               <td className={cn(tdCls, 'font-medium')}>{c.name}</td>
               <td className={tdCls}>
-                {c.model === 'padBased' ? t('contracts.modelPadBased') : t('contracts.modelHourly')}
+                <span className="flex flex-wrap gap-1">
+                  {c.components.length === 0 && '—'}
+                  {c.components.map((k) => (
+                    <span key={k}
+                      className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">
+                      {t(`contracts.comp.${k}`)}
+                    </span>
+                  ))}
+                </span>
               </td>
               <td className={tdCls}>{c.startDate}</td>
               <td className={tdCls}>{c.endDate ?? '—'}</td>

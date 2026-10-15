@@ -20,12 +20,14 @@ public class ContractsController(AppDbContext db) : ControllerBase
             query = query.Where(c => c.CustomerId == customerId.Value);
 
         var contracts = await query
+            .Include(c => c.TermsVersions)
             .OrderBy(c => c.Name)
-            .Select(c => new ContractSummaryDto(
-                c.Id, c.CustomerId, c.Name, c.ExternalReference, c.Model,
-                c.StartDate, c.EndDate, c.IsActive))
             .ToListAsync(ct);
-        return Ok(contracts);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return Ok(contracts.Select(c => new ContractSummaryDto(
+            c.Id, c.CustomerId, c.Name, c.ExternalReference,
+            ComponentsOf(c, today),
+            c.StartDate, c.EndDate, c.IsActive)));
     }
 
     [HttpGet("{id:guid}")]
@@ -43,7 +45,8 @@ public class ContractsController(AppDbContext db) : ControllerBase
         return Ok(new ContractDetailDto(
             contract.Id, contract.CustomerId, contract.Customer.Name,
             contract.EndClientId, contract.EndClient?.Name,
-            contract.Name, contract.ExternalReference, contract.Model,
+            contract.Name, contract.ExternalReference,
+            ComponentsOf(contract, DateOnly.FromDateTime(DateTime.UtcNow)),
             contract.StartDate, contract.EndDate, contract.IsActive,
             contract.TermsVersions
                 .OrderByDescending(t => t.Version)
@@ -72,7 +75,6 @@ public class ContractsController(AppDbContext db) : ControllerBase
             EndClientId = req.EndClientId,
             Name = req.Name.Trim(),
             ExternalReference = req.ExternalReference,
-            Model = req.Model,
             StartDate = req.StartDate,
             EndDate = req.EndDate,
             IsActive = req.IsActive,
@@ -82,7 +84,7 @@ public class ContractsController(AppDbContext db) : ControllerBase
 
         return CreatedAtAction(nameof(Get), new { id = contract.Id },
             new ContractSummaryDto(contract.Id, contract.CustomerId, contract.Name,
-                contract.ExternalReference, contract.Model, contract.StartDate,
+                contract.ExternalReference, [], contract.StartDate,
                 contract.EndDate, contract.IsActive));
     }
 
@@ -104,15 +106,17 @@ public class ContractsController(AppDbContext db) : ControllerBase
         contract.EndClientId = req.EndClientId;
         contract.Name = req.Name.Trim();
         contract.ExternalReference = req.ExternalReference;
-        contract.Model = req.Model;
         contract.StartDate = req.StartDate;
         contract.EndDate = req.EndDate;
         contract.IsActive = req.IsActive;
         await db.SaveChangesAsync(ct);
 
-        return Ok(new ContractSummaryDto(contract.Id, contract.CustomerId, contract.Name,
-            contract.ExternalReference, contract.Model, contract.StartDate,
-            contract.EndDate, contract.IsActive));
+        var fresh = await db.Contracts.Include(c => c.TermsVersions)
+            .FirstAsync(c => c.Id == id, ct);
+        return Ok(new ContractSummaryDto(fresh.Id, fresh.CustomerId, fresh.Name,
+            fresh.ExternalReference,
+            ComponentsOf(fresh, DateOnly.FromDateTime(DateTime.UtcNow)),
+            fresh.StartDate, fresh.EndDate, fresh.IsActive));
     }
 
     /// <summary>
@@ -206,6 +210,15 @@ public class ContractsController(AppDbContext db) : ControllerBase
             OvertimePercent = req.OvertimePercent,
             MobilisationFee = req.MobilisationFee,
             ExpenseMarkupPercent = req.ExpenseMarkupPercent,
+            TimeBilling = req.TimeBilling,
+            PadEnabled = req.PadEnabled,
+            FixedPriceEnabled = req.FixedPriceEnabled,
+            DayRate = req.DayRate,
+            HalfDayRate = req.HalfDayRate,
+            HalfDayMaxHours = req.HalfDayMaxHours,
+            FixedPriceAmount = req.FixedPriceAmount,
+            FixedPriceDate = req.FixedPriceDate,
+            FixedPriceNote = req.FixedPriceNote,
             PadHoursPerDay = req.PadHoursPerDay,
             MinPadPerBookedDay = req.MinPadPerBookedDay,
             CarryOverMaxPercent = req.CarryOverMaxPercent,
@@ -236,11 +249,32 @@ public class ContractsController(AppDbContext db) : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Billing-component keys active on the terms version in force on
+    /// <paramref name="date"/> — "hourly" / "dailyRate" / "pad" / "fixedPrice".
+    /// Empty when no version is in force yet.</summary>
+    public static List<string> ComponentsOf(Contract contract, DateOnly date)
+    {
+        var t = contract.TermsVersions
+            .Where(x => x.EffectiveFrom <= date)
+            .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.Version)
+            .FirstOrDefault();
+        if (t is null) return [];
+        var list = new List<string>();
+        if (t.TimeBilling == TimeBilling.Hourly) list.Add("hourly");
+        if (t.TimeBilling == TimeBilling.DailyRate) list.Add("dailyRate");
+        if (t.PadEnabled) list.Add("pad");
+        if (t.FixedPriceEnabled) list.Add("fixedPrice");
+        return list;
+    }
+
     private static ContractTermsDto ToDto(ContractTerms t) => new(
         t.Id, t.ContractId, t.Version, t.EffectiveFrom, t.CreatedUtc,
-        t.Currency, t.PadRate, t.HourlyRate, t.SaturdayRate, t.SundayRate,
+        t.Currency, t.TimeBilling, t.PadEnabled, t.FixedPriceEnabled,
+        t.PadRate, t.HourlyRate, t.SaturdayRate, t.SundayRate,
         t.HolidayRate, t.OvertimeAfterHours, t.OvertimePercent, t.MobilisationFee,
-        t.ExpenseMarkupPercent, t.PadHoursPerDay, t.MinPadPerBookedDay,
+        t.ExpenseMarkupPercent, t.DayRate, t.HalfDayRate, t.HalfDayMaxHours,
+        t.FixedPriceAmount, t.FixedPriceDate, t.FixedPriceNote,
+        t.PadHoursPerDay, t.MinPadPerBookedDay,
         t.CarryOverMaxPercent, t.CancellationDeadlineBusinessDays,
         t.HolidayCalendar, t.MinBillableHoursPerDay,
         t.TravelExpensePolicy, t.Indexation, t.Notes);

@@ -51,7 +51,6 @@ public static class DevSeed
             EndClient = endClient,
             Name = "Framework Inspection Services",
             ExternalReference = "FW-2026-01",
-            Model = ContractModel.PadBased,
             StartDate = new DateOnly(2026, 1, 1),
         };
         contract.TermsVersions.Add(new ContractTerms
@@ -59,6 +58,8 @@ public static class DevSeed
             Version = 1,
             EffectiveFrom = new DateOnly(2026, 1, 1),
             Currency = "SEK",
+            TimeBilling = TimeBilling.Hourly,
+            PadEnabled = true,
             PadRate = 100m,
             HourlyRate = 10m,
             SaturdayRate = 12m,

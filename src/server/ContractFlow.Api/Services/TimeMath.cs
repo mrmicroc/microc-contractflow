@@ -26,7 +26,15 @@ public record DayRateSet(
     /// <summary>Minimum hours per attendance day; null = no minimum. The
     /// minimum is added as an adjustment line — it never overwrites actual
     /// hours and never itself triggers overtime.</summary>
-    decimal? MinHoursPerDay);
+    decimal? MinHoursPerDay,
+    /// <summary>Flat price per attendance day — the daily-rate component.
+    /// Set ⇒ the day bills a fixed price split across projects, with no
+    /// overtime or minimum-hours adjustment on top.</summary>
+    decimal? DayRate = null,
+    /// <summary>Price when the day totals ≤ <paramref name="HalfDayMaxHours"/>
+    /// — null = every attended day bills the full day rate.</summary>
+    decimal? HalfDayRate = null,
+    decimal? HalfDayMaxHours = null);
 
 public record DayLine(
     Guid ProjectId,
@@ -36,7 +44,10 @@ public record DayLine(
     decimal OrdinaryHours,
     decimal OvertimeHours,
     decimal MinimumAdjustment,
-    decimal Amount);
+    decimal Amount,
+    /// <summary>This line's share of the day (0–1) — the billing quantity for
+    /// daily-rate contracts.</summary>
+    decimal DayFraction = 0m);
 
 public record DayResult(
     DayKind Kind,
@@ -108,8 +119,16 @@ public static class TimeMath
         var ordinaryTotal = Math.Min(actual, otAfter);
         var otTotal = actual - ordinaryTotal;
 
+        // Daily-rate component: one flat price per attended day, split across
+        // projects. A half-day rate applies when configured and the day stays
+        // short; no OT or minimum adjustment stacks on a fixed day price.
+        var daily = rates.DayRate is > 0m;
+        var halfDay = daily && rates.HalfDayRate is > 0m
+            && rates.HalfDayMaxHours is > 0m && actual <= rates.HalfDayMaxHours.Value;
+        var dayPrice = daily ? (halfDay ? rates.HalfDayRate!.Value : rates.DayRate!.Value) : 0m;
+
         // Step 4 — minimum adjustment on top of actuals.
-        var minAdj = rates.MinHoursPerDay.HasValue && actual < rates.MinHoursPerDay.Value
+        var minAdj = !daily && rates.MinHoursPerDay.HasValue && actual < rates.MinHoursPerDay.Value
             ? rates.MinHoursPerDay.Value - actual
             : 0m;
         var effective = actual + minAdj;
@@ -117,7 +136,7 @@ public static class TimeMath
         // Step 5 — proportional allocation across projects, rounded per line;
         // the last line absorbs the rounding remainder so Σ lines == totals.
         var lines = new List<DayLine>();
-        decimal effAcc = 0m, otAcc = 0m;
+        decimal effAcc = 0m, otAcc = 0m, amtAcc = 0m;
         for (var i = 0; i < splits.Count; i++)
         {
             var (projectId, hours) = splits[i];
@@ -129,15 +148,21 @@ public static class TimeMath
             effAcc += eff; otAcc += ot;
 
             var ordinary = eff - ot;
-            var amount = rate.HasValue
-                ? Round2(ordinary * rate.Value + ot * rate.Value * otPct / 100m)
-                : 0m;
-            lines.Add(new DayLine(projectId, hours, eff, ordinary, ot, eff - hours, amount));
+            var amount = daily
+                ? (last ? dayPrice - amtAcc : Round2(dayPrice * share))
+                : rate.HasValue
+                    ? Round2(ordinary * rate.Value + ot * rate.Value * otPct / 100m)
+                    : 0m;
+            amtAcc += amount;
+            lines.Add(new DayLine(projectId, hours, eff, ordinary, ot, eff - hours, amount, share));
         }
 
         // Steps 6+7 — rounded amounts + human-readable explanation (§5).
         var amountTotal = lines.Sum(l => l.Amount);
-        var explanation = rate.HasValue
+        var explanation = daily
+            ? string.Create(Inv, $"{kind}: {(halfDay ? "half" : "full")} day @ {dayPrice:0.##}") +
+              string.Create(Inv, $" → {amountTotal:0.##}")
+            : rate.HasValue
             ? string.Create(Inv, $"{kind}: {ordinaryTotal:0.##} h @ {rate.Value:0.##}") +
               (otTotal > 0 ? string.Create(Inv, $" + {otTotal:0.##} h OT × {otPct:0.##}%") : "") +
               (minAdj > 0 ? string.Create(Inv, $"; minimum-hours adjustment +{minAdj:0.##} h") : "") +

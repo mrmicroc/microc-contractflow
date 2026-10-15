@@ -89,8 +89,33 @@ public class BillingService(AppDbContext db)
             .FirstOrDefault();
         spec.Currency = termsAt(to)?.Currency ?? spec.Currency;
 
-        // ── Hours: re-run the billable pipeline per resource×day, keep this
-        // project's share of each day (incl. its OT + minimum-adjustment slice).
+        // ── PAD component: the month bills utilised PAD × the PAD rate —
+        // booked days are already inside the ledger, so their hours never
+        // price twice (design §4/§5 — billing component on the terms version
+        // in force at month end).
+        var endTerms = termsAt(to);
+        if (endTerms?.PadEnabled == true && endTerms.PadRate is > 0m)
+        {
+            var utilised = await db.PadTransactions
+                .Where(t => t.ProjectId == projectId && t.Year == year && t.Month == month
+                    && t.Type == PadTransactionType.Utilise)
+                .SumAsync(t => t.Amount, ct);
+            if (utilised > 0m)
+                spec.Lines.Add(new InvoiceLine
+                {
+                    Id = Guid.NewGuid(), InvoiceSpecificationId = spec.Id,
+                    Kind = InvoiceLineKind.Pad, Date = to,
+                    Description = string.Create(Inv, $"PAD utilised {year}-{month:00}"),
+                    Explanation = string.Create(Inv,
+                        $"{utilised:0.##} PAD utilised × {endTerms.PadRate.Value:0.##} {spec.Currency}"),
+                    Quantity = utilised, UnitPrice = endTerms.PadRate.Value,
+                    Amount = TimeMath.Round2(utilised * endTerms.PadRate.Value),
+                });
+        }
+
+        // ── Time billing: re-run the billable pipeline per resource×day, keep
+        // this project's share. Under a PAD component, booking-bound entries
+        // are covered by the PAD line — only standalone rows bill per time.
         var dayGroups = await db.TimeEntries
             .Where(e => e.ProjectId == projectId && e.Date >= from && e.Date <= to
                 && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved
@@ -101,34 +126,66 @@ public class BillingService(AppDbContext db)
 
         foreach (var g in dayGroups.OrderBy(x => x.Date).ThenBy(x => x.ResourceId))
         {
+            var t = termsAt(g.Date);
+            var padCovers = t?.PadEnabled == true;
+            var mode = t?.TimeBilling ?? TimeBilling.Hourly;
+            if (mode == TimeBilling.None) continue;
+
             // The day was priced across ALL its projects at approval — replay
             // with every approved row of the day so the split matches.
             var allDay = await db.TimeEntries
                 .Where(e => e.ResourceId == g.ResourceId && e.Date == g.Date
                     && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved
                     && Counted.Contains(e.Category))
-                .Select(e => new { e.ProjectId, e.ActualHours })
+                .Select(e => new { e.ProjectId, e.ActualHours, e.BookingId })
                 .ToListAsync(ct);
-            var splits = allDay.GroupBy(x => x.ProjectId)
+            var splits = allDay
+                .Where(x => !(padCovers && x.BookingId != null))
+                .GroupBy(x => x.ProjectId)
                 .Select(x => (ProjectId: x.Key, Hours: x.Sum(e => e.ActualHours))).ToList();
+            if (splits.All(s => s.ProjectId != projectId)) continue;
 
-            var t = termsAt(g.Date);
+            var daily = mode == TimeBilling.DailyRate;
             var rates = new DayRateSet(
                 t?.HourlyRate, t?.SaturdayRate, t?.SundayRate, t?.HolidayRate,
                 t?.OvertimeAfterHours ?? 8, t?.OvertimePercent ?? 150m,
-                t?.MinBillableHoursPerDay);
+                t?.MinBillableHoursPerDay,
+                daily ? t?.DayRate : null,
+                daily ? t?.HalfDayRate : null,
+                daily ? t?.HalfDayMaxHours : null);
             var day = TimeMath.CalculateDay(g.Date, splits, rates, t?.HolidayCalendar ?? "SE");
             var line = day.Lines.FirstOrDefault(l => l.ProjectId == projectId);
             if (line is null || line.Amount == 0m && line.EffectiveHours == 0m) continue;
 
-            var rate = TimeMath.RateFor(day.Kind, rates) ?? 0m;
+            var rate = daily
+                ? (line.DayFraction > 0m ? line.Amount / line.DayFraction : 0m)
+                : TimeMath.RateFor(day.Kind, rates) ?? 0m;
             spec.Lines.Add(new InvoiceLine
             {
                 Id = Guid.NewGuid(), InvoiceSpecificationId = spec.Id,
                 Kind = InvoiceLineKind.Hours, Date = g.Date,
-                Description = string.Create(Inv, $"Work {g.Date:yyyy-MM-dd}"),
+                Description = daily
+                    ? string.Create(Inv, $"Day {g.Date:yyyy-MM-dd}")
+                    : string.Create(Inv, $"Work {g.Date:yyyy-MM-dd}"),
                 Explanation = day.Explanation,
-                Quantity = line.EffectiveHours, UnitPrice = rate, Amount = line.Amount,
+                Quantity = daily ? line.DayFraction : line.EffectiveHours,
+                UnitPrice = rate, Amount = line.Amount,
+            });
+        }
+
+        // ── Fixed-price component: one-off amount on its configured month.
+        if (endTerms?.FixedPriceEnabled == true && endTerms.FixedPriceAmount is > 0m
+            && endTerms.FixedPriceDate is { } fpDate && fpDate >= from && fpDate <= to)
+        {
+            spec.Lines.Add(new InvoiceLine
+            {
+                Id = Guid.NewGuid(), InvoiceSpecificationId = spec.Id,
+                Kind = InvoiceLineKind.FixedPrice, Date = fpDate,
+                Description = endTerms.FixedPriceNote
+                    ?? string.Create(Inv, $"Fixed price {year}-{month:00}"),
+                Explanation = "Fixed-price contract component",
+                Quantity = 1m, UnitPrice = endTerms.FixedPriceAmount.Value,
+                Amount = endTerms.FixedPriceAmount.Value,
             });
         }
 

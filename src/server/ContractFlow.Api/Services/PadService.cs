@@ -83,6 +83,11 @@ public class PadService(AppDbContext db)
         Booking booking, Guid? userId, CancellationToken ct)
     {
         var terms = await TermsForAsync(booking.ProjectId, booking.Date, ct);
+        // No PAD component on the in-force terms → confirming is a pure status
+        // change; the ledger is untouched (hourly/fixed-price contracts).
+        if (terms?.PadEnabled != true)
+            return new CommitResult(true, 0m, 0m, MonthClosed: false);
+
         var amount = PadMath.CommitAmount(
             booking.PlannedHours,
             terms?.PadHoursPerDay ?? 8m,
