@@ -1,0 +1,9 @@
+@host = http://localhost:5190
+@devUserId = 00000000-0000-4000-8000-000000000001
+
+### Current user (dev identity via X-Dev-User-Id header)
+GET {{host}}/api/me
+X-Dev-User-Id: {{devUserId}}
+
+### All users (feeds the dev role-switcher)
+GET {{host}}/api/users

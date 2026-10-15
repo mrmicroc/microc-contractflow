@@ -4,11 +4,11 @@ Items are marked ✅ only when implemented **and** tested. See
 `docs/FUNCTIONAL_DESIGN.md` §12 for the full plan.
 
 ## Phase 0 — Skeleton
-- [ ] Repo structure: `src/server` (API + tests), `src/client` (React + Vitest)
-- [ ] Dev mode: no login, role-switcher picks the active seeded user
-- [ ] i18n scaffold (English primary, Swedish selectable)
-- [ ] EF Core: LocalDB dev, SQLite tests
-- [ ] Neutral seed data (no real company names or contract values)
+- [x] Repo structure: `src/server` (API + tests), `src/client` (React + Vitest)
+- [x] Dev mode: no login, role-switcher picks the active seeded user
+- [x] i18n scaffold (English primary, Swedish selectable)
+- [x] EF Core: LocalDB dev (`ContractFlow_Local`), SQLite tests
+- [x] Neutral seed data (no real company names or contract values)
 
 ## Phase 1 — Internal planning & PAD
 - [ ] Customers / contracts / projects / locations with versioned terms

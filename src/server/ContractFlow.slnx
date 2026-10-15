@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ContractFlow.Api/ContractFlow.Api.csproj" />
+  <Project Path="ContractFlow.Api.Tests/ContractFlow.Api.Tests.csproj" />
+</Solution>

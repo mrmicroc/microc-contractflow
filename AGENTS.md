@@ -24,10 +24,10 @@
 All source files are UTF-8. Do not append to files with Windows PowerShell
 `Add-Content` / `Set-Content` / `Out-File` without `-Encoding utf8`.
 
-## Repository layout (once scaffolded)
-- Backend: `src/server/ContractFlow.Api/`
+## Repository layout
+- Backend: `src/server/ContractFlow.Api/` (http://localhost:5190)
 - Backend tests: `src/server/ContractFlow.Api.Tests/`
-- Frontend: `src/client/src/`
+- Frontend: `src/client/src/` (http://localhost:5175, Vite proxy `/api` → 5190)
 - Frontend tests: co-located `*.test.ts` files in `src/client/src/lib/`
 
 ## Verification commands (run before every commit)
@@ -35,3 +35,18 @@ All source files are UTF-8. Do not append to files with Windows PowerShell
 cd src/client && npm run build && npx vitest run
 cd src/server && dotnet build && dotnet test
 ```
+
+## Test counts (update after adding tests)
+- Backend: 3
+- Frontend: 4 (1 test file)
+
+## Gotchas
+- A running local backend (`dotnet run`) locks `ContractFlow.Api\bin` — stop it
+  before `dotnet build` / `dotnet test`.
+- ImageSharp: 3.x carries known advisories; 4.x requires a Six Labors license
+  key for Release builds. No image library is referenced yet — the choice is
+  deferred to Phase 2 (receipts). Evaluate SkiaSharp / Magick.NET / licensed
+  ImageSharp then.
+- Dev identity travels in the `X-Dev-User-Id` header (`DevCurrentUser`); without
+  it the API falls back to the first active Administrator. When Entra sign-in
+  lands, `ICurrentUser` is the seam to re-implement from token claims.
