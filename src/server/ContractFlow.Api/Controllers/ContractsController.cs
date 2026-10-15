@@ -115,6 +115,35 @@ public class ContractsController(AppDbContext db) : ControllerBase
             contract.EndDate, contract.IsActive));
     }
 
+    /// <summary>
+    /// Deletes the contract and cascades its terms/projects/locations/quantities
+    /// and PAD ledger rows. Blocked while bookings (audit anchors) or
+    /// compensation agreements reference it — deactivate instead.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var contract = await db.Contracts.FindAsync([id], ct);
+        if (contract is null) return NotFound();
+        if (await db.Bookings.AnyAsync(b => b.Project.ContractId == id, ct))
+            return Conflict(new
+            {
+                error = "hasDependents",
+                message = "Contract has bookings — they anchor the PAD audit trail and cannot be deleted.",
+            });
+        if (await db.CompensationAgreements.AnyAsync(a => a.ContractId == id, ct))
+            return Conflict(new
+            {
+                error = "hasDependents",
+                message = "Contract is referenced by compensation agreements — remove them first.",
+            });
+
+        db.Contracts.Remove(contract);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     // ── Terms versions — effective-dated, never rewritten (design §3) ────────
 
     [HttpGet("{id:guid}/terms")]
@@ -190,6 +219,20 @@ public class ContractsController(AppDbContext db) : ControllerBase
         await db.SaveChangesAsync(ct);
 
         return Ok(ToDto(terms));
+    }
+
+    /// <summary>Removes a single terms version (e.g. entered by mistake).</summary>
+    [HttpDelete("{id:guid}/terms/{termId:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> DeleteTerms(Guid id, Guid termId, CancellationToken ct)
+    {
+        var terms = await db.ContractTerms
+            .FirstOrDefaultAsync(t => t.Id == termId && t.ContractId == id, ct);
+        if (terms is null) return NotFound();
+
+        db.ContractTerms.Remove(terms);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     private static ContractTermsDto ToDto(ContractTerms t) => new(

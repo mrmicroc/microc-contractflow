@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   closeMonth,
   createPadRequest,
+  deletePadRequest,
   getPadDashboard,
   getPadRequests,
   getProjects,
@@ -138,6 +139,13 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
 
+  const removeRequest = async (id: string) => {
+    if (!window.confirm(t('common.confirmDelete'))) return;
+    setError(null);
+    try { await deletePadRequest(id); reload(); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
+
   const canManage = me !== null && ['Administrator', 'ProjectManager'].includes(me.role);
 
   const cards: [string, number, string?][] = dash ? [
@@ -269,9 +277,14 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                           </>
                         )}
                         {canManage && (
-                          <button className={btnSecondaryCls} onClick={() => void actOnRequest(r.id, 'withdraw')}>
-                            {t('monthEnd.withdraw')}
-                          </button>
+                          <>
+                            <button className={btnSecondaryCls} onClick={() => void actOnRequest(r.id, 'withdraw')}>
+                              {t('monthEnd.withdraw')}
+                            </button>
+                            <button className={btnDangerCls} onClick={() => void removeRequest(r.id)}>
+                              {t('common.delete')}
+                            </button>
+                          </>
                         )}
                       </span>
                     )}

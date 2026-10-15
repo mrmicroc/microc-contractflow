@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import {
   bookingAction,
   createBooking,
+  deleteBooking,
+  errorMessage,
   getBookings,
   getProjects,
   getResources,
@@ -10,23 +12,30 @@ import {
   updateBooking,
 } from '@/lib/api';
 import {
-  availableActions, monthGrid, statusClasses, type BookingAction,
+  addDays, availableActions, monthGrid, statusClasses, weekDates,
+  type BookingAction,
 } from '@/lib/bookings';
 import { numOrNull } from '@/lib/versioned';
 import type { Booking, ProjectSummary, ResourceSummary } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { canSeeCommercial, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnSecondaryCls, Field, inputCls, Panel,
+  btnCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
 } from '@/components/forms';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const monthKey = (y: number, m: number) => `${y}-${pad2(m)}`;
 
+type View = 'month' | 'week' | 'day';
+type LaneBy = 'resource' | 'project';
+
 export function Plan() {
   const { t } = useTranslation();
   const me = useMe();
+  const [view, setView] = useState<View>('month');
+  const [laneBy, setLaneBy] = useState<LaneBy>('resource');
+  const [anchor, setAnchor] = useState(todayIso());
   const [ym, setYm] = useState(() => {
     const d = new Date();
     return { year: d.getFullYear(), month: d.getMonth() + 1 };
@@ -48,13 +57,20 @@ export function Plan() {
     activityRef: '', workDescription: '', status: 'forecast' as 'forecast' | 'tentative' | 'requested',
   });
 
-  const from = `${monthKey(ym.year, ym.month)}-01`;
-  const to = `${monthKey(ym.year, ym.month)}-31`;
+  const week = weekDates(anchor);
 
   const reload = useCallback(() => {
-    getBookings({ from, to, projectId: projectFilter || undefined, resourceId: resourceFilter || undefined })
-      .then(setBookings).catch(() => setBookings([]));
-  }, [from, to, projectFilter, resourceFilter]);
+    const w = weekDates(anchor);
+    const r = {
+      from: view === 'month' ? `${monthKey(ym.year, ym.month)}-01` : view === 'week' ? w[0] : anchor,
+      to: view === 'month' ? `${monthKey(ym.year, ym.month)}-31` : view === 'week' ? w[6] : anchor,
+    };
+    getBookings({
+      ...r,
+      projectId: projectFilter || undefined,
+      resourceId: resourceFilter || undefined,
+    }).then(setBookings).catch(() => setBookings([]));
+  }, [view, ym.year, ym.month, anchor, projectFilter, resourceFilter]);
   useEffect(() => { void reload(); }, [reload]);
 
   useEffect(() => {
@@ -65,11 +81,32 @@ export function Plan() {
   const canManage = me !== null && ['Administrator', 'ProjectManager'].includes(me.role);
   const userResourceIds = new Set(resources.filter((r) => r.userId === me?.id).map((r) => r.id));
 
-  const shiftMonth = (d: number) =>
-    setYm(({ year, month }) => {
-      const next = new Date(year, month - 1 + d, 1);
-      return { year: next.getFullYear(), month: next.getMonth() + 1 };
-    });
+  const shift = (d: number) => {
+    if (view === 'month')
+      setYm(({ year, month }) => {
+        const next = new Date(year, month - 1 + d, 1);
+        return { year: next.getFullYear(), month: next.getMonth() + 1 };
+      });
+    else if (view === 'week') setAnchor((a) => addDays(a, d * 7));
+    else setAnchor((a) => addDays(a, d));
+  };
+
+  const periodLabel = view === 'month' ? monthKey(ym.year, ym.month)
+    : view === 'week' ? `${week[0]} – ${week[6]}`
+    : anchor;
+
+  const lanes: { id: string; name: string }[] = laneBy === 'resource'
+    ? resources
+        .filter((r) => r.isActive && (!resourceFilter || r.id === resourceFilter))
+        .map((r) => ({ id: r.id, name: r.displayName }))
+    : projects
+        .filter((p) => p.isActive && (!projectFilter || p.id === projectFilter))
+        .map((p) => ({ id: p.id, name: p.name }));
+
+  const laneDays = view === 'week' ? week : [anchor];
+  const bookingsFor = (laneId: string, day: string) =>
+    (byDate.get(day) ?? []).filter((b) =>
+      (laneBy === 'resource' ? b.resourceId : b.projectId) === laneId);
 
   const byDate = new Map<string, Booking[]>();
   for (const b of bookings) {
@@ -95,11 +132,16 @@ export function Plan() {
       return;
     }
     try {
-      await bookingAction(id, action);
+      if (action === 'delete') {
+        if (!window.confirm(t('common.confirmDelete'))) return;
+        await deleteBooking(id);
+      } else {
+        await bookingAction(id, action);
+      }
       setSelected(null);
       reload();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorMessage(e);
       setError(msg.includes('insufficientPad') ? t('booking.insufficientPadError')
         : msg.includes('monthClosed') ? t('booking.monthClosedError')
         : msg);
@@ -189,9 +231,29 @@ export function Plan() {
               <option value="">{t('plan.allResources')}</option>
               {resources.map((r) => <option key={r.id} value={r.id}>{r.displayName}</option>)}
             </select>
-            <button className={btnSecondaryCls} onClick={() => shiftMonth(-1)}>←</button>
-            <span className="min-w-24 text-center text-sm font-medium">{monthKey(ym.year, ym.month)}</span>
-            <button className={btnSecondaryCls} onClick={() => shiftMonth(1)}>→</button>
+            <span className="flex overflow-hidden rounded border border-slate-300 text-sm">
+              {(['month', 'week', 'day'] as const).map((v) => (
+                <button key={v}
+                  className={cn('px-2 py-1', view === v ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+                  onClick={() => setView(v)}>
+                  {t(`plan.view.${v}`)}
+                </button>
+              ))}
+            </span>
+            {view !== 'month' && (
+              <span className="flex overflow-hidden rounded border border-slate-300 text-sm">
+                {(['resource', 'project'] as const).map((l) => (
+                  <button key={l}
+                    className={cn('px-2 py-1', laneBy === l ? 'bg-slate-700 text-white' : 'bg-white text-slate-600 hover:bg-slate-50')}
+                    onClick={() => setLaneBy(l)}>
+                    {t(`plan.lanes.${l}`)}
+                  </button>
+                ))}
+              </span>
+            )}
+            <button className={btnSecondaryCls} onClick={() => shift(-1)}>←</button>
+            <span className="min-w-24 text-center text-sm font-medium">{periodLabel}</span>
+            <button className={btnSecondaryCls} onClick={() => shift(1)}>→</button>
             {canManage && (
               <button className={btnCls} onClick={() => setFormOpen((v) => !v)}>
                 {t('plan.newBooking')}
@@ -258,41 +320,88 @@ export function Plan() {
           </div>
         )}
 
-        <div className="grid grid-cols-7 gap-px overflow-hidden rounded border border-slate-200 bg-slate-200">
-          {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((d) => (
-            <div key={d} className="bg-slate-50 px-2 py-1 text-center text-xs font-semibold text-slate-500">
-              {t(`plan.weekday.${d}`)}
-            </div>
-          ))}
-          {monthGrid(ym.year, ym.month).flat().map((day, i) => (
-            <div key={i} className={cn('min-h-20 bg-white p-1', !day && 'bg-slate-50')}>
-              {day && (
-                <>
-                  <div className={cn('px-1 text-xs font-medium',
-                    day === todayIso() ? 'text-blue-600' : 'text-slate-500')}>
-                    {Number(day.slice(8))}
-                  </div>
-                  <div className="mt-0.5 space-y-0.5">
-                    {(byDate.get(day) ?? []).map((b) => (
-                      <button
-                        key={b.id}
-                        onClick={() => setSelected(b)}
-                        className={cn(
-                          'block w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium',
-                          statusClasses(b.status),
-                        )}
-                        title={`${b.resourceName} · ${b.projectName}`}
-                      >
-                        {b.resourceName}
-                        {b.warnings.length > 0 && ' ⚠'}
-                      </button>
-                    ))}
-                  </div>
-                </>
+        {view === 'month' ? (
+          <div className="grid grid-cols-7 gap-px overflow-hidden rounded border border-slate-200 bg-slate-200">
+            {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((d) => (
+              <div key={d} className="bg-slate-50 px-2 py-1 text-center text-xs font-semibold text-slate-500">
+                {t(`plan.weekday.${d}`)}
+              </div>
+            ))}
+            {monthGrid(ym.year, ym.month).flat().map((day, i) => (
+              <div key={i} className={cn('min-h-20 bg-white p-1', !day && 'bg-slate-50')}>
+                {day && (
+                  <>
+                    <div className={cn('px-1 text-xs font-medium',
+                      day === todayIso() ? 'text-blue-600' : 'text-slate-500')}>
+                      {Number(day.slice(8))}
+                    </div>
+                    <div className="mt-0.5 space-y-0.5">
+                      {(byDate.get(day) ?? []).map((b) => (
+                        <button
+                          key={b.id}
+                          onClick={() => setSelected(b)}
+                          className={cn(
+                            'block w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium',
+                            statusClasses(b.status),
+                          )}
+                          title={`${b.resourceName} · ${b.projectName}`}
+                        >
+                          {b.resourceName}
+                          {b.warnings.length > 0 && ' ⚠'}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className={cn(thCls, 'w-40 text-left')}>
+                  {laneBy === 'resource' ? t('booking.resource') : t('booking.project')}
+                </th>
+                {laneDays.map((d, i) => (
+                  <th key={d} className={cn(thCls, 'text-center',
+                    d === todayIso() && 'text-blue-600')}>
+                    {view === 'week' && `${t(`plan.weekday.${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][i]}`)} `}
+                    {Number(d.slice(8))}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {lanes.map((lane) => (
+                <tr key={lane.id} className="border-b border-slate-100 align-top">
+                  <td className={cn(tdCls, 'font-medium')}>{lane.name}</td>
+                  {laneDays.map((d) => (
+                    <td key={d} className={cn(tdCls, 'min-w-24')}>
+                      {bookingsFor(lane.id, d).map((b) => (
+                        <button
+                          key={b.id}
+                          onClick={() => setSelected(b)}
+                          className={cn(
+                            'mb-0.5 block w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium',
+                            statusClasses(b.status),
+                          )}
+                          title={`${b.resourceName} · ${b.projectName}`}
+                        >
+                          {laneBy === 'resource' ? b.projectName : b.resourceName}
+                          {b.warnings.length > 0 && ' ⚠'}
+                        </button>
+                      ))}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {lanes.length === 0 && (
+                <tr><td className={tdCls} colSpan={8}>{t('common.none')}</td></tr>
               )}
-            </div>
-          ))}
-        </div>
+            </tbody>
+          </table>
+        )}
       </Panel>
 
       {selected && (
@@ -366,7 +475,7 @@ export function Plan() {
           <div className="mt-3 flex flex-wrap gap-2">
             {selActions.map((a) => (
               <button key={a}
-                className={a === 'cancel' ? 'rounded border border-red-300 px-3 py-1 text-sm text-red-600 hover:bg-red-50' : btnSecondaryCls}
+                className={a === 'cancel' || a === 'delete' ? 'rounded border border-red-300 px-3 py-1 text-sm text-red-600 hover:bg-red-50' : btnSecondaryCls}
                 onClick={() => void runAction(selected.id, a)}>
                 {t(`booking.action.${a}`)}
               </button>

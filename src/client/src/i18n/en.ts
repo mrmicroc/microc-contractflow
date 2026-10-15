@@ -37,6 +37,7 @@ export const en = {
     add: 'Add',
     edit: 'Edit',
     delete: 'Delete',
+    confirmDelete: 'Delete — are you sure?',
     name: 'Name',
     active: 'Active',
     inactive: 'Inactive',
@@ -103,6 +104,7 @@ export const en = {
     title: 'Projects',
     newProject: 'New project',
     editProject: 'Edit project',
+    deleteProject: 'Delete project',
     code: 'Code',
     description: 'Description',
   },
@@ -131,6 +133,8 @@ export const en = {
     competencies: 'Competencies',
     linkedUser: 'Linked user',
     noLinkedUser: '— none —',
+    calendarFeed: 'Calendar feed (.ics)',
+    regenerateFeed: 'New link',
   },
   leave: {
     title: 'Leave & unavailability',
@@ -168,6 +172,8 @@ export const en = {
     allProjects: 'All projects',
     allResources: 'All resources',
     resourceHint: 'Planners use this view — your assignments are under My Work.',
+    view: { month: 'Month', week: 'Week', day: 'Day' },
+    lanes: { resource: 'Resources', project: 'Projects' },
     weekday: { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' },
   },
   booking: {
@@ -197,7 +203,7 @@ export const en = {
       onLeave: 'Resource is on leave',
     },
     action: {
-      edit: 'Edit', confirm: 'Confirm', acknowledge: 'Acknowledge',
+      edit: 'Edit', delete: 'Delete', confirm: 'Confirm', acknowledge: 'Acknowledge',
       start: 'Start', complete: 'Complete', cancel: 'Cancel', reschedule: 'Reschedule',
     },
   },
@@ -250,5 +256,7 @@ export const en = {
   myWork: {
     title: 'My assignments',
     noBookings: 'No upcoming assignments.',
+    calendarFeed: 'Subscribe in your calendar (.ics):',
+    regenerateFeed: 'New link',
   },
 } as const;

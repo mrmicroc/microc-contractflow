@@ -4,7 +4,9 @@ import {
   createLocation,
   createQuantity,
   deleteLocation,
+  deleteProject,
   deleteQuantity,
+  errorMessage,
   getProject,
 } from '@/lib/api';
 import { numOrNull } from '@/lib/versioned';
@@ -14,10 +16,17 @@ import {
   btnCls, btnDangerCls, Field, inputCls, Panel, tdCls, thCls,
 } from '@/components/forms';
 
-export function ProjectDetail({ projectId }: { projectId: string }) {
+export function ProjectDetail({
+  projectId,
+  onDeleted,
+}: {
+  projectId: string;
+  onDeleted?: () => void;
+}) {
   const { t } = useTranslation();
   const me = useMe();
   const [project, setProject] = useState<ProjectDetailDto | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [lf, setLf] = useState({ name: '', address: '', notes: '' });
   const [qf, setQf] = useState({ label: '', quantity: '', unit: '', notes: '' });
 
@@ -54,8 +63,31 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     await reload();
   };
 
+  const remove = async () => {
+    if (!window.confirm(t('common.confirmDelete'))) return;
+    setError(null);
+    try {
+      await deleteProject(project.id);
+      onDeleted?.();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+    <div>
+      {isAdmin(me) && (
+        <div className="mb-2 flex items-center justify-end gap-2">
+          {error && <span className="rounded bg-red-50 px-3 py-1 text-sm text-red-700">{error}</span>}
+          <button className={btnDangerCls} onClick={() => void remove()}>
+            {t('projects.deleteProject')}
+          </button>
+        </div>
+      )}
+      {!isAdmin(me) && error && (
+        <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>
+      )}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Panel title={`${t('locations.title')} — ${project.name}`}>
         <table className="mb-3 w-full border-collapse">
           <thead>
@@ -155,6 +187,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </div>
         )}
       </Panel>
+      </div>
     </div>
   );
 }

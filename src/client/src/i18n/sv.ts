@@ -43,6 +43,7 @@ export const sv: DeepStringify<typeof en> = {
     add: 'Lägg till',
     edit: 'Redigera',
     delete: 'Ta bort',
+    confirmDelete: 'Ta bort — är du säker?',
     name: 'Namn',
     active: 'Aktiv',
     inactive: 'Inaktiv',
@@ -109,6 +110,7 @@ export const sv: DeepStringify<typeof en> = {
     title: 'Projekt',
     newProject: 'Nytt projekt',
     editProject: 'Redigera projekt',
+    deleteProject: 'Ta bort projekt',
     code: 'Kod',
     description: 'Beskrivning',
   },
@@ -137,6 +139,8 @@ export const sv: DeepStringify<typeof en> = {
     competencies: 'Kompetenser',
     linkedUser: 'Kopplad användare',
     noLinkedUser: '— ingen —',
+    calendarFeed: 'Kalenderfeed (.ics)',
+    regenerateFeed: 'Ny länk',
   },
   leave: {
     title: 'Ledighet och otillgänglighet',
@@ -174,6 +178,8 @@ export const sv: DeepStringify<typeof en> = {
     allProjects: 'Alla projekt',
     allResources: 'Alla resurser',
     resourceHint: 'Planerare använder den här vyn — dina uppdrag ligger under Mitt arbete.',
+    view: { month: 'Månad', week: 'Vecka', day: 'Dag' },
+    lanes: { resource: 'Resurser', project: 'Projekt' },
     weekday: { mon: 'Mån', tue: 'Tis', wed: 'Ons', thu: 'Tor', fri: 'Fre', sat: 'Lör', sun: 'Sön' },
   },
   booking: {
@@ -203,7 +209,7 @@ export const sv: DeepStringify<typeof en> = {
       onLeave: 'Resursen är ledig',
     },
     action: {
-      edit: 'Redigera', confirm: 'Bekräfta', acknowledge: 'Ack',
+      edit: 'Redigera', delete: 'Ta bort', confirm: 'Bekräfta', acknowledge: 'Ack',
       start: 'Starta', complete: 'Slutför', cancel: 'Avboka', reschedule: 'Boka om',
     },
   },
@@ -256,5 +262,7 @@ export const sv: DeepStringify<typeof en> = {
   myWork: {
     title: 'Mina uppdrag',
     noBookings: 'Inga kommande uppdrag.',
+    calendarFeed: 'Prenumerera i din kalender (.ics):',
+    regenerateFeed: 'Ny länk',
   },
 };

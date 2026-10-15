@@ -2,7 +2,7 @@ import type { BookingStatus } from './types';
 
 /** Actions the UI can offer per booking status + caller rights. */
 export type BookingAction =
-  | 'edit' | 'confirm' | 'acknowledge' | 'start' | 'complete'
+  | 'edit' | 'delete' | 'confirm' | 'acknowledge' | 'start' | 'complete'
   | 'cancel' | 'reschedule';
 
 /**
@@ -22,6 +22,7 @@ export function availableActions(
     case 'requested':
       if (canManage) {
         actions.add('edit');
+        actions.add('delete');
         actions.add('confirm');
         actions.add('cancel');
       }
@@ -69,6 +70,21 @@ export function monthGrid(year: number, month: number): (string | null)[][] {
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
   return weeks;
 }
+
+/**
+ * The seven ISO dates of the Monday-first week containing anchorIso.
+ */
+export function weekDates(anchorIso: string): string[] {
+  const d = new Date(`${anchorIso}T00:00:00Z`);
+  const offset = (d.getUTCDay() + 6) % 7;
+  const monday = d.getTime() - offset * 86400_000;
+  return Array.from({ length: 7 }, (_, i) =>
+    new Date(monday + i * 86400_000).toISOString().slice(0, 10));
+}
+
+export const addDays = (iso: string, days: number) =>
+  new Date(new Date(`${iso}T00:00:00Z`).getTime() + days * 86400_000)
+    .toISOString().slice(0, 10);
 
 /** Status → chip styling, per design §7.1 colour rules. */
 export function statusClasses(status: BookingStatus): string {

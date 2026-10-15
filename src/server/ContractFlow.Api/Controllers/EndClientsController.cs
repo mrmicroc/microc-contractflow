@@ -44,4 +44,17 @@ public class EndClientsController(AppDbContext db) : ControllerBase
         await db.SaveChangesAsync(ct);
         return Ok(new EndClientDto(client.Id, client.Name, client.Notes));
     }
+
+    /// <summary>Delete is safe — contracts referencing the end client keep working (FK SetNull).</summary>
+    [HttpDelete("{id:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var client = await db.EndClients.FindAsync([id], ct);
+        if (client is null) return NotFound();
+
+        db.EndClients.Remove(client);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
 }

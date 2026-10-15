@@ -112,6 +112,25 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
         return Ok(ToDto(request));
     }
 
+    /// <summary>Hard delete for undecided requests — decided ones stay as history.</summary>
+    [HttpDelete("{id:guid}")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var request = await db.AdditionalPadRequests.FindAsync([id], ct);
+        if (request is null) return NotFound();
+        if (request.Status is not (AdditionalPadStatus.Draft or AdditionalPadStatus.Submitted))
+            return Conflict(new
+            {
+                error = "decidedRequest",
+                message = "Decided requests are history — they cannot be deleted.",
+            });
+
+        db.AdditionalPadRequests.Remove(request);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     private static AdditionalPadRequestDto ToDto(AdditionalPadRequest r) => new(
         r.Id, r.ProjectId, r.Year, r.Month, r.Quantity, r.Rate, r.Reason,
         r.Reference, r.Status, r.CreatedUtc, r.DecidedUtc);

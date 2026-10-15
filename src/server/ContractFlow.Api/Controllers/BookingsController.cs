@@ -320,6 +320,28 @@ public class BookingsController(AppDbContext db, PadService pad, ICurrentUser cu
         });
     }
 
+    /// <summary>
+    /// Hard delete — only pre-commitment bookings (they never touched the PAD
+    /// ledger). Committed bookings must be cancelled: the audit trail stays.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var booking = await db.Bookings.FindAsync([id], ct);
+        if (booking is null) return NotFound();
+        if (!PreCommitment.Contains(booking.Status))
+            return Conflict(new
+            {
+                error = "committedBooking",
+                message = "Committed bookings have PAD consequences — cancel instead of deleting.",
+            });
+
+        db.Bookings.Remove(booking);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────
 
     private Task<Booking?> LoadAsync(Guid id, CancellationToken ct) =>

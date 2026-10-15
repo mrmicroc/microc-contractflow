@@ -82,6 +82,28 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         return Ok(ToDto(resource));
     }
 
+    /// <summary>
+    /// Deletes the resource, cascading agreements and leave. Blocked while
+    /// bookings exist — deactivate instead to preserve planning history.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var resource = await db.Resources.FindAsync([id], ct);
+        if (resource is null) return NotFound();
+        if (await db.Bookings.AnyAsync(b => b.ResourceId == id, ct))
+            return Conflict(new
+            {
+                error = "hasDependents",
+                message = "Resource has bookings — deactivate instead to preserve history.",
+            });
+
+        db.Resources.Remove(resource);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     // ── Compensation agreements — internal economics; PMs and resources never
     // see rates (design §10) → Admin + Finance read, Admin writes. ────────────
 
@@ -142,6 +164,20 @@ public class ResourcesController(AppDbContext db) : ControllerBase
             ? await db.Contracts.FindAsync([req.ContractId.Value], ct)
             : null;
         return Ok(ToDto(agreement));
+    }
+
+    /// <summary>Removes a single agreement version (e.g. entered by mistake).</summary>
+    [HttpDelete("{id:guid}/agreements/{agreementId:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> DeleteAgreement(Guid id, Guid agreementId, CancellationToken ct)
+    {
+        var agreement = await db.CompensationAgreements
+            .FirstOrDefaultAsync(a => a.Id == agreementId && a.ResourceId == id, ct);
+        if (agreement is null) return NotFound();
+
+        db.CompensationAgreements.Remove(agreement);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     // ── Leave / availability ────────────────────────────────────────────────

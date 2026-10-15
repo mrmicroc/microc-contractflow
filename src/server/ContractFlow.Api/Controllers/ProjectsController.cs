@@ -83,6 +83,28 @@ public class ProjectsController(AppDbContext db) : ControllerBase
             project.Code, project.IsActive));
     }
 
+    /// <summary>
+    /// Deletes the project, cascading locations/quantities and its PAD ledger.
+    /// Blocked while bookings exist — they anchor the audit trail; deactivate instead.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var project = await db.Projects.FindAsync([id], ct);
+        if (project is null) return NotFound();
+        if (await db.Bookings.AnyAsync(b => b.ProjectId == id, ct))
+            return Conflict(new
+            {
+                error = "hasDependents",
+                message = "Project has bookings — they anchor the PAD audit trail and cannot be deleted.",
+            });
+
+        db.Projects.Remove(project);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     private static ProjectDetailDto ToDto(Project p) => new(
         p.Id, p.ContractId, p.Contract.Name, p.Contract.Customer.Name,
         p.Name, p.Code, p.Description, p.IsActive,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { availableActions, monthGrid } from './bookings';
+import { addDays, availableActions, monthGrid, weekDates } from './bookings';
 
 describe('availableActions', () => {
   it('manager can confirm/edit/cancel pre-commitment bookings', () => {
@@ -53,5 +53,33 @@ describe('monthGrid', () => {
   it('pads the last week to seven cells', () => {
     const weeks = monthGrid(2026, 10);
     for (const week of weeks) expect(week).toHaveLength(7);
+  });
+});
+
+describe('weekDates', () => {
+  it('returns the Monday-first week containing the anchor', () => {
+    // 2026-10-15 is a Thursday
+    expect(weekDates('2026-10-15')).toEqual([
+      '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15',
+      '2026-10-16', '2026-10-17', '2026-10-18',
+    ]);
+  });
+
+  it('a Sunday anchor still maps to the same week', () => {
+    expect(weekDates('2026-10-18')[0]).toBe('2026-10-12');
+    expect(weekDates('2026-10-11')).toEqual(weekDates('2026-10-05'));
+  });
+
+  it('crosses month boundaries', () => {
+    // 2026-11-01 is a Sunday
+    expect(weekDates('2026-10-31')[6]).toBe('2026-11-01');
+  });
+});
+
+describe('addDays', () => {
+  it('shifts across month and year boundaries', () => {
+    expect(addDays('2026-10-31', 1)).toBe('2026-11-01');
+    expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
+    expect(addDays('2027-03-01', -1)).toBe('2027-02-28');
   });
 });

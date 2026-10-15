@@ -79,4 +79,22 @@ public class CustomersController(AppDbContext db) : ControllerBase
             customer.ExternalReference, customer.IsActive,
             await db.Contracts.CountAsync(c => c.CustomerId == id, ct)));
     }
+
+    [HttpDelete("{id:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var customer = await db.Customers.FindAsync([id], ct);
+        if (customer is null) return NotFound();
+        if (await db.Contracts.AnyAsync(c => c.CustomerId == id, ct))
+            return Conflict(new
+            {
+                error = "hasDependents",
+                message = "Customer has contracts — delete or reassign them first.",
+            });
+
+        db.Customers.Remove(customer);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
 }

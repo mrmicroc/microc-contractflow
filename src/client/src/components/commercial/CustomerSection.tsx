@@ -1,23 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createCustomer, getCustomer, getCustomers, updateCustomer } from '@/lib/api';
+import {
+  createCustomer, deleteCustomer, errorMessage, getCustomer, getCustomers, updateCustomer,
+} from '@/lib/api';
 import type { CustomerSummary } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
-import { btnCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls } from '@/components/forms';
+import {
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
+} from '@/components/forms';
 
 export function CustomerSection({
   selectedId,
   onSelect,
+  onDeleted,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onDeleted?: (id: string) => void;
 }) {
   const { t } = useTranslation();
   const me = useMe();
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [f, setF] = useState({ name: '', externalReference: '', notes: '', isActive: true });
 
   const reload = useCallback(
@@ -61,6 +68,18 @@ export function CustomerSection({
     await reload();
   };
 
+  const remove = async (id: string) => {
+    if (!window.confirm(t('common.confirmDelete'))) return;
+    setError(null);
+    try {
+      await deleteCustomer(id);
+      onDeleted?.(id);
+      await reload();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
   return (
     <Panel
       title={t('customers.title')}
@@ -68,6 +87,7 @@ export function CustomerSection({
         <button className={btnSecondaryCls} onClick={openNew}>{t('customers.newCustomer')}</button>
       )}
     >
+      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
       {formOpen && (
         <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -125,12 +145,20 @@ export function CustomerSection({
               <td className={tdCls}>{c.isActive ? t('common.active') : t('common.inactive')}</td>
               {isAdmin(me) && (
                 <td className={tdCls}>
-                  <button
-                    className={btnSecondaryCls}
-                    onClick={(e) => { e.stopPropagation(); void openEdit(c.id); }}
-                  >
-                    {t('common.edit')}
-                  </button>
+                  <span className="flex gap-1">
+                    <button
+                      className={btnSecondaryCls}
+                      onClick={(e) => { e.stopPropagation(); void openEdit(c.id); }}
+                    >
+                      {t('common.edit')}
+                    </button>
+                    <button
+                      className={btnDangerCls}
+                      onClick={(e) => { e.stopPropagation(); void remove(c.id); }}
+                    >
+                      {t('common.delete')}
+                    </button>
+                  </span>
                 </td>
               )}
             </tr>

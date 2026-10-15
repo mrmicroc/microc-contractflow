@@ -56,6 +56,17 @@ export const apiPost = <T>(path: string, body: unknown) => apiSend<T>('POST', pa
 export const apiPut = <T>(path: string, body: unknown) => apiSend<T>('PUT', path, body);
 export const apiDelete = (path: string) => apiSend<void>('DELETE', path);
 
+/** Extracts a readable message from an API error body ({error, message}). */
+export function errorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    const parsed = JSON.parse(raw) as { message?: string; error?: string };
+    return parsed.message ?? parsed.error ?? raw;
+  } catch {
+    return raw;
+  }
+}
+
 export interface UserDto {
   id: string;
   displayName: string;
@@ -73,9 +84,13 @@ export const getCustomer = (id: string) => apiGet<CustomerDetail>(`/api/customer
 export const createCustomer = (b: CustomerRequestBody) => apiPost<CustomerSummary>('/api/customers', b);
 export const updateCustomer = (id: string, b: CustomerRequestBody) =>
   apiPut<CustomerSummary>(`/api/customers/${id}`, b);
+export const deleteCustomer = (id: string) => apiDelete(`/api/customers/${id}`);
 
 export const getEndClients = () => apiGet<EndClient[]>('/api/endclients');
 export const createEndClient = (b: EndClientRequestBody) => apiPost<EndClient>('/api/endclients', b);
+export const updateEndClient = (id: string, b: EndClientRequestBody) =>
+  apiPut<EndClient>(`/api/endclients/${id}`, b);
+export const deleteEndClient = (id: string) => apiDelete(`/api/endclients/${id}`);
 
 export const getContracts = (customerId?: string) =>
   apiGet<ContractSummary[]>(`/api/contracts${customerId ? `?customerId=${customerId}` : ''}`);
@@ -83,12 +98,15 @@ export const getContract = (id: string) => apiGet<ContractDetail>(`/api/contract
 export const createContract = (b: ContractRequestBody) => apiPost<ContractSummary>('/api/contracts', b);
 export const updateContract = (id: string, b: ContractRequestBody) =>
   apiPut<ContractSummary>(`/api/contracts/${id}`, b);
+export const deleteContract = (id: string) => apiDelete(`/api/contracts/${id}`);
 export const getContractTerms = (contractId: string) =>
   apiGet<ContractTerms[]>(`/api/contracts/${contractId}/terms`);
 export const getEffectiveTerms = (contractId: string, on?: string) =>
   apiGet<ContractTerms>(`/api/contracts/${contractId}/terms/effective${on ? `?on=${on}` : ''}`);
 export const createContractTerms = (contractId: string, b: ContractTermsRequestBody) =>
   apiPost<ContractTerms>(`/api/contracts/${contractId}/terms`, b);
+export const deleteContractTerms = (contractId: string, termId: string) =>
+  apiDelete(`/api/contracts/${contractId}/terms/${termId}`);
 
 export const getProjects = (contractId?: string) =>
   apiGet<ProjectSummary[]>(`/api/projects${contractId ? `?contractId=${contractId}` : ''}`);
@@ -96,6 +114,7 @@ export const getProject = (id: string) => apiGet<ProjectDetail>(`/api/projects/$
 export const createProject = (b: ProjectRequestBody) => apiPost<ProjectSummary>('/api/projects', b);
 export const updateProject = (id: string, b: ProjectRequestBody) =>
   apiPut<ProjectSummary>(`/api/projects/${id}`, b);
+export const deleteProject = (id: string) => apiDelete(`/api/projects/${id}`);
 
 export const createLocation = (b: LocationRequestBody) => apiPost<Location>('/api/locations', b);
 export const updateLocation = (id: string, b: LocationRequestBody) =>
@@ -115,10 +134,13 @@ export const getResource = (id: string) => apiGet<ResourceDetail>(`/api/resource
 export const createResource = (b: ResourceRequestBody) => apiPost<ResourceDetail>('/api/resources', b);
 export const updateResource = (id: string, b: ResourceRequestBody) =>
   apiPut<ResourceDetail>(`/api/resources/${id}`, b);
+export const deleteResource = (id: string) => apiDelete(`/api/resources/${id}`);
 export const getAgreements = (resourceId: string) =>
   apiGet<CompensationAgreement[]>(`/api/resources/${resourceId}/agreements`);
 export const createAgreement = (resourceId: string, b: AgreementRequestBody) =>
   apiPost<CompensationAgreement>(`/api/resources/${resourceId}/agreements`, b);
+export const deleteAgreement = (resourceId: string, agreementId: string) =>
+  apiDelete(`/api/resources/${resourceId}/agreements/${agreementId}`);
 export const createLeave = (resourceId: string, b: ResourceLeaveRequestBody) =>
   apiPost<ResourceLeave>(`/api/resources/${resourceId}/leave`, b);
 export const deleteLeave = (resourceId: string, leaveId: string) =>
@@ -143,6 +165,7 @@ export const bookingAction = (id: string, action: 'confirm' | 'acknowledge' | 's
 export const rescheduleBooking = (id: string, date: string, plannedHours?: number) =>
   apiPost<{ original: Booking; replacement: Booking; replacementConfirmed: boolean; padEffect: string }>(
     `/api/bookings/${id}/reschedule`, { date, plannedHours });
+export const deleteBooking = (id: string) => apiDelete(`/api/bookings/${id}`);
 
 // ── PAD ─────────────────────────────────────────────────────────────────────
 
@@ -164,6 +187,14 @@ export const createPadRequest = (b: {
 }) => apiPost<AdditionalPadRequest>('/api/pad-requests', b);
 export const padRequestAction = (id: string, action: 'approve' | 'reject' | 'withdraw') =>
   apiPost<AdditionalPadRequest>(`/api/pad-requests/${id}/${action}`, {});
+export const deletePadRequest = (id: string) => apiDelete(`/api/pad-requests/${id}`);
+
+// ── Calendar feed (.ics) ────────────────────────────────────────────────────
+
+export const getFeedUrl = (resourceId?: string) =>
+  apiGet<{ url: string }>(`/api/calendar/feed-url${resourceId ? `?resourceId=${resourceId}` : ''}`);
+export const rotateFeedUrl = (resourceId?: string) =>
+  apiPost<{ url: string }>(`/api/calendar/feed-url/rotate${resourceId ? `?resourceId=${resourceId}` : ''}`, {});
 
 export interface AgreementRequestBody {
   contractId: string | null;

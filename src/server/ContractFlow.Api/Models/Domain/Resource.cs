@@ -27,6 +27,11 @@ public class Resource
     /// <summary>Optional link to the AppUser this person signs in as.</summary>
     public Guid? UserId { get; set; }
     public AppUser? User { get; set; }
+    /// <summary>
+    /// Unguessable token authorising the personal .ics feed URL
+    /// (/api/calendar/{id}/{token}.ics). Rotatable — null disables the feed.
+    /// </summary>
+    public string? FeedToken { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 

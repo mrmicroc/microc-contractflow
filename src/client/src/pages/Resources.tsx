@@ -4,12 +4,17 @@ import {
   createAgreement,
   createLeave,
   createResource,
+  deleteAgreement,
   deleteLeave,
+  deleteResource,
+  errorMessage,
   getAgreements,
   getContracts,
+  getFeedUrl,
   getResource,
   getResources,
   getUsers,
+  rotateFeedUrl,
   updateResource,
   type UserDto,
 } from '@/lib/api';
@@ -44,6 +49,7 @@ export function Resources() {
   });
   const [lf, setLf] = useState({ from: '', to: '', type: 'vacation' as LeaveType, notes: '' });
   const [leaveFormOpen, setLeaveFormOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(
     () => getResources().then(setResources).catch(() => setResources([])),
@@ -106,6 +112,18 @@ export function Resources() {
     setFormOpen(false);
     await reload();
     reloadDetail();
+  };
+
+  const removeResource = async (id: string) => {
+    if (!window.confirm(t('common.confirmDelete'))) return;
+    setError(null);
+    try {
+      await deleteResource(id);
+      if (id === selectedId) { setSelectedId(null); setDetail(null); }
+      await reload();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
   };
 
   const saveLeave = async () => {
@@ -184,6 +202,7 @@ export function Resources() {
           <button className={btnSecondaryCls} onClick={openNew}>{t('resources.newResource')}</button>
         )}
       >
+        {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
         {resourceForm}
         <table className="w-full border-collapse">
           <thead>
@@ -220,9 +239,14 @@ export function Resources() {
           <Panel
             title={detail.displayName}
             actions={isAdmin(me) && !formOpen && (
-              <button className={btnSecondaryCls} onClick={() => openEdit(detail)}>
-                {t('common.edit')}
-              </button>
+              <span className="flex gap-1">
+                <button className={btnSecondaryCls} onClick={() => openEdit(detail)}>
+                  {t('common.edit')}
+                </button>
+                <button className={btnDangerCls} onClick={() => void removeResource(detail.id)}>
+                  {t('common.delete')}
+                </button>
+              </span>
             )}
           >
             {resourceForm}
@@ -236,6 +260,8 @@ export function Resources() {
                 <dd>{detail.phone ?? '—'}</dd>
                 <dt className="text-slate-500">{t('resources.competencies')}</dt>
                 <dd>{detail.competencies ?? '—'}</dd>
+                <dt className="text-slate-500">{t('resources.calendarFeed')}</dt>
+                <dd><FeedUrl resourceId={detail.id} /></dd>
               </dl>
             )}
 
@@ -307,12 +333,34 @@ export function Resources() {
   );
 }
 
+/** The resource's tokened .ics subscription URL, with rotate for admins. */
+function FeedUrl({ resourceId }: { resourceId: string }) {
+  const { t } = useTranslation();
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let on = true;
+    getFeedUrl(resourceId).then((r) => { if (on) setUrl(r.url); }).catch(() => {});
+    return () => { on = false; };
+  }, [resourceId]);
+  if (!url) return <span className="text-slate-400">—</span>;
+  return (
+    <span className="flex items-center gap-2">
+      <code className="max-w-72 truncate text-xs">{location.origin}{url}</code>
+      <button className={btnSecondaryCls}
+        onClick={() => void rotateFeedUrl(resourceId).then((r) => setUrl(r.url))}>
+        {t('resources.regenerateFeed')}
+      </button>
+    </span>
+  );
+}
+
 function AgreementsPanel({ resourceId }: { resourceId: string }) {
   const { t } = useTranslation();
   const me = useMe();
   const [agreements, setAgreements] = useState<CompensationAgreement[]>([]);
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
   const [formOpen, setFormOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [af, setAf] = useState({
     contractId: '', effectiveFrom: '', currency: 'SEK', hourlyRate: '', saturdayRate: '',
     sundayRate: '', holidayRate: '', overtimeAfterHours: '8', overtimePercent: '150',
@@ -351,6 +399,13 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
     await reload();
   };
 
+  const remove = async (agreementId: string) => {
+    if (!window.confirm(t('common.confirmDelete'))) return;
+    setError(null);
+    try { await deleteAgreement(resourceId, agreementId); await reload(); }
+    catch (e) { setError(errorMessage(e)); }
+  };
+
   const perDiemLabel = (p: PerDiemPolicy) =>
     p === 'statutory' ? t('agreements.perDiemStatutory')
     : p === 'custom' ? t('agreements.perDiemCustom')
@@ -366,6 +421,7 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
       )}
     >
       <p className="mb-2 text-[11px] text-slate-400">{t('agreements.internalOnly')}</p>
+      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
       {formOpen && (
         <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -441,6 +497,7 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
             <th className={thCls}>{t('common.effectiveFrom')}</th>
             <th className={thCls}>{t('agreements.hourlyRate')}</th>
             <th className={thCls}>{t('agreements.perDiem')}</th>
+            {isAdmin(me) && <th className={thCls}>{t('common.actions')}</th>}
           </tr>
         </thead>
         <tbody>
@@ -451,10 +508,17 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
               <td className={tdCls}>{a.effectiveFrom}</td>
               <td className={tdCls}>{a.hourlyRate === null ? '—' : `${a.hourlyRate} ${a.currency}`}</td>
               <td className={tdCls}>{perDiemLabel(a.perDiem)}</td>
+              {isAdmin(me) && (
+                <td className={tdCls}>
+                  <button className={btnDangerCls} onClick={() => void remove(a.id)}>
+                    {t('common.delete')}
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
           {agreements.length === 0 && (
-            <tr><td className={tdCls} colSpan={5}>{t('common.none')}</td></tr>
+            <tr><td className={tdCls} colSpan={6}>{t('common.none')}</td></tr>
           )}
         </tbody>
       </table>

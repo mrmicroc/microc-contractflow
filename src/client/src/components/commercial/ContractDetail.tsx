@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { createContractTerms, createProject, getContract } from '@/lib/api';
+import {
+  createContractTerms, createProject, deleteContractTerms, errorMessage, getContract,
+} from '@/lib/api';
 import { numOrNull, resolveVersion } from '@/lib/versioned';
 import type { ContractDetail as ContractDetailDto } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
-import { btnCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls } from '@/components/forms';
+import {
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
+} from '@/components/forms';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -21,6 +25,7 @@ export function ContractDetail({
   const { t } = useTranslation();
   const me = useMe();
   const [contract, setContract] = useState<ContractDetailDto | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [termsFormOpen, setTermsFormOpen] = useState(false);
   const [projectFormOpen, setProjectFormOpen] = useState(false);
   const [tf, setTf] = useState({
@@ -84,6 +89,13 @@ export function ContractDetail({
     await reload();
   };
 
+  const removeTerms = async (termId: string) => {
+    if (!window.confirm(t('common.confirmDelete'))) return;
+    setError(null);
+    try { await deleteContractTerms(contract.id, termId); await reload(); }
+    catch (e) { setError(errorMessage(e)); }
+  };
+
   const fmt = (n: number | null) => (n === null ? '—' : String(n));
 
   return (
@@ -102,6 +114,7 @@ export function ContractDetail({
           {contract.endClientName && <> · {t('contracts.endClient')}: {contract.endClientName}</>}
           {' · '}{t('terms.immutable')}
         </p>
+        {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
 
         {termsFormOpen && (
           <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
@@ -209,6 +222,7 @@ export function ContractDetail({
               <th className={thCls}>{t('terms.mobilisationFee')}</th>
               <th className={thCls}>{t('terms.carryOverMaxPercent')}</th>
               <th className={thCls}>{t('terms.cancellationDeadlineBusinessDays')}</th>
+              {isAdmin(me) && <th className={thCls}>{t('common.actions')}</th>}
             </tr>
           </thead>
           <tbody>
@@ -229,10 +243,17 @@ export function ContractDetail({
                 <td className={tdCls}>{fmt(v.mobilisationFee)}</td>
                 <td className={tdCls}>{v.carryOverMaxPercent}%</td>
                 <td className={tdCls}>{v.cancellationDeadlineBusinessDays}</td>
+                {isAdmin(me) && (
+                  <td className={tdCls}>
+                    <button className={btnDangerCls} onClick={() => void removeTerms(v.id)}>
+                      {t('common.delete')}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
             {contract.termsVersions.length === 0 && (
-              <tr><td className={tdCls} colSpan={8}>{t('common.none')}</td></tr>
+              <tr><td className={tdCls} colSpan={9}>{t('common.none')}</td></tr>
             )}
           </tbody>
         </table>

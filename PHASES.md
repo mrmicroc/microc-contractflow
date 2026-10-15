@@ -13,14 +13,14 @@ Items are marked ✅ only when implemented **and** tested. See
 ## Phase 1 — Internal planning & PAD
 - [x] Customers / contracts / projects / locations with versioned terms
 - [x] Resource register + versioned compensation agreements
-- [~] Planning calendar (month grid; week/day + lane views remain)
+- [x] Planning calendar (month grid + week/day views with resource & project lanes)
 - [x] Bookings + status flow (Forecast → … → Confirmed → … → Completed)
 - [x] PAD ledger + monthly dashboard with drill-down
 - [x] Carry-over, expiry, month-end closing
 - [x] Additional PAD request/approval flow
 - [x] Cancellation & rescheduling rules (4-business-day rule, Swedish holidays)
 - [x] Conflict warnings (double-booking, leave overlap)
-- [ ] Personal .ics calendar feeds
+- [x] Personal .ics calendar feeds (token-gated, rotatable)
 - [x] My Work (resource assignment view)
 
 ## Phase 2 — Resource reporting
@@ -48,6 +48,7 @@ Items are marked ✅ only when implemented **and** tested. See
 - [ ] Retention/GDPR review
 
 ## Backlog
+- Audit log (admin-visible change history, like Mitrandir)
 - Customer reviewer portal
 - Forecasting/scenario UI
 - Mitrandir read-API link (service identity, customer consent)
