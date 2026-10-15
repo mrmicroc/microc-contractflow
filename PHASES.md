@@ -13,14 +13,15 @@ Items are marked ✅ only when implemented **and** tested. See
 ## Phase 1 — Internal planning & PAD
 - [x] Customers / contracts / projects / locations with versioned terms
 - [x] Resource register + versioned compensation agreements
-- [ ] Planning calendar (month/week/day, resource & project lanes)
-- [ ] Bookings + status flow (Forecast → … → Confirmed → … → Completed)
-- [ ] PAD ledger + monthly dashboard with drill-down
-- [ ] Carry-over, expiry, month-end closing
-- [ ] Additional PAD request/approval flow
-- [ ] Cancellation & rescheduling rules
-- [ ] Conflict warnings
+- [~] Planning calendar (month grid; week/day + lane views remain)
+- [x] Bookings + status flow (Forecast → … → Confirmed → … → Completed)
+- [x] PAD ledger + monthly dashboard with drill-down
+- [x] Carry-over, expiry, month-end closing
+- [x] Additional PAD request/approval flow
+- [x] Cancellation & rescheduling rules (4-business-day rule, Swedish holidays)
+- [x] Conflict warnings (double-booking, leave overlap)
 - [ ] Personal .ics calendar feeds
+- [x] My Work (resource assignment view)
 
 ## Phase 2 — Resource reporting
 - [ ] Assignment acknowledgement

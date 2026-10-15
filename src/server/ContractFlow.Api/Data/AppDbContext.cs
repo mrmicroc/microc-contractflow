@@ -16,6 +16,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Resource> Resources => Set<Resource>();
     public DbSet<ResourceLeave> ResourceLeaves => Set<ResourceLeave>();
     public DbSet<CompensationAgreement> CompensationAgreements => Set<CompensationAgreement>();
+    public DbSet<Booking> Bookings => Set<Booking>();
+    public DbSet<PadTransaction> PadTransactions => Set<PadTransaction>();
+    public DbSet<AdditionalPadRequest> AdditionalPadRequests => Set<AdditionalPadRequest>();
+    public DbSet<ProjectMonthClose> ProjectMonthCloses => Set<ProjectMonthClose>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -124,6 +128,51 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(a => a.PerDiemAmount).HasPrecision(18, 2);
             e.Property(a => a.OvertimePercent).HasPrecision(9, 4);
             e.Property(a => a.TravelTimePercent).HasPrecision(9, 4);
+        });
+
+        builder.Entity<Booking>(e =>
+        {
+            e.Property(b => b.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(b => b.PlannedHours).HasPrecision(9, 4);
+            e.Property(b => b.ActivityRef).HasMaxLength(100);
+            e.Property(b => b.EvidenceRef).HasMaxLength(200);
+            e.Property(b => b.CustomerContact).HasMaxLength(200);
+            e.HasIndex(b => new { b.ProjectId, b.Date });
+            e.HasIndex(b => new { b.ResourceId, b.Date });
+            e.HasOne(b => b.Project).WithMany()
+                .HasForeignKey(b => b.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(b => b.Resource).WithMany()
+                .HasForeignKey(b => b.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(b => b.Location).WithMany()
+                .HasForeignKey(b => b.LocationId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<PadTransaction>(e =>
+        {
+            e.Property(t => t.Type).HasConversion<string>().HasMaxLength(30);
+            e.Property(t => t.Amount).HasPrecision(9, 4);
+            e.HasIndex(t => new { t.ProjectId, t.Year, t.Month });
+            e.HasOne(t => t.Project).WithMany()
+                .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(t => t.Booking).WithMany()
+                .HasForeignKey(t => t.BookingId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<AdditionalPadRequest>(e =>
+        {
+            e.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(r => r.Quantity).HasPrecision(9, 4);
+            e.Property(r => r.Rate).HasPrecision(18, 2);
+            e.Property(r => r.Reference).HasMaxLength(200);
+            e.HasOne(r => r.Project).WithMany()
+                .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ProjectMonthClose>(e =>
+        {
+            e.HasIndex(c => new { c.ProjectId, c.Year, c.Month }).IsUnique();
+            e.HasOne(c => c.Project).WithMany()
+                .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

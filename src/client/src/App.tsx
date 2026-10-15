@@ -4,6 +4,9 @@ import { DevUserBar } from '@/components/DevUserBar';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { Placeholder } from '@/components/Placeholder';
 import { Dashboard } from '@/pages/Dashboard';
+import { MonthEnd } from '@/pages/MonthEnd';
+import { MyWork } from '@/pages/MyWork';
+import { Plan } from '@/pages/Plan';
 import { Projects } from '@/pages/Projects';
 import { Resources } from '@/pages/Resources';
 import { cn } from '@/lib/utils';
@@ -59,9 +62,12 @@ export default function App() {
         <main>
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/plan" element={<Plan />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/resources" element={<Resources />} />
-            {NAV_ITEMS.filter((i) => !['/', '/projects', '/resources'].includes(i.to)).map((item) => (
+            <Route path="/my" element={<MyWork />} />
+            <Route path="/month-end" element={<MonthEnd />} />
+            {NAV_ITEMS.filter((i) => !['/', '/plan', '/projects', '/resources', '/my', '/month-end'].includes(i.to)).map((item) => (
               <Route key={item.to} path={item.to} element={<Placeholder titleKey={item.key} />} />
             ))}
             <Route path="*" element={<Placeholder titleKey="nav.dashboard" />} />

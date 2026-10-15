@@ -255,3 +255,108 @@ export interface CompensationAgreement {
   expensePolicy: string | null;
   notes: string | null;
 }
+
+// ── Bookings & PAD ──────────────────────────────────────────────────────────
+
+export type BookingStatus =
+  | 'forecast' | 'tentative' | 'requested' | 'confirmed' | 'acknowledged'
+  | 'inProgress' | 'completed' | 'cancelled' | 'rescheduled';
+
+export interface Booking {
+  id: string;
+  projectId: string;
+  projectName: string;
+  customerName: string;
+  resourceId: string;
+  resourceName: string;
+  locationId: string | null;
+  locationName: string | null;
+  date: string;
+  plannedHours: number;
+  activityRef: string | null;
+  workDescription: string | null;
+  customerContact: string | null;
+  evidenceRef: string | null;
+  status: BookingStatus;
+  expectedPad: number | null;
+  acknowledgedUtc: string | null;
+  replacesBookingId: string | null;
+  rescheduledToBookingId: string | null;
+  warnings: string[];
+}
+
+export interface BookingRequestBody {
+  projectId: string;
+  resourceId: string;
+  locationId: string | null;
+  date: string;
+  plannedHours: number;
+  activityRef: string | null;
+  workDescription: string | null;
+  customerContact: string | null;
+  evidenceRef: string | null;
+  status: 'forecast' | 'tentative' | 'requested';
+}
+
+export type PadTransactionType =
+  | 'baselineSet' | 'carryOverIn' | 'commit' | 'release' | 'utilise'
+  | 'additionalApproved' | 'autoAdditional' | 'borrowNextMonth'
+  | 'carryOverOut' | 'expire' | 'adjustment';
+
+export interface PadTransaction {
+  id: string;
+  type: PadTransactionType;
+  amount: number;
+  bookingId: string | null;
+  note: string | null;
+  createdUtc: string;
+}
+
+export interface PadDashboard {
+  projectId: string;
+  projectName: string;
+  year: number;
+  month: number;
+  baseline: number;
+  carryOverIn: number;
+  additionalApproved: number;
+  committedOpen: number;
+  utilised: number;
+  released: number;
+  expired: number;
+  carryOverOut: number;
+  borrowedFromThisMonth: number;
+  adjustments: number;
+  totalAvailable: number;
+  free: number;
+  closed: boolean;
+  closedUtc: string | null;
+  transactions: PadTransaction[];
+}
+
+export interface CloseMonthResult {
+  baseline: number;
+  utilised: number;
+  releasedOpenCommitments: number;
+  carryOverOut: number;
+  expired: number;
+  carryOverInNextMonth: number;
+  nextYear: number;
+  nextMonth: number;
+}
+
+export type AdditionalPadStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'withdrawn';
+
+export interface AdditionalPadRequest {
+  id: string;
+  projectId: string;
+  year: number;
+  month: number;
+  quantity: number;
+  rate: number | null;
+  reason: string | null;
+  reference: string | null;
+  status: AdditionalPadStatus;
+  createdUtc: string;
+  decidedUtc: string | null;
+}

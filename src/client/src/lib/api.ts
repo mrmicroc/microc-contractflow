@@ -1,5 +1,9 @@
 import { DEV_USER_HEADER, getDevUserId } from './currentUser';
 import type {
+  AdditionalPadRequest,
+  Booking,
+  BookingRequestBody,
+  CloseMonthResult,
   CompensationAgreement,
   ContractDetail,
   ContractRequestBody,
@@ -15,6 +19,8 @@ import type {
   EstimatedQuantityRequestBody,
   Location,
   LocationRequestBody,
+  PadDashboard,
+  PadTransaction,
   ProjectDetail,
   ProjectRequestBody,
   ProjectSummary,
@@ -117,6 +123,47 @@ export const createLeave = (resourceId: string, b: ResourceLeaveRequestBody) =>
   apiPost<ResourceLeave>(`/api/resources/${resourceId}/leave`, b);
 export const deleteLeave = (resourceId: string, leaveId: string) =>
   apiDelete(`/api/resources/${resourceId}/leave/${leaveId}`);
+
+// ── Bookings ────────────────────────────────────────────────────────────────
+
+export const getBookings = (q: { from?: string; to?: string; projectId?: string; resourceId?: string }) => {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.projectId) p.set('projectId', q.projectId);
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  const s = p.toString();
+  return apiGet<Booking[]>(`/api/bookings${s ? `?${s}` : ''}`);
+};
+export const createBooking = (b: BookingRequestBody) => apiPost<Booking>('/api/bookings', b);
+export const updateBooking = (id: string, b: Partial<BookingRequestBody>) =>
+  apiPut<Booking>(`/api/bookings/${id}`, b);
+export const bookingAction = (id: string, action: 'confirm' | 'acknowledge' | 'start' | 'complete' | 'cancel') =>
+  apiPost<unknown>(`/api/bookings/${id}/${action}`, {});
+export const rescheduleBooking = (id: string, date: string, plannedHours?: number) =>
+  apiPost<{ original: Booking; replacement: Booking; replacementConfirmed: boolean; padEffect: string }>(
+    `/api/bookings/${id}/reschedule`, { date, plannedHours });
+
+// ── PAD ─────────────────────────────────────────────────────────────────────
+
+export const getPadDashboard = (projectId: string, year: number, month: number) =>
+  apiGet<PadDashboard>(`/api/projects/${projectId}/pad/${year}/${month}`);
+export const setBaseline = (projectId: string, year: number, month: number, amount: number, note?: string) =>
+  apiPost<PadTransaction>(`/api/projects/${projectId}/pad/${year}/${month}/baseline`, { amount, note });
+export const closeMonth = (projectId: string, year: number, month: number) =>
+  apiPost<CloseMonthResult>(`/api/projects/${projectId}/pad/${year}/${month}/close`, {});
+export const getPadRequests = (projectId: string, year?: number, month?: number) => {
+  const p = new URLSearchParams({ projectId });
+  if (year) p.set('year', String(year));
+  if (month) p.set('month', String(month));
+  return apiGet<AdditionalPadRequest[]>(`/api/pad-requests?${p}`);
+};
+export const createPadRequest = (b: {
+  projectId: string; year: number; month: number; quantity: number;
+  rate?: number | null; reason?: string | null; reference?: string | null;
+}) => apiPost<AdditionalPadRequest>('/api/pad-requests', b);
+export const padRequestAction = (id: string, action: 'approve' | 'reject' | 'withdraw') =>
+  apiPost<AdditionalPadRequest>(`/api/pad-requests/${id}/${action}`, {});
 
 export interface AgreementRequestBody {
   contractId: string | null;
