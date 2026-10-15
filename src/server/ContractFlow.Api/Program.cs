@@ -55,6 +55,7 @@ if (!string.IsNullOrWhiteSpace(connectionString) && !app.Environment.IsEnvironme
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         db.Database.Migrate();
         await DevSeed.SeedIfEmptyAsync(db);
+        await DevSeed.SeedCommercialExampleAsync(db);
     }
     catch (Exception ex)
     {

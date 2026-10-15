@@ -4,6 +4,8 @@ import { DevUserBar } from '@/components/DevUserBar';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { Placeholder } from '@/components/Placeholder';
 import { Dashboard } from '@/pages/Dashboard';
+import { Projects } from '@/pages/Projects';
+import { Resources } from '@/pages/Resources';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS: { to: string; key: string }[] = [
@@ -57,7 +59,9 @@ export default function App() {
         <main>
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            {NAV_ITEMS.filter((i) => i.to !== '/').map((item) => (
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/resources" element={<Resources />} />
+            {NAV_ITEMS.filter((i) => !['/', '/projects', '/resources'].includes(i.to)).map((item) => (
               <Route key={item.to} path={item.to} element={<Placeholder titleKey={item.key} />} />
             ))}
             <Route path="*" element={<Placeholder titleKey="nav.dashboard" />} />

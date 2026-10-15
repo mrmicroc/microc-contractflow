@@ -43,8 +43,9 @@ public class MeTests(ContractFlowWebApplicationFactory factory)
         var users = await client.GetFromJsonAsync<MeDto[]>("/api/users");
 
         Assert.NotNull(users);
-        Assert.Equal(4, users.Length);
+        Assert.Equal(5, users.Length);
         Assert.Contains(users, u => u.Role == "ProjectManager");
         Assert.Contains(users, u => u.Role == "Finance");
+        Assert.Contains(users, u => u.Role == "CustomerReviewer");
     }
 }

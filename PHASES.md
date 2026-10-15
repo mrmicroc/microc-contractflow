@@ -11,8 +11,8 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Neutral seed data (no real company names or contract values)
 
 ## Phase 1 — Internal planning & PAD
-- [ ] Customers / contracts / projects / locations with versioned terms
-- [ ] Resource register + versioned compensation agreements
+- [x] Customers / contracts / projects / locations with versioned terms
+- [x] Resource register + versioned compensation agreements
 - [ ] Planning calendar (month/week/day, resource & project lanes)
 - [ ] Bookings + status flow (Forecast → … → Confirmed → … → Completed)
 - [ ] PAD ledger + monthly dashboard with drill-down
