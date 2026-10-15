@@ -43,8 +43,8 @@ public record CompensationAgreementDto(
     int Version, DateOnly EffectiveFrom, DateTime CreatedUtc,
     string Currency, decimal? HourlyRate, decimal? SaturdayRate, decimal? SundayRate,
     decimal? HolidayRate, int OvertimeAfterHours, decimal OvertimePercent,
-    decimal? TravelTimePercent, decimal? MileageRate, PerDiemPolicy PerDiem,
-    decimal? PerDiemAmount, string? ExpensePolicy, string? Notes);
+    decimal? TravelTimePercent, decimal? MileageRate, decimal? MinPayableHoursPerDay,
+    PerDiemPolicy PerDiem, decimal? PerDiemAmount, string? ExpensePolicy, string? Notes);
 
 /// <summary>Creates a new agreement version — server assigns Version = max + 1
 /// within the same resource + contract scope.</summary>
@@ -64,6 +64,9 @@ public class CompensationAgreementRequest
     public decimal OvertimePercent { get; set; } = 150m;
     public decimal? TravelTimePercent { get; set; }
     public decimal? MileageRate { get; set; }
+    /// <summary>Minimum payable hours per attendance day (§5). Null = none.</summary>
+    [Range(0, 24)]
+    public decimal? MinPayableHoursPerDay { get; set; }
     public PerDiemPolicy PerDiem { get; set; } = PerDiemPolicy.None;
     public decimal? PerDiemAmount { get; set; }
     public string? ExpensePolicy { get; set; }

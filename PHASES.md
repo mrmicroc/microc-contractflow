@@ -24,12 +24,13 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] My Work (resource assignment view)
 
 ## Phase 2 — Resource reporting
-- [ ] Assignment acknowledgement
-- [ ] Time reporting (waiting/standby, multi-project days)
-- [ ] Travel records + mobilisation grouping
-- [ ] Expenses + receipt upload (ImageSharp)
-- [ ] Mileage, per diem
-- [ ] Timesheet submission & approval
+- [x] Assignment acknowledgement
+- [x] Time reporting (waiting/standby, multi-project days)
+- [x] Travel records + mobilisation grouping (suggest/confirm/split)
+- [x] Expenses + mileage + per diem (receipt upload TBD — ImageSharp deferred)
+- [x] Timesheet submission & approval (submit → approve/return/reject, locks rows)
+- [x] Day calculation engine (TimeMath: day type, OT split, min-hours,
+      proportional allocation, expense markup — actual/payable/billable kept separate)
 - [ ] Authentication (Entra) — arrives here at latest
 
 ## Phase 3 — Money

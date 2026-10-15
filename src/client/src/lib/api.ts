@@ -1,6 +1,8 @@
 import { DEV_USER_HEADER, getDevUserId } from './currentUser';
 import type {
   AdditionalPadRequest,
+  AllowanceClaim,
+  AllowanceRequestBody,
   Booking,
   BookingRequestBody,
   CloseMonthResult,
@@ -17,8 +19,12 @@ import type {
   EndClientRequestBody,
   EstimatedQuantity,
   EstimatedQuantityRequestBody,
+  Expense,
+  ExpenseRequestBody,
   Location,
   LocationRequestBody,
+  MobilisationPeriod,
+  MobilisationSuggestion,
   PadDashboard,
   PadTransaction,
   ProjectDetail,
@@ -29,6 +35,13 @@ import type {
   ResourceLeaveRequestBody,
   ResourceRequestBody,
   ResourceSummary,
+  TimeEntry,
+  TimeEntryRequestBody,
+  Timesheet,
+  TimesheetDetail,
+  TimesheetStatus,
+  TravelRecord,
+  TravelRecordRequestBody,
 } from './types';
 
 function devHeaders(): HeadersInit {
@@ -215,3 +228,92 @@ export interface AgreementRequestBody {
 }
 
 export type PerDiemPolicyValue = 'none' | 'statutory' | 'custom';
+
+// ── Time reporting (Phase 2) ────────────────────────────────────────────────
+
+export const getTimeEntries = (q: { from?: string; to?: string; resourceId?: string; projectId?: string }) => {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  if (q.projectId) p.set('projectId', q.projectId);
+  const s = p.toString();
+  return apiGet<TimeEntry[]>(`/api/time-entries${s ? `?${s}` : ''}`);
+};
+export const createTimeEntry = (b: TimeEntryRequestBody) => apiPost<TimeEntry>('/api/time-entries', b);
+export const updateTimeEntry = (id: string, b: TimeEntryRequestBody) =>
+  apiPut<TimeEntry>(`/api/time-entries/${id}`, b);
+export const deleteTimeEntry = (id: string) => apiDelete(`/api/time-entries/${id}`);
+
+export const getTravelRecords = (q: { from?: string; to?: string; resourceId?: string; projectId?: string }) => {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  if (q.projectId) p.set('projectId', q.projectId);
+  const s = p.toString();
+  return apiGet<TravelRecord[]>(`/api/travel-records${s ? `?${s}` : ''}`);
+};
+export const createTravelRecord = (b: TravelRecordRequestBody) =>
+  apiPost<TravelRecord>('/api/travel-records', b);
+export const updateTravelRecord = (id: string, b: TravelRecordRequestBody) =>
+  apiPut<TravelRecord>(`/api/travel-records/${id}`, b);
+export const deleteTravelRecord = (id: string) => apiDelete(`/api/travel-records/${id}`);
+
+export const getExpenses = (q: { from?: string; to?: string; resourceId?: string; projectId?: string }) => {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  if (q.projectId) p.set('projectId', q.projectId);
+  const s = p.toString();
+  return apiGet<Expense[]>(`/api/expenses${s ? `?${s}` : ''}`);
+};
+export const createExpense = (b: ExpenseRequestBody) => apiPost<Expense>('/api/expenses', b);
+export const updateExpense = (id: string, b: ExpenseRequestBody) =>
+  apiPut<Expense>(`/api/expenses/${id}`, b);
+export const deleteExpense = (id: string) => apiDelete(`/api/expenses/${id}`);
+
+export const getAllowances = (q: { from?: string; to?: string; resourceId?: string }) => {
+  const p = new URLSearchParams();
+  if (q.from) p.set('from', q.from);
+  if (q.to) p.set('to', q.to);
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  const s = p.toString();
+  return apiGet<AllowanceClaim[]>(`/api/allowances${s ? `?${s}` : ''}`);
+};
+export const createAllowance = (b: AllowanceRequestBody) => apiPost<AllowanceClaim>('/api/allowances', b);
+export const deleteAllowance = (id: string) => apiDelete(`/api/allowances/${id}`);
+
+export const getMobilisations = (q: { projectId?: string; resourceId?: string }) => {
+  const p = new URLSearchParams();
+  if (q.projectId) p.set('projectId', q.projectId);
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  const s = p.toString();
+  return apiGet<MobilisationPeriod[]>(`/api/mobilisations${s ? `?${s}` : ''}`);
+};
+export const suggestMobilisations = (resourceId: string, from: string, to: string) =>
+  apiGet<MobilisationSuggestion[]>(
+    `/api/mobilisations/suggest?resourceId=${resourceId}&from=${from}&to=${to}`);
+export const confirmMobilisation = (b: {
+  projectId: string; resourceId: string; startDate: string; endDate: string;
+}) => apiPost<MobilisationPeriod>('/api/mobilisations', b);
+export const splitMobilisation = (id: string, fromDate: string) =>
+  apiPost<{ first: MobilisationPeriod; second: MobilisationPeriod }>(
+    `/api/mobilisations/${id}/split`, { fromDate });
+export const mergeMobilisation = (id: string, otherId: string) =>
+  apiPost<MobilisationPeriod>(`/api/mobilisations/${id}/merge`, { otherId });
+export const deleteMobilisation = (id: string) => apiDelete(`/api/mobilisations/${id}`);
+
+export const getTimesheets = (q: { resourceId?: string; status?: TimesheetStatus } = {}) => {
+  const p = new URLSearchParams();
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  if (q.status) p.set('status', q.status);
+  const s = p.toString();
+  return apiGet<Timesheet[]>(`/api/timesheets${s ? `?${s}` : ''}`);
+};
+export const getTimesheet = (id: string) => apiGet<TimesheetDetail>(`/api/timesheets/${id}`);
+export const submitTimesheet = (year: number, isoWeek: number, resourceId?: string) =>
+  apiPost<TimesheetDetail>('/api/timesheets/submit', { year, isoWeek, resourceId });
+export const timesheetAction = (id: string, action: 'approve' | 'return' | 'reject', note?: string) =>
+  apiPost<Timesheet>(`/api/timesheets/${id}/${action}`, { note });

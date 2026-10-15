@@ -93,11 +93,17 @@ public class ProjectsController(AppDbContext db) : ControllerBase
     {
         var project = await db.Projects.FindAsync([id], ct);
         if (project is null) return NotFound();
-        if (await db.Bookings.AnyAsync(b => b.ProjectId == id, ct))
+        var hasBookings = await db.Bookings.AnyAsync(b => b.ProjectId == id, ct);
+        var hasReporting = await db.TimeEntries.AnyAsync(x => x.ProjectId == id, ct)
+            || await db.TravelRecords.AnyAsync(x => x.ProjectId == id, ct)
+            || await db.Expenses.AnyAsync(x => x.ProjectId == id, ct)
+            || await db.AllowanceClaims.AnyAsync(x => x.ProjectId == id, ct)
+            || await db.MobilisationPeriods.AnyAsync(x => x.ProjectId == id, ct);
+        if (hasBookings || hasReporting)
             return Conflict(new
             {
                 error = "hasDependents",
-                message = "Project has bookings — they anchor the PAD audit trail and cannot be deleted.",
+                message = "Project has bookings or reported time — they anchor the audit trail and cannot be deleted.",
             });
 
         db.Projects.Remove(project);

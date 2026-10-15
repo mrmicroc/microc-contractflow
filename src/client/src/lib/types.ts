@@ -360,3 +360,168 @@ export interface AdditionalPadRequest {
   createdUtc: string;
   decidedUtc: string | null;
 }
+
+// ── Time reporting (execution ledger) ───────────────────────────────────────
+
+export type TimeEntryCategory = 'work' | 'waiting' | 'standby' | 'break';
+export type TravelMode = 'car' | 'train' | 'flight' | 'boat' | 'other';
+export type ExpenseCategory = 'travel' | 'meal' | 'accommodation' | 'material' | 'equipment' | 'other';
+export type TimesheetStatus = 'draft' | 'submitted' | 'approved' | 'returned' | 'rejected';
+
+export interface TimeEntry {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  projectId: string;
+  projectName: string;
+  bookingId: string | null;
+  date: string;
+  category: TimeEntryCategory;
+  actualHours: number;
+  description: string | null;
+  payableHours: number | null;
+  billableHours: number | null;
+  minimumAdjustmentHours: number | null;
+  timesheetId: string | null;
+  timesheetStatus: TimesheetStatus | null;
+}
+
+export interface TimeEntryRequestBody {
+  resourceId?: string | null;
+  projectId: string;
+  bookingId?: string | null;
+  date: string;
+  category: TimeEntryCategory;
+  actualHours: number;
+  description?: string | null;
+}
+
+export interface TravelRecord {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  projectId: string | null;
+  projectName: string | null;
+  bookingId: string | null;
+  date: string;
+  fromPlace: string | null;
+  toPlace: string | null;
+  mode: TravelMode;
+  distanceKm: number | null;
+  durationHours: number | null;
+  mobilisationPeriodId: string | null;
+  notes: string | null;
+  timesheetId: string | null;
+}
+
+export interface TravelRecordRequestBody {
+  resourceId?: string | null;
+  projectId?: string | null;
+  bookingId?: string | null;
+  date: string;
+  fromPlace?: string | null;
+  toPlace?: string | null;
+  mode: TravelMode;
+  distanceKm?: number | null;
+  durationHours?: number | null;
+  notes?: string | null;
+}
+
+export interface Expense {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  projectId: string | null;
+  projectName: string | null;
+  bookingId: string | null;
+  date: string;
+  category: ExpenseCategory;
+  amount: number;
+  currency: string;
+  description: string | null;
+  receiptRef: string | null;
+  reimbursableToResource: boolean;
+  rechargeableToCustomer: boolean;
+  includedInRate: boolean;
+  timesheetId: string | null;
+}
+
+export interface ExpenseRequestBody {
+  resourceId?: string | null;
+  projectId?: string | null;
+  bookingId?: string | null;
+  date: string;
+  category: ExpenseCategory;
+  amount: number;
+  currency: string;
+  description?: string | null;
+  receiptRef?: string | null;
+  reimbursableToResource: boolean;
+  rechargeableToCustomer: boolean;
+  includedInRate: boolean;
+}
+
+export interface AllowanceClaim {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  projectId: string | null;
+  projectName: string | null;
+  date: string;
+  amount: number;
+  currency: string;
+  notes: string | null;
+  timesheetId: string | null;
+}
+
+export interface AllowanceRequestBody {
+  resourceId?: string | null;
+  projectId?: string | null;
+  date: string;
+  amount: number;
+  currency: string;
+  notes?: string | null;
+}
+
+export interface MobilisationPeriod {
+  id: string;
+  projectId: string;
+  projectName: string;
+  resourceId: string;
+  resourceName: string;
+  startDate: string;
+  endDate: string;
+  confirmedUtc: string;
+}
+
+export interface MobilisationSuggestion {
+  projectId: string;
+  projectName: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface Timesheet {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  year: number;
+  isoWeek: number;
+  status: TimesheetStatus;
+  submittedUtc: string | null;
+  reviewedUtc: string | null;
+  reviewerNote: string | null;
+  entryCount: number;
+  travelCount: number;
+  expenseCount: number;
+  allowanceCount: number;
+  totalActualHours: number;
+}
+
+export interface TimesheetDetail {
+  sheet: Timesheet;
+  entries: TimeEntry[];
+  travel: TravelRecord[];
+  expenses: Expense[];
+  allowances: AllowanceClaim[];
+}

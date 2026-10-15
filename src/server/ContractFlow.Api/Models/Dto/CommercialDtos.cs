@@ -67,6 +67,7 @@ public record ContractTermsDto(
     decimal OvertimePercent, decimal? MobilisationFee, decimal ExpenseMarkupPercent,
     decimal PadHoursPerDay, decimal MinPadPerBookedDay, decimal CarryOverMaxPercent,
     int CancellationDeadlineBusinessDays, string HolidayCalendar,
+    decimal? MinBillableHoursPerDay,
     string? TravelExpensePolicy, string? Indexation, string? Notes);
 
 /// <summary>Creates a new terms version — server assigns Version = max + 1.</summary>
@@ -91,6 +92,9 @@ public class ContractTermsRequest
     public int CancellationDeadlineBusinessDays { get; set; } = 4;
     [Required, StringLength(20)]
     public required string HolidayCalendar { get; set; }
+    /// <summary>Minimum billable hours per attendance day (§5 step 4). Null = none.</summary>
+    [Range(0, 24)]
+    public decimal? MinBillableHoursPerDay { get; set; }
     public string? TravelExpensePolicy { get; set; }
     public string? Indexation { get; set; }
     public string? Notes { get; set; }

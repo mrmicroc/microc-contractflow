@@ -38,6 +38,10 @@ public class ContractTerms
     public decimal? MobilisationFee { get; set; }
     /// <summary>Mark-up percent on recharged expenses (spec example: 10 %).</summary>
     public decimal ExpenseMarkupPercent { get; set; }
+    /// <summary>Minimum billable hours per attendance day (design §5 step 4 —
+    /// the adjustment line is added on top of actuals, never overwriting them).
+    /// Null = no minimum.</summary>
+    public decimal? MinBillableHoursPerDay { get; set; }
 
     // ── PAD rules (design §4.3) ─────────────────────────────────────────────
     /// <summary>Hours per 1 PAD — default 8.</summary>

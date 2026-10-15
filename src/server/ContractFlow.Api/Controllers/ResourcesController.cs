@@ -92,11 +92,18 @@ public class ResourcesController(AppDbContext db) : ControllerBase
     {
         var resource = await db.Resources.FindAsync([id], ct);
         if (resource is null) return NotFound();
-        if (await db.Bookings.AnyAsync(b => b.ResourceId == id, ct))
+        var hasBookings = await db.Bookings.AnyAsync(b => b.ResourceId == id, ct);
+        var hasReporting = await db.TimeEntries.AnyAsync(x => x.ResourceId == id, ct)
+            || await db.TravelRecords.AnyAsync(x => x.ResourceId == id, ct)
+            || await db.Expenses.AnyAsync(x => x.ResourceId == id, ct)
+            || await db.AllowanceClaims.AnyAsync(x => x.ResourceId == id, ct)
+            || await db.Timesheets.AnyAsync(x => x.ResourceId == id, ct)
+            || await db.MobilisationPeriods.AnyAsync(x => x.ResourceId == id, ct);
+        if (hasBookings || hasReporting)
             return Conflict(new
             {
                 error = "hasDependents",
-                message = "Resource has bookings — deactivate instead to preserve history.",
+                message = "Resource has bookings or reported time — deactivate instead to preserve history.",
             });
 
         db.Resources.Remove(resource);
@@ -152,6 +159,7 @@ public class ResourcesController(AppDbContext db) : ControllerBase
             OvertimePercent = req.OvertimePercent,
             TravelTimePercent = req.TravelTimePercent,
             MileageRate = req.MileageRate,
+            MinPayableHoursPerDay = req.MinPayableHoursPerDay,
             PerDiem = req.PerDiem,
             PerDiemAmount = req.PerDiemAmount,
             ExpensePolicy = req.ExpensePolicy,
@@ -231,5 +239,6 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         a.Version, a.EffectiveFrom, a.CreatedUtc,
         a.Currency, a.HourlyRate, a.SaturdayRate, a.SundayRate, a.HolidayRate,
         a.OvertimeAfterHours, a.OvertimePercent, a.TravelTimePercent,
-        a.MileageRate, a.PerDiem, a.PerDiemAmount, a.ExpensePolicy, a.Notes);
+        a.MileageRate, a.MinPayableHoursPerDay,
+        a.PerDiem, a.PerDiemAmount, a.ExpensePolicy, a.Notes);
 }

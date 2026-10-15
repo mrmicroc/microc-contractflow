@@ -42,6 +42,9 @@ public class CompensationAgreement
     public decimal OvertimePercent { get; set; } = 150m;
     /// <summary>Percent of hourly rate paid for travel time.</summary>
     public decimal? TravelTimePercent { get; set; }
+    /// <summary>Minimum payable hours per attendance day (§5 step 4 — added as
+    /// an adjustment line, never overwriting actuals). Null = no minimum.</summary>
+    public decimal? MinPayableHoursPerDay { get; set; }
     /// <summary>Mileage compensation per km in the agreement currency.</summary>
     public decimal? MileageRate { get; set; }
     public PerDiemPolicy PerDiem { get; set; } = PerDiemPolicy.None;

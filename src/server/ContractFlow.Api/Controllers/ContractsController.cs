@@ -211,6 +211,7 @@ public class ContractsController(AppDbContext db) : ControllerBase
             CarryOverMaxPercent = req.CarryOverMaxPercent,
             CancellationDeadlineBusinessDays = req.CancellationDeadlineBusinessDays,
             HolidayCalendar = req.HolidayCalendar,
+            MinBillableHoursPerDay = req.MinBillableHoursPerDay,
             TravelExpensePolicy = req.TravelExpensePolicy,
             Indexation = req.Indexation,
             Notes = req.Notes,
@@ -241,5 +242,6 @@ public class ContractsController(AppDbContext db) : ControllerBase
         t.HolidayRate, t.OvertimeAfterHours, t.OvertimePercent, t.MobilisationFee,
         t.ExpenseMarkupPercent, t.PadHoursPerDay, t.MinPadPerBookedDay,
         t.CarryOverMaxPercent, t.CancellationDeadlineBusinessDays,
-        t.HolidayCalendar, t.TravelExpensePolicy, t.Indexation, t.Notes);
+        t.HolidayCalendar, t.MinBillableHoursPerDay,
+        t.TravelExpensePolicy, t.Indexation, t.Notes);
 }

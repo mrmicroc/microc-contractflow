@@ -20,6 +20,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<PadTransaction> PadTransactions => Set<PadTransaction>();
     public DbSet<AdditionalPadRequest> AdditionalPadRequests => Set<AdditionalPadRequest>();
     public DbSet<ProjectMonthClose> ProjectMonthCloses => Set<ProjectMonthClose>();
+    public DbSet<TimeEntry> TimeEntries => Set<TimeEntry>();
+    public DbSet<TravelRecord> TravelRecords => Set<TravelRecord>();
+    public DbSet<MobilisationPeriod> MobilisationPeriods => Set<MobilisationPeriod>();
+    public DbSet<Expense> Expenses => Set<Expense>();
+    public DbSet<AllowanceClaim> AllowanceClaims => Set<AllowanceClaim>();
+    public DbSet<Timesheet> Timesheets => Set<Timesheet>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -66,6 +72,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(t => t.PadHoursPerDay).HasPrecision(9, 4);
             e.Property(t => t.MinPadPerBookedDay).HasPrecision(9, 4);
             e.Property(t => t.CarryOverMaxPercent).HasPrecision(9, 4);
+            e.Property(t => t.MinBillableHoursPerDay).HasPrecision(9, 2);
         });
 
         builder.Entity<Project>(e =>
@@ -128,6 +135,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(a => a.PerDiemAmount).HasPrecision(18, 2);
             e.Property(a => a.OvertimePercent).HasPrecision(9, 4);
             e.Property(a => a.TravelTimePercent).HasPrecision(9, 4);
+            e.Property(a => a.MinPayableHoursPerDay).HasPrecision(9, 2);
         });
 
         builder.Entity<Booking>(e =>
@@ -173,6 +181,97 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(c => new { c.ProjectId, c.Year, c.Month }).IsUnique();
             e.HasOne(c => c.Project).WithMany()
                 .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<TimeEntry>(e =>
+        {
+            e.Property(x => x.Category).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.ActualHours).HasPrecision(9, 2);
+            e.Property(x => x.PayableHours).HasPrecision(9, 2);
+            e.Property(x => x.BillableHours).HasPrecision(9, 2);
+            e.Property(x => x.MinimumAdjustmentHours).HasPrecision(9, 2);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => new { x.ResourceId, x.Date });
+            e.HasIndex(x => new { x.ProjectId, x.Date });
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Booking).WithMany()
+                .HasForeignKey(x => x.BookingId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Timesheet).WithMany(t => t.Entries)
+                .HasForeignKey(x => x.TimesheetId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<TravelRecord>(e =>
+        {
+            e.Property(x => x.Mode).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.FromPlace).HasMaxLength(200);
+            e.Property(x => x.ToPlace).HasMaxLength(200);
+            e.Property(x => x.DistanceKm).HasPrecision(9, 2);
+            e.Property(x => x.DurationHours).HasPrecision(9, 2);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.HasIndex(x => new { x.ResourceId, x.Date });
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Booking).WithMany()
+                .HasForeignKey(x => x.BookingId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.MobilisationPeriod).WithMany()
+                .HasForeignKey(x => x.MobilisationPeriodId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Timesheet).WithMany(t => t.TravelRecords)
+                .HasForeignKey(x => x.TimesheetId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<MobilisationPeriod>(e =>
+        {
+            e.HasIndex(x => new { x.ResourceId, x.StartDate });
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Expense>(e =>
+        {
+            e.Property(x => x.Category).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.ReceiptRef).HasMaxLength(300);
+            e.HasIndex(x => new { x.ResourceId, x.Date });
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Booking).WithMany()
+                .HasForeignKey(x => x.BookingId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Timesheet).WithMany(t => t.Expenses)
+                .HasForeignKey(x => x.TimesheetId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<AllowanceClaim>(e =>
+        {
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.Notes).HasMaxLength(300);
+            e.HasIndex(x => new { x.ResourceId, x.Date });
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Timesheet).WithMany(t => t.AllowanceClaims)
+                .HasForeignKey(x => x.TimesheetId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<Timesheet>(e =>
+        {
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.ReviewerNote).HasMaxLength(500);
+            e.HasIndex(x => new { x.ResourceId, x.Year, x.IsoWeek }).IsUnique();
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

@@ -2,15 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { bookingAction, getBookings, getFeedUrl, rotateFeedUrl } from '@/lib/api';
 import { availableActions, statusClasses } from '@/lib/bookings';
+import { useMe } from '@/lib/useMe';
 import type { Booking } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { btnSecondaryCls, Panel, tdCls, thCls } from '@/components/forms';
+import { WeekReport } from '@/components/reporting/WeekReport';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 /** The resource's own assignments — acknowledge, start, complete (design §2 My Work). */
 export function MyWork() {
   const { t } = useTranslation();
+  const me = useMe();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [feedUrl, setFeedUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +96,8 @@ export function MyWork() {
           </tbody>
         </table>
       </Panel>
+
+      {me?.role === 'Resource' && <WeekReport bookings={bookings} />}
     </div>
   );
 }
