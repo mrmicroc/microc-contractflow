@@ -56,6 +56,7 @@ export const en = {
   },
   customers: {
     title: 'Customers',
+    help: 'Customers that MICROC signs contracts with. Click a row to open its contracts — click again to hide.',
     newCustomer: 'New customer',
     editCustomer: 'Edit customer',
     externalRef: 'External reference',
@@ -63,10 +64,14 @@ export const en = {
   },
   endClients: {
     title: 'End clients',
+    help: 'The organisations ultimately served (e.g. grid owners). A contract may point at an end client even though another party pays.',
     newEndClient: 'New end client',
   },
   contracts: {
     title: 'Contracts',
+    help: 'Commercial agreements under the customer. PAD-based contracts budget work in pre-allocated days bought up front; hourly contracts bill time as reported. Click a row for its terms and projects.',
+    detailHelp: 'Versioned commercial terms: rates per day type, overtime, PAD rules, expense markup. A change creates a new version — historical months keep the terms of their time.',
+    projectsHelp: 'Projects booked under this contract — each has locations, estimated quantities and its own PAD ledger. Click a row for details.',
     newContract: 'New contract',
     editContract: 'Edit contract',
     model: 'Model',
@@ -81,6 +86,7 @@ export const en = {
   },
   terms: {
     title: 'Terms versions',
+    help: 'Every commercial change creates a new version with an effective-from date. Older versions are never rewritten.',
     newVersion: 'New version',
     inForceToday: 'In force today',
     padRate: 'PAD rate',
@@ -111,11 +117,13 @@ export const en = {
   },
   locations: {
     title: 'Locations',
+    help: 'Named work locations on this project. Bookings and travel legs reference these.',
     add: 'Add location',
     address: 'Address',
   },
   quantities: {
     title: 'Estimated quantities',
+    help: 'Estimated work quantities per unit (e.g. object counts) — the baseline for follow-up against actual execution.',
     add: 'Add estimate',
     label: 'Label',
     quantity: 'Quantity',
@@ -123,6 +131,8 @@ export const en = {
   },
   resources: {
     title: 'Resources',
+    help: 'People who perform work: employees, subcontractors, or staff contracted directly by the customer. Click a row for agreements, leave and the calendar feed.',
+    detailHelp: 'Versioned compensation agreements set what MICROC owes the resource. Leave blocks planning. The .ics feed puts assignments into the resource\u2019s own calendar.',
     newResource: 'New resource',
     editResource: 'Edit resource',
     type: 'Type',
@@ -148,6 +158,7 @@ export const en = {
   },
   agreements: {
     title: 'Compensation agreements',
+    help: 'What MICROC pays the resource — hourly rates per day type, overtime, travel time %, mileage, per diem. Versioned per contract scope; internal rates are visible to Admin & Finance only.',
     addVersion: 'New agreement version',
     scope: 'Scope',
     scopeDefault: 'Default (all contracts)',
@@ -169,6 +180,7 @@ export const en = {
   },
   plan: {
     title: 'Planning calendar',
+    detailHelp: 'Booking detail — status flows forecast/tentative → requested → confirmed → acknowledged → in progress → completed. Confirmed bookings commit PAD. Cancellation must meet the business-day deadline; rescheduling cancels and rebooks.',
     newBooking: 'New booking',
     allProjects: 'All projects',
     allResources: 'All resources',
@@ -211,6 +223,10 @@ export const en = {
   },
   monthEnd: {
     title: 'PAD per month',
+    dashHelp: 'PAD = pre-allocated days the customer budgets per month. Committed comes from confirmed bookings, utilised from approved time. Unused baseline may carry over (contract-capped) or expire at month close.',
+    baselineHelp: 'Sets the month\u2019s PAD baseline per contract terms. The ledger is append-only — a change posts a delta transaction, never a rewrite.',
+    requestsHelp: 'Extra PAD beyond the baseline when work runs over. An approved request is added to the ledger.',
+    txHelp: 'The append-only ledger behind every number above — nothing is deleted, each change is a new transaction.',
     selectProject: 'Select a project',
     baseline: 'Baseline',
     carryOverIn: 'Carry-over in',
@@ -257,6 +273,8 @@ export const en = {
   },
   myWork: {
     title: 'My assignments',
+    help: 'Bookings the planners have made for you. Acknowledge → start → complete as work progresses.',
+    reportHelp: 'Log time, travel, expenses and per diem per day, attach receipts, then submit the week\u2019s timesheet for approval. Submitted rows lock until returned or approved.',
     noBookings: 'No upcoming assignments.',
     calendarFeed: 'Subscribe in your calendar (.ics):',
     regenerateFeed: 'New link',
@@ -321,6 +339,7 @@ export const en = {
   approvals: {
     title: 'Approvals',
     queue: 'Submitted timesheets',
+    queueHelp: 'Timesheets awaiting review. Approving locks the rows and makes them the basis for customer billing and subcontractor statements.',
     noPending: 'Nothing awaiting review.',
     week: 'Week',
     resource: 'Resource',
@@ -340,6 +359,7 @@ export const en = {
     allowances: 'Per diem',
     expand: 'Details',
     mobilisations: 'Mobilisation periods',
+    mobHelp: 'Travel records grouped into a mobilisation period — the customer pays the fixed mobilisation fee (per contract terms) while the resource is compensated per their agreement.',
     noMobilisations: 'No confirmed periods.',
     suggestionTitle: 'Suggested periods',
     confirm: 'Confirm',
@@ -352,7 +372,9 @@ export const en = {
   },
   economy: {
     invoices: 'Invoice specifications',
+    invoicesHelp: 'What the customer is billed per project and month, generated from approved timesheets at contract rates. Draft → customer review → final → issued → paid.',
     statements: 'Subcontractor statements',
+    statementsHelp: 'What MICROC owes each subcontractor per month, priced at their compensation agreement. Draft → final → paid.',
     generate: 'Generate',
     project: 'Project',
     resource: 'Resource',
@@ -379,6 +401,7 @@ export const en = {
       manual: 'Manual',
     },
     supplierInvoices: 'Supplier invoices',
+    supplierHelp: 'Register incoming subcontractor invoices and match them against our statement — differences per cost type are flagged.',
     registerInvoice: 'Register invoice',
     invoiceNumber: 'Invoice no.',
     invoiceDate: 'Invoice date',
@@ -392,6 +415,7 @@ export const en = {
       approved: 'Approved', paid: 'Paid',
     },
     margins: 'Project margins',
+    marginsHelp: 'Billed revenue minus subcontractor cost per project and month. Visible to internal roles only.',
     customer: 'Customer',
     billed: 'Billed',
     cost: 'Cost',

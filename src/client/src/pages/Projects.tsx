@@ -40,15 +40,26 @@ export function Projects() {
   useEffect(() => { void reloadCustomer(); }, [reloadCustomer]);
 
   const selectCustomer = (id: string) => {
-    if (id !== customerId) setCustomer(null);
+    if (id === customerId) {
+      setCustomerId(null);
+      setCustomer(null);
+      setContractId(null);
+      setProjectId(null);
+      return;
+    }
+    setCustomer(null);
     setCustomerId(id);
     setContractId(null);
     setProjectId(null);
   };
 
   const selectContract = (id: string) => {
-    setContractId(id);
+    setContractId((prev) => (prev === id ? null : id));
     setProjectId(null);
+  };
+
+  const selectProject = (id: string) => {
+    setProjectId((prev) => (prev === id ? null : id));
   };
 
   const saveEndClient = async () => {
@@ -121,7 +132,7 @@ export function Projects() {
           key={`${contractId}:${contractKey}`}
           contractId={contractId}
           selectedProjectId={projectId}
-          onSelectProject={setProjectId}
+          onSelectProject={selectProject}
         />
       )}
 
@@ -137,7 +148,7 @@ export function Projects() {
       )}
 
       {isAdmin(me) && (
-        <Panel title={t('endClients.title')}>
+        <Panel title={t('endClients.title')} help={t('endClients.help')}>
           {endClientError && (
             <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{endClientError}</p>
           )}

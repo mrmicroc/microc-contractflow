@@ -62,7 +62,7 @@ function TimesheetQueue() {
   };
 
   return (
-    <Panel title={t('approvals.queue')}>
+    <Panel title={t('approvals.queue')} help={t('approvals.queueHelp')}>
       {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
       {msg && <p className="mb-2 rounded bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700">{msg}</p>}
       <table className="w-full border-collapse">
@@ -242,7 +242,7 @@ function MobilisationPanel() {
   };
 
   return (
-    <Panel title={t('approvals.mobilisations')}>
+    <Panel title={t('approvals.mobilisations')} help={t('approvals.mobHelp')}>
       {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
       <div className="mb-3 flex flex-wrap items-end gap-2">
         <Field label={t('approvals.resource')}>

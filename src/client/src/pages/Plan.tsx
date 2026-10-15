@@ -407,6 +407,7 @@ export function Plan() {
 
       {selected && (
         <Panel title={`${selected.resourceName} · ${selected.date}`}
+          help={t('plan.detailHelp')}
           actions={<button className={btnSecondaryCls} onClick={() => setSelected(null)}>✕</button>}>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
             <div><span className="text-slate-500">{t('booking.project')}:</span> {selected.projectName}</div>

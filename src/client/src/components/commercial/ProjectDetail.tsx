@@ -88,7 +88,7 @@ export function ProjectDetail({
         <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>
       )}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <Panel title={`${t('locations.title')} — ${project.name}`}>
+      <Panel title={`${t('locations.title')} — ${project.name}`} help={t('locations.help')}>
         <table className="mb-3 w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200">
@@ -135,7 +135,7 @@ export function ProjectDetail({
         )}
       </Panel>
 
-      <Panel title={t('quantities.title')}>
+      <Panel title={t('quantities.title')} help={t('quantities.help')}>
         <table className="mb-3 w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200">

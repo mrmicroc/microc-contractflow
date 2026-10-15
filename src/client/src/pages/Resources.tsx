@@ -65,7 +65,12 @@ export function Resources() {
   useEffect(() => { void reloadDetail(); }, [reloadDetail]);
 
   const selectResource = (id: string) => {
-    if (id !== selectedId) setDetail(null);
+    if (id === selectedId) {
+      setSelectedId(null);
+      setDetail(null);
+      return;
+    }
+    setDetail(null);
     setSelectedId(id);
     setFormOpen(false);
     setLeaveFormOpen(false);
@@ -198,6 +203,7 @@ export function Resources() {
     <div className="mx-auto max-w-6xl space-y-4 px-4 py-6">
       <Panel
         title={t('resources.title')}
+        help={t('resources.help')}
         actions={isAdmin(me) && !formOpen && (
           <button className={btnSecondaryCls} onClick={openNew}>{t('resources.newResource')}</button>
         )}
@@ -207,6 +213,7 @@ export function Resources() {
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200">
+              <th className={cn(thCls, 'w-6')}></th>
               <th className={thCls}>{t('common.name')}</th>
               <th className={thCls}>{t('resources.type')}</th>
               <th className={thCls}>{t('common.active')}</th>
@@ -222,13 +229,16 @@ export function Resources() {
                   selectedId === r.id && 'bg-blue-50',
                 )}
               >
+                <td className={cn(tdCls, 'w-6 text-slate-400')}>
+                  {selectedId === r.id ? '▾' : '▸'}
+                </td>
                 <td className={cn(tdCls, 'font-medium')}>{r.displayName}</td>
                 <td className={tdCls}>{typeLabel(r.type)}</td>
                 <td className={tdCls}>{r.isActive ? t('common.active') : t('common.inactive')}</td>
               </tr>
             ))}
             {resources.length === 0 && (
-              <tr><td className={tdCls} colSpan={3}>{t('common.none')}</td></tr>
+              <tr><td className={tdCls} colSpan={4}>{t('common.none')}</td></tr>
             )}
           </tbody>
         </table>
@@ -238,6 +248,7 @@ export function Resources() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Panel
             title={detail.displayName}
+            help={t('resources.detailHelp')}
             actions={isAdmin(me) && !formOpen && (
               <span className="flex gap-1">
                 <button className={btnSecondaryCls} onClick={() => openEdit(detail)}>

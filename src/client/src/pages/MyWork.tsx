@@ -38,7 +38,7 @@ export function MyWork() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 px-4 py-6">
-      <Panel title={t('myWork.title')}>
+      <Panel title={t('myWork.title')} help={t('myWork.help')}>
         {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
         {feedUrl && (
           <p className="mb-3 flex items-center gap-2 text-xs text-slate-600">

@@ -102,6 +102,7 @@ export function ContractDetail({
     <div className="space-y-4">
       <Panel
         title={`${contract.name} · ${contract.customerName}`}
+        help={t('contracts.detailHelp')}
         actions={isAdmin(me) && !termsFormOpen && (
           <button className={btnSecondaryCls} onClick={() => setTermsFormOpen(true)}>
             {t('terms.newVersion')}
@@ -261,6 +262,7 @@ export function ContractDetail({
 
       <Panel
         title={t('contracts.projects')}
+        help={t('contracts.projectsHelp')}
         actions={isAdmin(me) && !projectFormOpen && (
           <button className={btnSecondaryCls} onClick={() => setProjectFormOpen(true)}>
             {t('projects.newProject')}
@@ -298,6 +300,7 @@ export function ContractDetail({
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200">
+              <th className={cn(thCls, 'w-6')}></th>
               <th className={thCls}>{t('common.name')}</th>
               <th className={thCls}>{t('projects.code')}</th>
               <th className={thCls}>{t('common.active')}</th>
@@ -313,13 +316,16 @@ export function ContractDetail({
                   selectedProjectId === p.id && 'bg-blue-50',
                 )}
               >
+                <td className={cn(tdCls, 'w-6 text-slate-400')}>
+                  {selectedProjectId === p.id ? '▾' : '▸'}
+                </td>
                 <td className={cn(tdCls, 'font-medium')}>{p.name}</td>
                 <td className={tdCls}>{p.code ?? '—'}</td>
                 <td className={tdCls}>{p.isActive ? t('common.active') : t('common.inactive')}</td>
               </tr>
             ))}
             {contract.projects.length === 0 && (
-              <tr><td className={tdCls} colSpan={3}>{t('common.none')}</td></tr>
+              <tr><td className={tdCls} colSpan={4}>{t('common.none')}</td></tr>
             )}
           </tbody>
         </table>

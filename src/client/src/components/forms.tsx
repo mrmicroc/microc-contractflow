@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 export const inputCls =
   'w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800';
@@ -20,17 +20,33 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   );
 }
 
-export function Panel({ title, children, actions }: {
+export function Panel({ title, help, children, actions }: {
   title: string;
+  help?: string;
   children: ReactNode;
   actions?: ReactNode;
 }) {
+  const [helpOpen, setHelpOpen] = useState(false);
   return (
     <section className="rounded-lg border border-slate-200 bg-white">
       <header className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
-        <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
+        <h2 className="text-sm font-semibold text-slate-700">
+          {title}
+          {help && (
+            <button
+              type="button"
+              title={help}
+              aria-label="Info"
+              onClick={() => setHelpOpen((v) => !v)}
+              className="ml-2 inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 align-middle text-[10px] font-semibold text-slate-400 hover:border-blue-400 hover:text-blue-600"
+            >?</button>
+          )}
+        </h2>
         {actions}
       </header>
+      {helpOpen && help && (
+        <p className="border-b border-slate-100 bg-blue-50/40 px-4 py-2 text-xs text-slate-600">{help}</p>
+      )}
       <div className="p-4">{children}</div>
     </section>
   );

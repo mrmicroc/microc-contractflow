@@ -89,7 +89,7 @@ function InvoicePanel({ canGenerate }: { canGenerate: boolean }) {
   };
 
   return (
-    <Panel title={t('economy.invoices')}>
+    <Panel title={t('economy.invoices')} help={t('economy.invoicesHelp')}>
       {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
       {canGenerate && (
         <div className="mb-3 flex flex-wrap items-end gap-2">
@@ -213,7 +213,7 @@ function StatementPanel({ canGenerate, isResource }: { canGenerate: boolean; isR
   };
 
   return (
-    <Panel title={t('economy.statements')}>
+    <Panel title={t('economy.statements')} help={t('economy.statementsHelp')}>
       {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
       {canGenerate && (
         <div className="mb-3 flex flex-wrap items-end gap-2">
@@ -370,6 +370,7 @@ function SupplierInvoicePanel({ canGenerate, isResource }: { canGenerate: boolea
 
   return (
     <Panel title={t('economy.supplierInvoices')}
+      help={t('economy.supplierHelp')}
       actions={canGenerate && (
         <button className={btnSecondaryCls} onClick={() => setFormOpen((v) => !v)}>
           {t('economy.registerInvoice')}
@@ -577,6 +578,7 @@ function MarginsPanel() {
 
   return (
     <Panel title={t('economy.margins')}
+      help={t('economy.marginsHelp')}
       actions={<input className={inputCls} type="month" value={month}
         onChange={(e) => setMonth(e.target.value)} />}>
       {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}

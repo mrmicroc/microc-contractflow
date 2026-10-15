@@ -83,6 +83,7 @@ export function CustomerSection({
   return (
     <Panel
       title={t('customers.title')}
+      help={t('customers.help')}
       actions={isAdmin(me) && !formOpen && (
         <button className={btnSecondaryCls} onClick={openNew}>{t('customers.newCustomer')}</button>
       )}
@@ -122,6 +123,7 @@ export function CustomerSection({
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-slate-200">
+            <th className={cn(thCls, 'w-6')}></th>
             <th className={thCls}>{t('common.name')}</th>
             <th className={thCls}>{t('customers.externalRef')}</th>
             <th className={thCls}>{t('customers.contractCount')}</th>
@@ -139,6 +141,9 @@ export function CustomerSection({
                 selectedId === c.id && 'bg-blue-50',
               )}
             >
+              <td className={cn(tdCls, 'w-6 text-slate-400')}>
+                {selectedId === c.id ? '▾' : '▸'}
+              </td>
               <td className={cn(tdCls, 'font-medium')}>{c.name}</td>
               <td className={tdCls}>{c.externalReference ?? '—'}</td>
               <td className={tdCls}>{c.contractCount}</td>
@@ -164,7 +169,7 @@ export function CustomerSection({
             </tr>
           ))}
           {customers.length === 0 && (
-            <tr><td className={tdCls} colSpan={5}>{t('common.none')}</td></tr>
+            <tr><td className={tdCls} colSpan={6}>{t('common.none')}</td></tr>
           )}
         </tbody>
       </table>

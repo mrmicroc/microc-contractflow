@@ -80,6 +80,7 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
   return (
     <Panel
       title={`${t('myWork.reportWeek')} — ${isoWeekLabel(year, week)}`}
+      help={t('myWork.reportHelp')}
       actions={
         <span className="flex items-center gap-1 text-xs">
           <button className={btnSecondaryCls} onClick={() => setAnchor(shiftIso(anchor, -7))}>

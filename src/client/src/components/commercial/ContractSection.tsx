@@ -91,6 +91,7 @@ export function ContractSection({
   return (
     <Panel
       title={`${t('contracts.title')} — ${customer.name}`}
+      help={t('contracts.help')}
       actions={isAdmin(me) && !formOpen && (
         <button className={btnSecondaryCls} onClick={openNew}>{t('contracts.newContract')}</button>
       )}
@@ -147,6 +148,7 @@ export function ContractSection({
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-slate-200">
+            <th className={cn(thCls, 'w-6')}></th>
             <th className={thCls}>{t('common.name')}</th>
             <th className={thCls}>{t('contracts.model')}</th>
             <th className={thCls}>{t('contracts.startDate')}</th>
@@ -165,6 +167,9 @@ export function ContractSection({
                 selectedId === c.id && 'bg-blue-50',
               )}
             >
+              <td className={cn(tdCls, 'w-6 text-slate-400')}>
+                {selectedId === c.id ? '▾' : '▸'}
+              </td>
               <td className={cn(tdCls, 'font-medium')}>{c.name}</td>
               <td className={tdCls}>
                 {c.model === 'padBased' ? t('contracts.modelPadBased') : t('contracts.modelHourly')}
@@ -193,7 +198,7 @@ export function ContractSection({
             </tr>
           ))}
           {customer.contracts.length === 0 && (
-            <tr><td className={tdCls} colSpan={6}>{t('common.none')}</td></tr>
+            <tr><td className={tdCls} colSpan={7}>{t('common.none')}</td></tr>
           )}
         </tbody>
       </table>

@@ -162,7 +162,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
 
   return (
     <>
-      <Panel title={`${dash?.projectName ?? ''} ${year}-${pad2(month)}`}>
+      <Panel title={`${dash?.projectName ?? ''} ${year}-${pad2(month)}`} help={t('monthEnd.dashHelp')}>
         {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
         {dash && (
           <>
@@ -186,7 +186,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
       </Panel>
 
       {dash && isAdmin(me) && !dash.closed && (
-        <Panel title={t('monthEnd.setBaseline')}>
+        <Panel title={t('monthEnd.setBaseline')} help={t('monthEnd.baselineHelp')}>
           <div className="flex flex-wrap items-end gap-2">
             <Field label={t('monthEnd.baselineAmount')}>
               <input className={inputCls} inputMode="decimal" value={baselineAmt}
@@ -218,6 +218,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
       {dash && (
         <Panel
           title={t('monthEnd.padRequests')}
+          help={t('monthEnd.requestsHelp')}
           actions={canManage && !dash.closed && !reqOpen && (
             <button className={btnSecondaryCls} onClick={() => setReqOpen(true)}>
               {t('monthEnd.newPadRequest')}
@@ -300,7 +301,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
       )}
 
       {dash && (
-        <Panel title={t('monthEnd.transactions')}>
+        <Panel title={t('monthEnd.transactions')} help={t('monthEnd.txHelp')}>
           <table className="w-full border-collapse">
             <thead>
               <tr className="border-b border-slate-200">

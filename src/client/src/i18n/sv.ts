@@ -62,6 +62,7 @@ export const sv: DeepStringify<typeof en> = {
   },
   customers: {
     title: 'Kunder',
+    help: 'Kunder som MICROC tecknar kontrakt med. Klicka på en rad för att se dess kontrakt — klicka igen för att dölja.',
     newCustomer: 'Ny kund',
     editCustomer: 'Redigera kund',
     externalRef: 'Extern referens',
@@ -69,10 +70,14 @@ export const sv: DeepStringify<typeof en> = {
   },
   endClients: {
     title: 'Slutkunder',
+    help: 'Organisationerna som till slut levereranserna går till (t.ex. nätägare). Ett kontrakt kan peka på en slutkund även om en annan part betalar.',
     newEndClient: 'Ny slutkund',
   },
   contracts: {
     title: 'Kontrakt',
+    help: 'Kommersiella avtal under kunden. PAD-baserade kontrakt budgeterar arbetet i förhandssålda dagar; löpande timkontrakt debiterar rapporterad tid. Klicka på en rad för villkor och projekt.',
+    detailHelp: 'Versionerade kommersiella villkor: priser per dagtyp, övertid, PAD-regler, påslag på utlägg. En ändring skapar en ny version — historiska månader behåller sin tids villkor.',
+    projectsHelp: 'Projekt under detta kontrakt — varje projekt har platser, uppskattade kvantiteter och egen PAD-redovisning. Klicka på en rad för detaljer.',
     newContract: 'Nytt kontrakt',
     editContract: 'Redigera kontrakt',
     model: 'Modell',
@@ -87,6 +92,7 @@ export const sv: DeepStringify<typeof en> = {
   },
   terms: {
     title: 'Villkorsversioner',
+    help: 'Varje kommersiell ändring skapar en ny version med giltighetsdatum. Äldre versioner skrivs aldrig om.',
     newVersion: 'Ny version',
     inForceToday: 'Gäller idag',
     padRate: 'PAD-pris',
@@ -117,11 +123,13 @@ export const sv: DeepStringify<typeof en> = {
   },
   locations: {
     title: 'Platser',
+    help: 'Namngivna arbetsplatser på projektet. Bokningar och resor refererar hit.',
     add: 'Lägg till plats',
     address: 'Adress',
   },
   quantities: {
     title: 'Uppskattade kvantiteter',
+    help: 'Uppskattade arbetsmängder per enhet (t.ex. antal objekt) — baslinjen för uppföljning mot faktiskt utförande.',
     add: 'Lägg till estimat',
     label: 'Beteckning',
     quantity: 'Kvantitet',
@@ -129,6 +137,8 @@ export const sv: DeepStringify<typeof en> = {
   },
   resources: {
     title: 'Resurser',
+    help: 'Personer som utför arbetet: anställda, underentreprenörer eller direktkontrakterade av kund. Klicka på en rad för avtal, ledigheter och kalenderflöde.',
+    detailHelp: 'Versionerade ersättningsavtal styr vad MICROC är skyldig resursen. Ledigheter blockerar planering. .ics-flödet matar uppdrag till resursens egen kalender.',
     newResource: 'Ny resurs',
     editResource: 'Redigera resurs',
     type: 'Typ',
@@ -154,6 +164,7 @@ export const sv: DeepStringify<typeof en> = {
   },
   agreements: {
     title: 'Ersättningsavtal',
+    help: 'Vad MICROC betalar resursen — timpriser per dagtyp, övertid, restidsprocent, milersättning, traktamente. Versionerat per kontrakt; interna priser syns bara för Admin och Finance.',
     addVersion: 'Ny avtalsversion',
     scope: 'Omfattning',
     scopeDefault: 'Standard (alla kontrakt)',
@@ -175,6 +186,7 @@ export const sv: DeepStringify<typeof en> = {
   },
   plan: {
     title: 'Planeringskalender',
+    detailHelp: 'Bokningsdetalj — status flödar prognos/preliminär → efterfrågad → bekräftad → kvitterad → pågående → slutförd. Bekräftade bokningar binder PAD. Avbokning måste ske inom arbetsdagsfristen; omplanering avbokar och bokar om.',
     newBooking: 'Ny bokning',
     allProjects: 'Alla projekt',
     allResources: 'Alla resurser',
@@ -217,6 +229,10 @@ export const sv: DeepStringify<typeof en> = {
   },
   monthEnd: {
     title: 'PAD per månad',
+    dashHelp: 'PAD = förhandssålda dagar som kunden budgeterar per månad. Bundet kommer från bekräftade bokningar, utnyttjat från godkänd tid. Oanvänd baslinje kan flyttas över (tak enligt kontrakt) eller förfalla vid månadsstängning.',
+    baselineHelp: 'Sätter månadens PAD-baslinje enligt kontraktsvillkoren. Ledgern är append-only — en ändring postar en deltatransaktion, aldrig en överskrivning.',
+    requestsHelp: 'Extra PAD utöver baslinjen när arbetet överskrider. En godkänd förfrågan läggs till i ledgern.',
+    txHelp: 'Den append-only-liggare som ligger bakom varje siffra ovan — inget raderas, varje ändring är en ny transaktion.',
     selectProject: 'Välj ett projekt',
     baseline: 'Baslinje',
     carryOverIn: 'Överföring in',
@@ -263,6 +279,8 @@ export const sv: DeepStringify<typeof en> = {
   },
   myWork: {
     title: 'Mina uppdrag',
+    help: 'Bokningar som planerarna lagt på dig. Kvittera → starta → slutför allt eftersom arbetet framskrider.',
+    reportHelp: 'Logga tid, resor, utlägg och traktamente per dag, bifoga kvitton och skicka sedan veckans tidrapport för godkännande. Inskickade rader låses tills de returneras eller godkänns.',
     noBookings: 'Inga kommande uppdrag.',
     calendarFeed: 'Prenumerera i din kalender (.ics):',
     regenerateFeed: 'Ny länk',
@@ -327,6 +345,7 @@ export const sv: DeepStringify<typeof en> = {
   approvals: {
     title: 'Godkännanden',
     queue: 'Inskickade tidrapporter',
+    queueHelp: 'Tidrapporter som väntar på granskning. Godkännande låser raderna och gör dem till underlag för kundfakturering och UE-avräkningar.',
     noPending: 'Inget väntar på granskning.',
     week: 'Vecka',
     resource: 'Resurs',
@@ -346,6 +365,7 @@ export const sv: DeepStringify<typeof en> = {
     allowances: 'Traktamenten',
     expand: 'Detaljer',
     mobilisations: 'Mobiliseringsperioder',
+    mobHelp: 'Resor som grupperats till en mobiliseringsperiod — kunden betalar den fasta mobiliseringsavgiften (enligt kontraktsvillkor) medan resursen ersätts enligt sitt avtal.',
     noMobilisations: 'Inga bekräftade perioder.',
     suggestionTitle: 'Föreslagna perioder',
     confirm: 'Bekräfta',
@@ -358,7 +378,9 @@ export const sv: DeepStringify<typeof en> = {
   },
   economy: {
     invoices: 'Fakturaunderlag',
+    invoicesHelp: 'Vad kunden faktureras per projekt och månad, genererat från godkända tidrapporter till kontraktspriser. Utkast → kundgranskning → slutgiltig → utfärdad → betald.',
     statements: 'UE-avräkningar',
+    statementsHelp: 'Vad MICROC är skyldig varje underentreprenör per månad, prissatt enligt deras ersättningsavtal. Utkast → slutgiltig → betald.',
     generate: 'Generera',
     project: 'Projekt',
     resource: 'Resurs',
@@ -385,6 +407,7 @@ export const sv: DeepStringify<typeof en> = {
       manual: 'Manuell',
     },
     supplierInvoices: 'Leverantörsfakturor',
+    supplierHelp: 'Registrera inkommande UE-fakturor och matcha dem mot vår avräkning — differenser per kostnadstyp flaggas.',
     registerInvoice: 'Registrera faktura',
     invoiceNumber: 'Fakturanr',
     invoiceDate: 'Fakturadatum',
@@ -398,6 +421,7 @@ export const sv: DeepStringify<typeof en> = {
       approved: 'Godkänd', paid: 'Betald',
     },
     margins: 'Projektmarginaler',
+    marginsHelp: 'Fakturerad intäkt minus UE-kostnad per projekt och månad. Syns bara för interna roller.',
     customer: 'Kund',
     billed: 'Fakturerat',
     cost: 'Kostnad',
