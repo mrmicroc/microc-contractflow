@@ -598,3 +598,49 @@ export interface StatementDetail {
   statement: SubcontractorStatement;
   lines: BillingLine[];
 }
+
+export type SupplierInvoiceStatus = 'registered' | 'matched' | 'discrepancy' | 'approved' | 'paid';
+
+export interface SupplierInvoice {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  number: string;
+  invoiceDate: string;
+  dueDate: string | null;
+  currency: string;
+  totalAmount: number;
+  status: SupplierInvoiceStatus;
+  statementId: string | null;
+  paidUtc: string | null;
+}
+
+export interface SupplierInvoiceLine {
+  id: string;
+  kind: StatementLineKind;
+  description: string;
+  amount: number;
+}
+
+export interface MatchDiff {
+  kind: string;
+  invoiced: number;
+  statement: number;
+  diff: number;
+}
+
+export interface SupplierInvoiceDetail {
+  invoice: SupplierInvoice;
+  lines: SupplierInvoiceLine[];
+  diffs: MatchDiff[] | null;
+}
+
+export interface MarginRow {
+  projectId: string;
+  projectName: string;
+  customerName: string;
+  billed: number;
+  cost: number;
+  margin: number;
+  marginPercent: number | null;
+}

@@ -40,8 +40,9 @@ Items are marked ✅ only when implemented **and** tested. See
       draft → customer review → final → issued → paid; per-line explanations)
 - [x] Subcontractor payment statements (payable hours/expenses/mileage/
       travel time/per diem at agreement rates; draft → final → paid)
-- [ ] Supplier invoice reconciliation
-- [ ] Revenue / cost / margin reporting
+- [x] Supplier invoice reconciliation (register incoming UE invoice, match
+      against statement, per-kind diffs, approve → pay)
+- [x] Revenue / cost / margin reporting (per project × month, internal roles)
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
 - [ ] Timesheet → Invoiced leg once an invoice covers the period

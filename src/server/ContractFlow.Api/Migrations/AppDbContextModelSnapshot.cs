@@ -1100,6 +1100,96 @@ namespace ContractFlow.Api.Migrations
                     b.ToTable("SubcontractorStatements");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.SupplierInvoice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateOnly?>("DueDate")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly>("InvoiceDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("MatchDiffJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTime?>("PaidUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("StatementId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StatementId");
+
+                    b.HasIndex("ResourceId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("SupplierInvoices");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.SupplierInvoiceLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("SupplierInvoiceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SupplierInvoiceId");
+
+                    b.ToTable("SupplierInvoiceLines");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.TimeEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1566,6 +1656,35 @@ namespace ContractFlow.Api.Migrations
                     b.Navigation("Resource");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.SupplierInvoice", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Resource", "Resource")
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ContractFlow.Api.Models.Domain.SubcontractorStatement", "Statement")
+                        .WithMany()
+                        .HasForeignKey("StatementId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Resource");
+
+                    b.Navigation("Statement");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.SupplierInvoiceLine", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.SupplierInvoice", "Invoice")
+                        .WithMany("Lines")
+                        .HasForeignKey("SupplierInvoiceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Invoice");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.TimeEntry", b =>
                 {
                     b.HasOne("ContractFlow.Api.Models.Domain.Booking", "Booking")
@@ -1686,6 +1805,11 @@ namespace ContractFlow.Api.Migrations
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.SubcontractorStatement", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.SupplierInvoice", b =>
                 {
                     b.Navigation("Lines");
                 });

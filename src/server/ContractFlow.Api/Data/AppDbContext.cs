@@ -31,6 +31,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
     public DbSet<SubcontractorStatement> SubcontractorStatements => Set<SubcontractorStatement>();
     public DbSet<StatementLine> StatementLines => Set<StatementLine>();
+    public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
+    public DbSet<SupplierInvoiceLine> SupplierInvoiceLines => Set<SupplierInvoiceLine>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -333,6 +335,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Amount).HasPrecision(18, 2);
             e.HasOne(x => x.Statement).WithMany(x => x.Lines)
                 .HasForeignKey(x => x.StatementId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<SupplierInvoice>(e =>
+        {
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Number).HasMaxLength(60);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.TotalAmount).HasPrecision(18, 2);
+            e.Property(x => x.MatchDiffJson).HasMaxLength(4000);
+            e.HasIndex(x => new { x.ResourceId, x.Number }).IsUnique();
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Statement).WithMany()
+                .HasForeignKey(x => x.StatementId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<SupplierInvoiceLine>(e =>
+        {
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Description).HasMaxLength(300);
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.HasOne(x => x.Invoice).WithMany(x => x.Lines)
+                .HasForeignKey(x => x.SupplierInvoiceId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

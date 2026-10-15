@@ -21,6 +21,37 @@ public class BillingService(AppDbContext db)
     private static (DateOnly From, DateOnly To) MonthRange(int year, int month) =>
         (new DateOnly(year, month, 1), new DateOnly(year, month, 1).AddMonths(1).AddDays(-1));
 
+    // ── Supplier-invoice matching (§6.2) ────────────────────────────────────
+
+    public record MatchDiff(string Kind, decimal Invoiced, decimal Statement, decimal Diff);
+
+    /// <summary>Compares the supplier invoice's lines per kind against the
+    /// statement's — the statement is the authority. Tolerance 0.01 for
+    /// rounding-only noise.</summary>
+    public static List<MatchDiff> MatchInvoice(
+        IEnumerable<SupplierInvoiceLine> invoiceLines,
+        IEnumerable<StatementLine> statementLines)
+    {
+        var invoiced = invoiceLines
+            .GroupBy(l => l.Kind).ToDictionary(g => g.Key, g => g.Sum(l => l.Amount));
+        var statement = statementLines
+            .GroupBy(l => l.Kind).ToDictionary(g => g.Key, g => g.Sum(l => l.Amount));
+        return invoiced.Keys.Union(statement.Keys)
+            .OrderBy(k => k.ToString())
+            .Select(k => new MatchDiff(
+                k.ToString().ToLowerInvariant(),
+                invoiced.GetValueOrDefault(k),
+                statement.GetValueOrDefault(k),
+                invoiced.GetValueOrDefault(k) - statement.GetValueOrDefault(k)))
+            .ToList();
+    }
+
+    /// <summary>Within tolerance → Matched, otherwise Discrepancy.</summary>
+    public static SupplierInvoiceStatus MatchOutcome(IEnumerable<MatchDiff> diffs) =>
+        diffs.All(d => Math.Abs(d.Diff) <= 0.01m)
+            ? SupplierInvoiceStatus.Matched
+            : SupplierInvoiceStatus.Discrepancy;
+
     // ── Customer invoice specification ──────────────────────────────────────
 
     /// <summary>(Re)builds the draft spec for project × month from approved
@@ -303,5 +334,95 @@ public class BillingService(AppDbContext db)
         st.TotalAmount = TimeMath.Round2(st.Lines.Sum(l => l.Amount));
         await db.SaveChangesAsync(ct);
         return st;
+    }
+
+    // ── Project direct cost (margin reporting, §8) ──────────────────────────
+
+    public record CostBreakdown(
+        decimal Hours, decimal Expenses, decimal Allowances,
+        decimal Mileage, decimal TravelTime, decimal Total);
+
+    /// <summary>Direct cost of one project in a month — the payable side
+    /// (agreement rates) of the approved rows hanging on the project. Read-only
+    /// computation; nothing is persisted.</summary>
+    public async Task<CostBreakdown> ProjectCostAsync(
+        Guid projectId, int year, int month, CancellationToken ct)
+    {
+        var (from, to) = MonthRange(year, month);
+        var contractId = await db.Projects.Where(p => p.Id == projectId)
+            .Select(p => p.ContractId).FirstOrDefaultAsync(ct);
+        var resourceIds = await db.TimeEntries
+            .Where(e => e.ProjectId == projectId && e.Date >= from && e.Date <= to
+                && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved)
+            .Select(e => e.ResourceId).Distinct().ToListAsync(ct);
+        var agreements = await db.CompensationAgreements
+            .Where(a => resourceIds.Contains(a.ResourceId)).ToListAsync(ct);
+        var agreementAt = (Guid resourceId, Guid? cId, DateOnly d) => agreements
+            .Where(a => a.ResourceId == resourceId
+                && (a.ContractId == cId || a.ContractId == null) && a.EffectiveFrom <= d)
+            .OrderByDescending(a => a.ContractId == cId)
+            .ThenByDescending(a => a.EffectiveFrom).ThenByDescending(a => a.Version)
+            .FirstOrDefault();
+
+        decimal hours = 0m;
+        var entries = await db.TimeEntries
+            .Where(e => e.ProjectId == projectId && e.Date >= from && e.Date <= to
+                && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved
+                && Counted.Contains(e.Category))
+            .Select(e => new { e.ResourceId, e.Date, e.ActualHours }).ToListAsync(ct);
+        var dayContracts = await db.Projects
+            .ToDictionaryAsync(p => p.Id, p => p.ContractId, ct);
+        foreach (var g in entries.GroupBy(e => (e.ResourceId, e.Date)))
+        {
+            // Other projects share the day's OT/minimum pool — replay the whole
+            // approved day and take this project's line (same as the invoice).
+            var allDay = await db.TimeEntries
+                .Where(e => e.ResourceId == g.Key.ResourceId && e.Date == g.Key.Date
+                    && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved
+                    && Counted.Contains(e.Category))
+                .Select(e => new { e.ProjectId, e.ActualHours }).ToListAsync(ct);
+            var splits = allDay.GroupBy(x => x.ProjectId)
+                .Select(x => (ProjectId: x.Key, Hours: x.Sum(e => e.ActualHours))).ToList();
+            var dominant = splits.OrderByDescending(s => s.Hours).First().ProjectId;
+            var a = agreementAt(
+                g.Key.ResourceId, dayContracts.GetValueOrDefault(dominant), g.Key.Date);
+            var rates = new DayRateSet(
+                a?.HourlyRate, a?.SaturdayRate, a?.SundayRate, a?.HolidayRate,
+                a?.OvertimeAfterHours ?? 8, a?.OvertimePercent ?? 150m,
+                a?.MinPayableHoursPerDay);
+            var day = TimeMath.CalculateDay(g.Key.Date, splits, rates);
+            hours += day.Lines.FirstOrDefault(l => l.ProjectId == projectId)?.Amount ?? 0m;
+        }
+
+        var expenses = await db.Expenses
+            .Where(x => x.ProjectId == projectId && x.Date >= from && x.Date <= to
+                && x.ReimbursableToResource
+                && x.Timesheet != null && x.Timesheet.Status == TimesheetStatus.Approved)
+            .SumAsync(x => x.Amount, ct);
+        var allowances = await db.AllowanceClaims
+            .Where(x => x.ProjectId == projectId && x.Date >= from && x.Date <= to
+                && x.Timesheet != null && x.Timesheet.Status == TimesheetStatus.Approved)
+            .SumAsync(x => x.Amount, ct);
+
+        decimal mileage = 0m, travelTime = 0m;
+        var travel = await db.TravelRecords
+            .Where(x => x.ProjectId == projectId && x.Date >= from && x.Date <= to
+                && x.Timesheet != null && x.Timesheet.Status == TimesheetStatus.Approved)
+            .ToListAsync(ct);
+        foreach (var x in travel)
+        {
+            var a = agreementAt(x.ResourceId, contractId, x.Date);
+            if (a is null) continue;
+            if (x.DistanceKm is > 0 && a.MileageRate is > 0)
+                mileage += TimeMath.Round2(x.DistanceKm.Value * a.MileageRate.Value);
+            if (x.DurationHours is > 0 && a.TravelTimePercent is > 0 && a.HourlyRate is > 0)
+                travelTime += TimeMath.Round2(
+                    x.DurationHours.Value * a.HourlyRate.Value * a.TravelTimePercent.Value / 100m);
+        }
+
+        return new CostBreakdown(
+            TimeMath.Round2(hours), expenses, allowances,
+            mileage, travelTime,
+            TimeMath.Round2(hours + expenses + allowances + mileage + travelTime));
     }
 }

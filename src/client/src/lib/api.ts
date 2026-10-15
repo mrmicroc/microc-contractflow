@@ -27,6 +27,7 @@ import type {
   InvoiceSpecification,
   Location,
   LocationRequestBody,
+  MarginRow,
   MobilisationPeriod,
   MobilisationSuggestion,
   PadDashboard,
@@ -41,6 +42,8 @@ import type {
   ResourceSummary,
   StatementDetail,
   SubcontractorStatement,
+  SupplierInvoice,
+  SupplierInvoiceDetail,
   TimeEntry,
   TimeEntryRequestBody,
   Timesheet,
@@ -380,3 +383,26 @@ export const generateStatement = (resourceId: string, year: number, month: numbe
 export const statementAction = (id: string, action: 'finalize' | 'pay') =>
   apiPost<SubcontractorStatement>(`/api/statements/${id}/${action}`);
 export const deleteStatement = (id: string) => apiDelete(`/api/statements/${id}`);
+
+export const getSupplierInvoices = (q: { resourceId?: string; status?: string } = {}) => {
+  const p = new URLSearchParams();
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  if (q.status) p.set('status', q.status);
+  const s = p.toString();
+  return apiGet<SupplierInvoice[]>(`/api/supplier-invoices${s ? `?${s}` : ''}`);
+};
+export const getSupplierInvoice = (id: string) =>
+  apiGet<SupplierInvoiceDetail>(`/api/supplier-invoices/${id}`);
+export const registerSupplierInvoice = (body: {
+  resourceId: string; number: string; invoiceDate: string; dueDate?: string | null;
+  currency: string; totalAmount: number;
+  lines?: { kind: string; description: string; amount: number }[];
+}) => apiPost<SupplierInvoice>('/api/supplier-invoices', body);
+export const matchSupplierInvoice = (id: string, statementId: string) =>
+  apiPost<SupplierInvoiceDetail>(`/api/supplier-invoices/${id}/match`, { statementId });
+export const supplierInvoiceAction = (id: string, action: 'approve' | 'pay') =>
+  apiPost<SupplierInvoice>(`/api/supplier-invoices/${id}/${action}`);
+export const deleteSupplierInvoice = (id: string) => apiDelete(`/api/supplier-invoices/${id}`);
+
+export const getMargins = (year: number, month: number) =>
+  apiGet<MarginRow[]>(`/api/reports/margins?year=${year}&month=${month}`);
