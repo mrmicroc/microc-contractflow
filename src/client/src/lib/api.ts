@@ -6,6 +6,8 @@ import type {
   Booking,
   BookingRequestBody,
   CloseMonthResult,
+  DocumentAttachment,
+  DocumentOwnerType,
   CompensationAgreement,
   ContractDetail,
   ContractRequestBody,
@@ -21,6 +23,8 @@ import type {
   EstimatedQuantityRequestBody,
   Expense,
   ExpenseRequestBody,
+  InvoiceDetail,
+  InvoiceSpecification,
   Location,
   LocationRequestBody,
   MobilisationPeriod,
@@ -35,6 +39,8 @@ import type {
   ResourceLeaveRequestBody,
   ResourceRequestBody,
   ResourceSummary,
+  StatementDetail,
+  SubcontractorStatement,
   TimeEntry,
   TimeEntryRequestBody,
   Timesheet,
@@ -65,9 +71,19 @@ async function apiSend<T>(method: string, path: string, body?: unknown): Promise
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
 
-export const apiPost = <T>(path: string, body: unknown) => apiSend<T>('POST', path, body);
+export const apiPost = <T>(path: string, body?: unknown) => apiSend<T>('POST', path, body);
 export const apiPut = <T>(path: string, body: unknown) => apiSend<T>('PUT', path, body);
 export const apiDelete = (path: string) => apiSend<void>('DELETE', path);
+
+/** Multipart upload — the browser sets the Content-Type boundary itself. */
+async function apiUpload<T>(path: string, file: File, label?: string): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+  if (label) form.append('label', label);
+  const res = await fetch(path, { method: 'POST', headers: { ...devHeaders() }, body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as T;
+}
 
 /** Extracts a readable message from an API error body ({error, message}). */
 export function errorMessage(e: unknown): string {
@@ -317,3 +333,50 @@ export const submitTimesheet = (year: number, isoWeek: number, resourceId?: stri
   apiPost<TimesheetDetail>('/api/timesheets/submit', { year, isoWeek, resourceId });
 export const timesheetAction = (id: string, action: 'approve' | 'return' | 'reject', note?: string) =>
   apiPost<Timesheet>(`/api/timesheets/${id}/${action}`, { note });
+
+export const getDocuments = (ownerType: DocumentOwnerType, ownerId: string) =>
+  apiGet<DocumentAttachment[]>(`/api/documents?ownerType=${ownerType}&ownerId=${ownerId}`);
+export const uploadDocument = (ownerType: DocumentOwnerType, ownerId: string, file: File, label?: string) =>
+  apiUpload<DocumentAttachment>(`/api/documents?ownerType=${ownerType}&ownerId=${ownerId}`, file, label);
+export const deleteDocument = (id: string) => apiDelete(`/api/documents/${id}`);
+/** Download URL — the dev-user header is needed, so fetch it through
+ * documentBlob() rather than linking directly. */
+export const documentBlob = async (id: string) => {
+  const res = await fetch(`/api/documents/${id}/content`, { headers: { ...devHeaders() } });
+  if (!res.ok) throw new Error(await res.text());
+  return res.blob();
+};
+
+// ── Billing ─────────────────────────────────────────────────────────────────
+
+export const getInvoices = (q: { projectId?: string; year?: number; month?: number; status?: string } = {}) => {
+  const p = new URLSearchParams();
+  if (q.projectId) p.set('projectId', q.projectId);
+  if (q.year) p.set('year', String(q.year));
+  if (q.month) p.set('month', String(q.month));
+  if (q.status) p.set('status', q.status);
+  const s = p.toString();
+  return apiGet<InvoiceSpecification[]>(`/api/invoices${s ? `?${s}` : ''}`);
+};
+export const getInvoice = (id: string) => apiGet<InvoiceDetail>(`/api/invoices/${id}`);
+export const generateInvoice = (projectId: string, year: number, month: number) =>
+  apiPost<InvoiceSpecification>('/api/invoices/generate', { projectId, year, month });
+export const invoiceAction = (id: string, action: 'review' | 'finalize' | 'issue' | 'pay') =>
+  apiPost<InvoiceSpecification>(`/api/invoices/${id}/${action}`);
+export const deleteInvoice = (id: string) => apiDelete(`/api/invoices/${id}`);
+
+export const getStatements = (q: { resourceId?: string; year?: number; month?: number; status?: string } = {}) => {
+  const p = new URLSearchParams();
+  if (q.resourceId) p.set('resourceId', q.resourceId);
+  if (q.year) p.set('year', String(q.year));
+  if (q.month) p.set('month', String(q.month));
+  if (q.status) p.set('status', q.status);
+  const s = p.toString();
+  return apiGet<SubcontractorStatement[]>(`/api/statements${s ? `?${s}` : ''}`);
+};
+export const getStatement = (id: string) => apiGet<StatementDetail>(`/api/statements/${id}`);
+export const generateStatement = (resourceId: string, year: number, month: number) =>
+  apiPost<SubcontractorStatement>('/api/statements/generate', { resourceId, year, month });
+export const statementAction = (id: string, action: 'finalize' | 'pay') =>
+  apiPost<SubcontractorStatement>(`/api/statements/${id}/${action}`);
+export const deleteStatement = (id: string) => apiDelete(`/api/statements/${id}`);

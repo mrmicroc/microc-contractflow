@@ -1,0 +1,70 @@
+namespace ContractFlow.Api.Models.Domain;
+
+/// <summary>draft → customerReview → final → issued → paid; corrections go
+/// through revisions/credit notes, never by editing an issued spec (§3).</summary>
+public enum InvoiceStatus
+{
+    Draft,
+    CustomerReview,
+    Final,
+    Issued,
+    Paid,
+}
+
+/// <summary>
+/// What MICROC may invoice the customer for one project in one month — the
+/// billing basis built from approved timesheets at the contract terms in
+/// force on each day (ledger 4 of §1.1, strictly separate from compensation).
+/// </summary>
+public class InvoiceSpecification
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+    public int Year { get; set; }
+    public int Month { get; set; }
+
+    public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
+    public required string Currency { get; set; }
+    public decimal TotalAmount { get; set; }
+    public string? Notes { get; set; }
+
+    public List<InvoiceLine> Lines { get; set; } = [];
+
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public Guid? CreatedByUserId { get; set; }
+    public DateTime? IssuedUtc { get; set; }
+    public DateTime? PaidUtc { get; set; }
+}
+
+public enum InvoiceLineKind
+{
+    /// <summary>Billable hours for one attendance day (incl. min-adjustment).</summary>
+    Hours,
+    /// <summary>Recharged expense incl. contract mark-up.</summary>
+    Expense,
+    /// <summary>Fixed customer fee per confirmed mobilisation period.</summary>
+    Mobilisation,
+    /// <summary>Free-text/manual line (adjustments stay explicit).</summary>
+    Manual,
+}
+
+public class InvoiceLine
+{
+    public Guid Id { get; set; }
+    public Guid InvoiceSpecificationId { get; set; }
+    public InvoiceSpecification Invoice { get; set; } = null!;
+
+    public InvoiceLineKind Kind { get; set; }
+    /// <summary>The service date the line stems from (null for period-level lines).</summary>
+    public DateOnly? Date { get; set; }
+    public required string Description { get; set; }
+    /// <summary>How the amount was computed — shown to the reviewer (§5: every
+    /// calculated line carries its explanation).</summary>
+    public string? Explanation { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+    public decimal Amount { get; set; }
+    /// <summary>Source row, for drill-down (TimeEntry day-group → null; Expense → its id).</summary>
+    public Guid? SourceId { get; set; }
+}

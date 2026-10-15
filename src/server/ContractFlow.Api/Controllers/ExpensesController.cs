@@ -12,7 +12,8 @@ namespace ContractFlow.Api.Controllers;
 /// Receipt upload lands with blob storage — ReceiptRef meanwhile.</summary>
 [ApiController]
 [Route("api/expenses")]
-public class ExpensesController(AppDbContext db, ICurrentUser currentUser, PadService pad)
+public class ExpensesController(
+    AppDbContext db, ICurrentUser currentUser, PadService pad, IFileStorage storage)
     : ReportingControllerBase(db, currentUser)
 {
     [HttpGet]
@@ -102,9 +103,20 @@ public class ExpensesController(AppDbContext db, ICurrentUser currentUser, PadSe
         if (row is null) return NotFound();
         if (!await OwnsAsync(row.ResourceId, ct)) return ForbidResult();
         if (await LockedAsync(row.TimesheetId, ct)) return LockedError();
+        await RemoveOwnerDocumentsAsync(DocumentOwnerType.Expense, id, ct);
         Db.Expenses.Remove(row);
         await Db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    private async Task RemoveOwnerDocumentsAsync(
+        DocumentOwnerType ownerType, Guid ownerId, CancellationToken ct)
+    {
+        var docs = await Db.Documents
+            .Where(d => d.OwnerType == ownerType && d.OwnerId == ownerId)
+            .ToListAsync(ct);
+        foreach (var d in docs) await storage.DeleteAsync(d.StorageKey, ct);
+        Db.Documents.RemoveRange(docs);
     }
 
     private async Task<IActionResult?> ValidateAsync(

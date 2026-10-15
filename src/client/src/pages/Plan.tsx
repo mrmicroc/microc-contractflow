@@ -22,6 +22,7 @@ import { canSeeCommercial, useMe } from '@/lib/useMe';
 import {
   btnCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
 } from '@/components/forms';
+import { Attachments } from '@/components/reporting/Attachments';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -426,6 +427,10 @@ export function Plan() {
               ))}
             </div>
           )}
+          <div className="mt-3">
+            <h4 className="mb-1 text-xs font-semibold text-slate-500">{t('booking.evidence')}</h4>
+            <Attachments ownerType="booking" ownerId={selected.id} canWrite={canManage} />
+          </div>
           {editing && (
             <div className="mt-3 grid grid-cols-2 gap-2 rounded border border-slate-200 bg-slate-50 p-3 sm:grid-cols-5">
               <Field label={t('booking.date')}>

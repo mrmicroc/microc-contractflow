@@ -26,6 +26,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<AllowanceClaim> AllowanceClaims => Set<AllowanceClaim>();
     public DbSet<Timesheet> Timesheets => Set<Timesheet>();
+    public DbSet<Document> Documents => Set<Document>();
+    public DbSet<InvoiceSpecification> InvoiceSpecifications => Set<InvoiceSpecification>();
+    public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+    public DbSet<SubcontractorStatement> SubcontractorStatements => Set<SubcontractorStatement>();
+    public DbSet<StatementLine> StatementLines => Set<StatementLine>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -272,6 +277,62 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.ResourceId, x.Year, x.IsoWeek }).IsUnique();
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Document>(e =>
+        {
+            e.Property(x => x.OwnerType).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.FileName).HasMaxLength(260);
+            e.Property(x => x.ContentType).HasMaxLength(100);
+            e.Property(x => x.StorageKey).HasMaxLength(300);
+            e.Property(x => x.Label).HasMaxLength(200);
+            e.HasIndex(x => new { x.OwnerType, x.OwnerId });
+        });
+
+        builder.Entity<InvoiceSpecification>(e =>
+        {
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.TotalAmount).HasPrecision(18, 2);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.HasIndex(x => new { x.ProjectId, x.Year, x.Month }).IsUnique();
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<InvoiceLine>(e =>
+        {
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Description).HasMaxLength(300);
+            e.Property(x => x.Explanation).HasMaxLength(500);
+            e.Property(x => x.Quantity).HasPrecision(18, 2);
+            e.Property(x => x.UnitPrice).HasPrecision(18, 2);
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.HasOne(x => x.Invoice).WithMany(x => x.Lines)
+                .HasForeignKey(x => x.InvoiceSpecificationId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<SubcontractorStatement>(e =>
+        {
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.TotalAmount).HasPrecision(18, 2);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.HasIndex(x => new { x.ResourceId, x.Year, x.Month }).IsUnique();
+            e.HasOne(x => x.Resource).WithMany()
+                .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<StatementLine>(e =>
+        {
+            e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Description).HasMaxLength(300);
+            e.Property(x => x.Explanation).HasMaxLength(500);
+            e.Property(x => x.Quantity).HasPrecision(18, 2);
+            e.Property(x => x.UnitPrice).HasPrecision(18, 2);
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.HasOne(x => x.Statement).WithMany(x => x.Lines)
+                .HasForeignKey(x => x.StatementId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

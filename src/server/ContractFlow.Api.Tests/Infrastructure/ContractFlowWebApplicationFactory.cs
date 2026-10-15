@@ -37,6 +37,11 @@ public sealed class ContractFlowWebApplicationFactory : WebApplicationFactory<Pr
 
             services.AddDbContext<AppDbContext>(opts =>
                 opts.UseSqlite(_connection).EnableServiceProviderCaching(false));
+
+            // Keep uploads in memory — tests never touch the disk.
+            var storage = services.Where(d => d.ServiceType == typeof(IFileStorage)).ToList();
+            foreach (var d in storage) services.Remove(d);
+            services.AddSingleton<IFileStorage, InMemoryFileStorage>();
         });
     }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   createAllowance, createExpense, createTimeEntry, createTravelRecord,
@@ -11,6 +11,7 @@ import type {
   AllowanceClaim, Booking, Expense, TimeEntry, Timesheet, TravelRecord,
 } from '@/lib/types';
 import { btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls } from '@/components/forms';
+import { Attachments } from '@/components/reporting/Attachments';
 import { cn } from '@/lib/utils';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -415,6 +416,7 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
   };
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState<string | null>(null);
+  const [receiptsFor, setReceiptsFor] = useState<string | null>(null);
 
   const save = async () => {
     try {
@@ -455,33 +457,48 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
         </thead>
         <tbody>
           {rows.map((x) => (
-            <tr key={x.id} className="border-b border-slate-100">
-              <td className={tdCls}>{x.date}</td>
-              <td className={tdCls}>{x.projectName ?? '—'}</td>
-              <td className={tdCls}>{t(`myWork.expenseCategory.${x.category}`)}</td>
-              <td className={tdCls}>{x.amount} {x.currency}</td>
-              <td className={cn(tdCls, 'text-xs text-slate-500')}>{flags(x)}</td>
-              <td className={tdCls}>
-                {!x.timesheetId && (
+            <Fragment key={x.id}>
+              <tr className="border-b border-slate-100">
+                <td className={tdCls}>{x.date}</td>
+                <td className={tdCls}>{x.projectName ?? '—'}</td>
+                <td className={tdCls}>{t(`myWork.expenseCategory.${x.category}`)}</td>
+                <td className={tdCls}>{x.amount} {x.currency}</td>
+                <td className={cn(tdCls, 'text-xs text-slate-500')}>{flags(x)}</td>
+                <td className={tdCls}>
                   <span className="flex gap-1">
-                    <button className={btnSecondaryCls} onClick={() => {
-                      setEditId(x.id);
-                      setForm({
-                        date: x.date, projectId: x.projectId ?? '', category: x.category,
-                        amount: String(x.amount), currency: x.currency,
-                        description: x.description ?? '', receiptRef: x.receiptRef ?? '',
-                        reimbursable: x.reimbursableToResource,
-                        rechargeable: x.rechargeableToCustomer, inRate: x.includedInRate,
-                      });
-                    }}>{t('common.edit')}</button>
-                    <button className={btnDangerCls}
-                      onClick={() => void deleteExpense(x.id).then(onChanged).catch(onError)}>
-                      {t('common.delete')}
+                    <button className={btnSecondaryCls}
+                      onClick={() => setReceiptsFor(receiptsFor === x.id ? null : x.id)}>
+                      {t('documents.receipts')}
                     </button>
+                    {!x.timesheetId && (
+                      <>
+                        <button className={btnSecondaryCls} onClick={() => {
+                          setEditId(x.id);
+                          setForm({
+                            date: x.date, projectId: x.projectId ?? '', category: x.category,
+                            amount: String(x.amount), currency: x.currency,
+                            description: x.description ?? '', receiptRef: x.receiptRef ?? '',
+                            reimbursable: x.reimbursableToResource,
+                            rechargeable: x.rechargeableToCustomer, inRate: x.includedInRate,
+                          });
+                        }}>{t('common.edit')}</button>
+                        <button className={btnDangerCls}
+                          onClick={() => void deleteExpense(x.id).then(onChanged).catch(onError)}>
+                          {t('common.delete')}
+                        </button>
+                      </>
+                    )}
                   </span>
-                )}
-              </td>
-            </tr>
+                </td>
+              </tr>
+              {receiptsFor === x.id && (
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <td colSpan={6} className="px-3 py-2">
+                    <Attachments ownerType="expense" ownerId={x.id} canWrite={!x.timesheetId} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
           {rows.length === 0 && (
             <tr><td className={tdCls} colSpan={6}>{t('myWork.noRows')}</td></tr>

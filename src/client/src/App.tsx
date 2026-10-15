@@ -5,6 +5,7 @@ import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { Placeholder } from '@/components/Placeholder';
 import { Dashboard } from '@/pages/Dashboard';
 import { Approvals } from '@/pages/Approvals';
+import { Economy } from '@/pages/Economy';
 import { MonthEnd } from '@/pages/MonthEnd';
 import { MyWork } from '@/pages/MyWork';
 import { Plan } from '@/pages/Plan';
@@ -69,7 +70,8 @@ export default function App() {
             <Route path="/my" element={<MyWork />} />
             <Route path="/approvals" element={<Approvals />} />
             <Route path="/month-end" element={<MonthEnd />} />
-            {NAV_ITEMS.filter((i) => !['/', '/plan', '/projects', '/resources', '/my', '/approvals', '/month-end'].includes(i.to)).map((item) => (
+            <Route path="/economy" element={<Economy />} />
+            {NAV_ITEMS.filter((i) => !['/', '/plan', '/projects', '/resources', '/my', '/approvals', '/month-end', '/economy'].includes(i.to)).map((item) => (
               <Route key={item.to} path={item.to} element={<Placeholder titleKey={item.key} />} />
             ))}
             <Route path="*" element={<Placeholder titleKey="nav.dashboard" />} />

@@ -9,7 +9,8 @@ namespace ContractFlow.Api.Controllers;
 
 [ApiController]
 [Route("api/bookings")]
-public class BookingsController(AppDbContext db, PadService pad, ICurrentUser currentUser)
+public class BookingsController(
+    AppDbContext db, PadService pad, ICurrentUser currentUser, IFileStorage storage)
     : ControllerBase
 {
     // HashSet (not arrays): Contains() on these must bind to the instance method
@@ -337,6 +338,11 @@ public class BookingsController(AppDbContext db, PadService pad, ICurrentUser cu
                 message = "Committed bookings have PAD consequences — cancel instead of deleting.",
             });
 
+        var docs = await db.Documents
+            .Where(d => d.OwnerType == DocumentOwnerType.Booking && d.OwnerId == id)
+            .ToListAsync(ct);
+        foreach (var d in docs) await storage.DeleteAsync(d.StorageKey, ct);
+        db.Documents.RemoveRange(docs);
         db.Bookings.Remove(booking);
         await db.SaveChangesAsync(ct);
         return NoContent();

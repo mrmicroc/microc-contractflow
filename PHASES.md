@@ -27,19 +27,24 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Assignment acknowledgement
 - [x] Time reporting (waiting/standby, multi-project days)
 - [x] Travel records + mobilisation grouping (suggest/confirm/split)
-- [x] Expenses + mileage + per diem (receipt upload TBD — ImageSharp deferred)
+- [x] Expenses + mileage + per diem
+- [x] Documents: receipts on expenses + evidence on bookings (IFileStorage —
+      local disk dev, blob later; ImageSharp thumbnails deferred)
 - [x] Timesheet submission & approval (submit → approve/return/reject, locks rows)
 - [x] Day calculation engine (TimeMath: day type, OT split, min-hours,
       proportional allocation, expense markup — actual/payable/billable kept separate)
 - [ ] Authentication (Entra) — arrives here at latest
 
 ## Phase 3 — Money
-- [ ] Customer invoice specifications + register + draft review
-- [ ] Subcontractor payment statements
+- [x] Customer invoice specifications (generate from approved timesheets;
+      draft → customer review → final → issued → paid; per-line explanations)
+- [x] Subcontractor payment statements (payable hours/expenses/mileage/
+      travel time/per diem at agreement rates; draft → final → paid)
 - [ ] Supplier invoice reconciliation
 - [ ] Revenue / cost / margin reporting
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
+- [ ] Timesheet → Invoiced leg once an invoice covers the period
 
 ## Phase 4 — Go live
 - [ ] Azure deploy (SWA + App Service + SQL + Blob)

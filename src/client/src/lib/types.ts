@@ -525,3 +525,76 @@ export interface TimesheetDetail {
   expenses: Expense[];
   allowances: AllowanceClaim[];
 }
+
+// ── Documents (receipts, booking evidence) ──────────────────────────────────
+
+export type DocumentOwnerType = 'expense' | 'booking';
+
+export interface DocumentAttachment {
+  id: string;
+  ownerType: DocumentOwnerType;
+  ownerId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  label: string | null;
+  createdUtc: string;
+}
+
+// ── Billing (customer invoices + subcontractor statements) ──────────────────
+
+export type InvoiceStatus = 'draft' | 'customerReview' | 'final' | 'issued' | 'paid';
+export type StatementStatus = 'draft' | 'final' | 'paid';
+export type InvoiceLineKind = 'hours' | 'expense' | 'mobilisation' | 'manual';
+export type StatementLineKind = 'hours' | 'expense' | 'allowance' | 'mileage' | 'travelTime' | 'manual';
+
+export interface InvoiceSpecification {
+  id: string;
+  projectId: string;
+  projectName: string;
+  customerName: string;
+  year: number;
+  month: number;
+  status: InvoiceStatus;
+  currency: string;
+  totalAmount: number;
+  lineCount: number;
+  createdUtc: string;
+  issuedUtc: string | null;
+  paidUtc: string | null;
+}
+
+export interface BillingLine {
+  id: string;
+  kind: string;
+  date: string | null;
+  description: string;
+  explanation: string | null;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+}
+
+export interface InvoiceDetail {
+  invoice: InvoiceSpecification;
+  lines: BillingLine[];
+}
+
+export interface SubcontractorStatement {
+  id: string;
+  resourceId: string;
+  resourceName: string;
+  year: number;
+  month: number;
+  status: StatementStatus;
+  currency: string;
+  totalAmount: number;
+  lineCount: number;
+  createdUtc: string;
+  paidUtc: string | null;
+}
+
+export interface StatementDetail {
+  statement: SubcontractorStatement;
+  lines: BillingLine[];
+}
