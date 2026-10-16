@@ -59,6 +59,37 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
         return Ok(projects);
     }
 
+    /// <summary>Work packages of a project — also readable by a Resource who
+    /// may report on it (access-listed or holding a non-terminal booking), so
+    /// the week report can offer the package picker on unbooked rows.</summary>
+    [HttpGet("{id:guid}/work-packages")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance, AppRole.Resource)]
+    public async Task<IActionResult> ListWorkPackages(Guid id, CancellationToken ct)
+    {
+        if (!await db.Projects.AnyAsync(p => p.Id == id, ct)) return NotFound();
+        var me = await currentUser.GetAsync(ct);
+        if (me!.Role == AppRole.Resource)
+        {
+            var resourceId = await db.Resources
+                .Where(r => r.UserId == me.Id).Select(r => (Guid?)r.Id)
+                .FirstOrDefaultAsync(ct);
+            if (resourceId is null) return Forbid();
+            var gated = await db.ProjectAccesses.AnyAsync(a => a.ProjectId == id, ct);
+            var allowed = !gated
+                || await db.ProjectAccesses.AnyAsync(
+                    a => a.ProjectId == id && a.ResourceId == resourceId, ct)
+                || await db.Bookings.AnyAsync(b => b.ProjectId == id
+                    && b.ResourceId == resourceId
+                    && b.Status != BookingStatus.Cancelled
+                    && b.Status != BookingStatus.Rescheduled, ct);
+            if (!allowed) return Forbid();
+        }
+        return Ok(await db.WorkPackages.Where(w => w.ProjectId == id)
+            .OrderBy(w => w.Name)
+            .Select(w => new WorkPackageDto(w.Id, w.ProjectId, w.Name, w.Address, w.Notes))
+            .ToListAsync(ct));
+    }
+
     [HttpGet("{id:guid}")]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
     public async Task<IActionResult> Get(Guid id, CancellationToken ct)
@@ -185,6 +216,115 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             .FirstOrDefaultAsync(a => a.ProjectId == id && a.ResourceId == resourceId, ct);
         if (row is null) return NotFound();
         db.ProjectAccesses.Remove(row);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    // ── Project resource roster ─────────────────────────────────────────────
+
+    /// <summary>Resources staffed on this project — the commercial roster that
+    /// feeds rate-matrix selectors, with per-resource pending review counts.</summary>
+    [HttpGet("{id:guid}/resources")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
+    public async Task<IActionResult> ListResources(Guid id, CancellationToken ct)
+    {
+        if (!await db.Projects.AnyAsync(p => p.Id == id, ct)) return NotFound();
+        var members = await db.ProjectResources.Include(m => m.Resource)
+            .Where(m => m.ProjectId == id)
+            .OrderBy(m => m.Resource.DisplayName).ToListAsync(ct);
+        var pending = await db.WorkPackageRates
+            .Where(r => r.WorkPackage.ProjectId == id && r.NeedsReview)
+            .GroupBy(r => r.ResourceId)
+            .Select(g => new { ResourceId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var pendingOf = pending.ToDictionary(x => x.ResourceId, x => x.Count);
+        return Ok(members.Select(m => new ProjectResourceDto(
+            m.ResourceId, m.Resource.DisplayName, m.Resource.Type.ToString(),
+            m.CreatedUtc, pendingOf.GetValueOrDefault(m.ResourceId))));
+    }
+
+    /// <summary>
+    /// Adds a resource to the project roster. For every work package this
+    /// snapshots the currently effective rates (latest package-wide override
+    /// merged over the latest contract terms) into a resource-specific matrix
+    /// cell marked NeedsReview — an admin confirms each one before the
+    /// inherited values are trusted.
+    /// </summary>
+    [HttpPost("{id:guid}/resources")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
+    public async Task<IActionResult> AddResource(Guid id, ProjectResourceRequest req, CancellationToken ct)
+    {
+        var project = await db.Projects.Include(p => p.WorkPackages)
+            .FirstOrDefaultAsync(p => p.Id == id, ct);
+        if (project is null) return NotFound();
+        if (!await db.Resources.AnyAsync(r => r.Id == req.ResourceId && r.IsActive, ct))
+            return BadRequest(new { error = "Unknown or inactive resource." });
+        if (await db.ProjectResources.AnyAsync(
+                m => m.ProjectId == id && m.ResourceId == req.ResourceId, ct))
+            return Conflict(new { error = "Resource is already on this project." });
+
+        db.ProjectResources.Add(new ProjectResource
+        {
+            ProjectId = id, ResourceId = req.ResourceId,
+        });
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var terms = await db.ContractTerms
+            .Where(t => t.ContractId == project.ContractId && t.EffectiveFrom <= today)
+            .OrderByDescending(t => t.EffectiveFrom).ThenByDescending(t => t.Version)
+            .FirstOrDefaultAsync(ct)
+            ?? await db.ContractTerms.Where(t => t.ContractId == project.ContractId)
+            .OrderByDescending(t => t.EffectiveFrom).ThenByDescending(t => t.Version)
+            .FirstOrDefaultAsync(ct);
+        var generic = await db.WorkPackageRates
+            .Where(r => r.WorkPackage.ProjectId == id && r.ResourceId == null
+                && r.EffectiveFrom <= today)
+            .ToListAsync(ct);
+        var genOf = generic.GroupBy(r => r.WorkPackageId)
+            .ToDictionary(g => g.Key,
+                g => g.OrderByDescending(r => r.EffectiveFrom).ThenByDescending(r => r.CreatedUtc).First());
+
+        foreach (var wp in project.WorkPackages)
+        {
+            genOf.TryGetValue(wp.Id, out var gen);
+            db.WorkPackageRates.Add(new WorkPackageRate
+            {
+                WorkPackageId = wp.Id,
+                ResourceId = req.ResourceId,
+                NeedsReview = true,
+                EffectiveFrom = today,
+                HourlyRate = gen?.HourlyRate ?? terms?.HourlyRate,
+                SaturdayRate = gen?.SaturdayRate ?? terms?.SaturdayRate,
+                SundayRate = gen?.SundayRate ?? terms?.SundayRate,
+                HolidayRate = gen?.HolidayRate ?? terms?.HolidayRate,
+                DayRate = gen?.DayRate ?? terms?.DayRate,
+                SaturdayDayRate = gen?.SaturdayDayRate ?? terms?.SaturdayDayRate,
+                SundayDayRate = gen?.SundayDayRate ?? terms?.SundayDayRate,
+                HolidayDayRate = gen?.HolidayDayRate ?? terms?.HolidayDayRate,
+                HalfDayRate = gen?.HalfDayRate ?? terms?.HalfDayRate,
+                HalfDayMaxHours = gen?.HalfDayMaxHours ?? terms?.HalfDayMaxHours,
+                MobilisationFee = gen?.MobilisationFee ?? terms?.MobilisationFee,
+                Notes = "Inherited from contract on adding resource — needs review",
+            });
+        }
+        await db.SaveChangesAsync(ct);
+
+        var member = await db.ProjectResources.Include(m => m.Resource)
+            .FirstAsync(m => m.ProjectId == id && m.ResourceId == req.ResourceId, ct);
+        return Ok(new ProjectResourceDto(member.ResourceId, member.Resource.DisplayName,
+            member.Resource.Type.ToString(), member.CreatedUtc, project.WorkPackages.Count));
+    }
+
+    /// <summary>Removes a resource from the roster. Rate rows stay — they are
+    /// billing history — but the resource leaves the selectors.</summary>
+    [HttpDelete("{id:guid}/resources/{resourceId:guid}")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
+    public async Task<IActionResult> RemoveResource(Guid id, Guid resourceId, CancellationToken ct)
+    {
+        var row = await db.ProjectResources
+            .FirstOrDefaultAsync(m => m.ProjectId == id && m.ResourceId == resourceId, ct);
+        if (row is null) return NotFound();
+        db.ProjectResources.Remove(row);
         await db.SaveChangesAsync(ct);
         return NoContent();
     }

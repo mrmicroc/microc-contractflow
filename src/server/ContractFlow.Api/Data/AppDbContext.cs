@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<WorkPackage> WorkPackages => Set<WorkPackage>();
     public DbSet<WorkPackageRate> WorkPackageRates => Set<WorkPackageRate>();
+    public DbSet<ProjectResource> ProjectResources => Set<ProjectResource>();
     public DbSet<ProjectAccess> ProjectAccesses => Set<ProjectAccess>();
     public DbSet<EstimatedQuantity> EstimatedQuantities => Set<EstimatedQuantity>();
     public DbSet<Resource> Resources => Set<Resource>();
@@ -134,9 +135,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         builder.Entity<WorkPackageRate>(e =>
         {
-            e.HasIndex(r => new { r.WorkPackageId, r.EffectiveFrom });
+            e.HasIndex(r => new { r.WorkPackageId, r.ResourceId, r.EffectiveFrom });
             e.HasOne(r => r.WorkPackage).WithMany(l => l.Rates)
                 .HasForeignKey(r => r.WorkPackageId).OnDelete(DeleteBehavior.Cascade);
+            // Rate rows anchor billing history — never let a resource delete
+            // silently downgrade a matrix cell to a package-wide rate.
+            e.HasOne(r => r.Resource).WithMany()
+                .HasForeignKey(r => r.ResourceId).OnDelete(DeleteBehavior.Restrict);
             e.Property(r => r.HourlyRate).HasPrecision(18, 2);
             e.Property(r => r.SaturdayRate).HasPrecision(18, 2);
             e.Property(r => r.SundayRate).HasPrecision(18, 2);
@@ -149,6 +154,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(r => r.HalfDayMaxHours).HasPrecision(9, 2);
             e.Property(r => r.MobilisationFee).HasPrecision(18, 2);
             e.Property(r => r.Notes).HasMaxLength(500);
+        });
+
+        builder.Entity<ProjectResource>(e =>
+        {
+            e.HasIndex(r => new { r.ProjectId, r.ResourceId }).IsUnique();
+            e.HasOne(r => r.Project).WithMany()
+                .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(r => r.Resource).WithMany()
+                .HasForeignKey(r => r.ResourceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<ProjectAccess>(e =>
@@ -272,6 +286,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Booking).WithMany()
                 .HasForeignKey(x => x.BookingId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.WorkPackage).WithMany()
+                .HasForeignKey(x => x.WorkPackageId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne(x => x.Timesheet).WithMany(t => t.Entries)
                 .HasForeignKey(x => x.TimesheetId).OnDelete(DeleteBehavior.SetNull);
         });

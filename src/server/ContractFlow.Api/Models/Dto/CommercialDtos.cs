@@ -183,15 +183,20 @@ public class ProjectRequest
 
 public record WorkPackageDto(Guid Id, Guid ProjectId, string Name, string? Address, string? Notes);
 
-/// <summary>One versioned package-rate override row (GET /api/work-packages/{id}/rates).</summary>
+/// <summary>One versioned package-rate override row (GET /api/work-packages/{id}/rates).
+/// ResourceId set = resource×package matrix cell; null = package-wide default.</summary>
 public record WorkPackageRateDto(
     Guid Id, Guid WorkPackageId, string EffectiveFrom,
+    Guid? ResourceId, string? ResourceName, bool NeedsReview,
     decimal? HourlyRate, decimal? SaturdayRate, decimal? SundayRate, decimal? HolidayRate,
     decimal? DayRate, decimal? SaturdayDayRate, decimal? SundayDayRate, decimal? HolidayDayRate,
     decimal? HalfDayRate, decimal? HalfDayMaxHours, decimal? MobilisationFee, string? Notes);
 
 public class WorkPackageRateRequest
 {
+    /// <summary>Optional project member the rate applies to — null = the
+    /// package-wide default row.</summary>
+    public Guid? ResourceId { get; set; }
     [Required]
     public DateOnly EffectiveFrom { get; set; }
     public decimal? HourlyRate { get; set; }
@@ -212,6 +217,18 @@ public class WorkPackageRateRequest
 public record ProjectAccessDto(Guid ResourceId, string ResourceName, DateTime CreatedUtc);
 
 public class ProjectAccessRequest
+{
+    [Required]
+    public Guid ResourceId { get; set; }
+}
+
+/// <summary>A resource staffed on a project (GET /api/projects/{id}/resources).
+/// PendingReviews counts inherited rate rows not yet reviewed per package.</summary>
+public record ProjectResourceDto(
+    Guid ResourceId, string ResourceName, string ResourceType,
+    DateTime AddedUtc, int PendingReviews);
+
+public class ProjectResourceRequest
 {
     [Required]
     public Guid ResourceId { get; set; }

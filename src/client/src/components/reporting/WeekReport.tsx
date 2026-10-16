@@ -3,14 +3,14 @@ import { useTranslation } from 'react-i18next';
 import {
   createAllowance, createExpense, createTimeEntry, createTravelRecord,
   deleteAllowance, deleteExpense, deleteTimeEntry, deleteTravelRecord,
-  getAllowances, getExpenses, getMyProjects, getTimeEntries, getTimesheets,
-  getTravelRecords,
+  getAllowances, getExpenses, getMyProjects, getProjectWorkPackages,
+  getTimeEntries, getTimesheets, getTravelRecords,
   submitTimesheet, updateExpense, updateTimeEntry, updateTravelRecord,
 } from '@/lib/api';
 import { isoWeekDates, isoWeekLabel, isoWeekMonday, isoWeekOf } from '@/lib/timekeeping';
 import type {
   AllowanceClaim, Booking, EntryBilling, Expense, ProjectSummary, TimeEntry,
-  Timesheet, TravelRecord,
+  Timesheet, TravelRecord, WorkPackage,
 } from '@/lib/types';
 import { btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls } from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
@@ -190,16 +190,30 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
   SectionProps & { entries: TimeEntry[] }) {
   const { t } = useTranslation();
   const empty = {
-    date: range.from, projectId: '', category: 'work', hours: '',
+    date: range.from, projectId: '', workPackageId: '', category: 'work', hours: '',
     billing: 'contract' as EntryBilling, description: '',
   };
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState<string | null>(null);
+  // Work packages per project — the row-level package picker only appears
+  // when the picked project actually has packages to target.
+  const [pkgMap, setPkgMap] = useState<Record<string, WorkPackage[]>>({});
+  const packages = form.projectId ? (pkgMap[form.projectId] ?? []) : [];
+
+  useEffect(() => {
+    if (!form.projectId) return;
+    let live = true;
+    getProjectWorkPackages(form.projectId)
+      .then((p) => { if (live) setPkgMap((m) => ({ ...m, [form.projectId]: p })); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [form.projectId]);
 
   const save = async () => {
     try {
       const body = {
-        projectId: form.projectId, date: form.date,
+        projectId: form.projectId, workPackageId: form.workPackageId || null,
+        date: form.date,
         category: form.category as TimeEntry['category'],
         actualHours: Number(form.hours), billing: form.billing,
         description: form.description || null,
@@ -212,8 +226,8 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
   const startEdit = (e: TimeEntry) => {
     setEditId(e.id);
     setForm({
-      date: e.date, projectId: e.projectId, category: e.category,
-      hours: String(e.actualHours), billing: e.billing,
+      date: e.date, projectId: e.projectId, workPackageId: e.workPackageId ?? '',
+      category: e.category, hours: String(e.actualHours), billing: e.billing,
       description: e.description ?? '',
     });
   };
@@ -239,7 +253,12 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
           {entries.map((e) => (
             <tr key={e.id} className="border-b border-slate-100">
               <td className={tdCls}>{e.date}</td>
-              <td className={tdCls}>{e.projectName}</td>
+              <td className={tdCls}>
+                {e.projectName}
+                {e.workPackageName && (
+                  <span className="block text-xs text-slate-500">{e.workPackageName}</span>
+                )}
+              </td>
               <td className={tdCls}>{t(`myWork.category${e.category[0].toUpperCase()}${e.category.slice(1)}`)}</td>
               <td className={tdCls}>{e.actualHours}</td>
               <td className={cn(tdCls, 'text-xs',
@@ -274,8 +293,17 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
           </Field>
           <Field label={t('myWork.project')}>
             <ProjectPicker options={projectOptions} value={form.projectId}
-              onChange={(v) => setForm({ ...form, projectId: v })} label="—" />
+              onChange={(v) => setForm({ ...form, projectId: v, workPackageId: '' })} label="—" />
           </Field>
+          {packages.length > 0 && (
+            <Field label={t('booking.workPackage')} help={t('myWork.workPackageHelp')}>
+              <select className={selectCls} value={form.workPackageId}
+                onChange={(e) => setForm({ ...form, workPackageId: e.target.value })}>
+                <option value="">—</option>
+                {packages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </Field>
+          )}
           <Field label={t('myWork.category')}>
             <select className={selectCls} value={form.category}
               onChange={(e) => setForm({ ...form, category: e.target.value })}>

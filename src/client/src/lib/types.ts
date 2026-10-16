@@ -244,12 +244,16 @@ export interface WorkPackageRequestBody {
   notes: string | null;
 }
 
-// One versioned site-rate override row — set fields win over contract terms,
+// One versioned package-rate override row — set fields win over contract terms,
 // null fields inherit (GET/POST /api/work-packages/{id}/rates).
+// resourceId set = resource×package matrix cell; null = package-wide default.
 export interface WorkPackageRate {
   id: string;
   workPackageId: string;
   effectiveFrom: string;
+  resourceId: string | null;
+  resourceName: string | null;
+  needsReview: boolean;
   hourlyRate: number | null;
   saturdayRate: number | null;
   sundayRate: number | null;
@@ -265,6 +269,7 @@ export interface WorkPackageRate {
 }
 
 export interface WorkPackageRateRequestBody {
+  resourceId?: string | null;
   effectiveFrom: string;
   hourlyRate?: number | null;
   saturdayRate?: number | null;
@@ -285,6 +290,17 @@ export interface ProjectAccess {
   resourceId: string;
   resourceName: string;
   createdUtc: string;
+}
+
+// A resource staffed on a project — the commercial roster (GET
+// /api/projects/{id}/resources). pendingReviews counts inherited rate rows
+// not yet reviewed on the project's work packages.
+export interface ProjectResource {
+  resourceId: string;
+  resourceName: string;
+  resourceType: string;
+  addedUtc: string;
+  pendingReviews: number;
 }
 
 export interface EstimatedQuantity {
@@ -495,6 +511,8 @@ export interface TimeEntry {
   projectId: string;
   projectName: string;
   bookingId: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
   date: string;
   category: TimeEntryCategory;
   actualHours: number;
@@ -511,6 +529,7 @@ export interface TimeEntryRequestBody {
   resourceId?: string | null;
   projectId: string;
   bookingId?: string | null;
+  workPackageId?: string | null;
   date: string;
   category: TimeEntryCategory;
   actualHours: number;

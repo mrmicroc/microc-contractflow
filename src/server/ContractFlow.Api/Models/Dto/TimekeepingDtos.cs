@@ -5,8 +5,10 @@ namespace ContractFlow.Api.Models.Dto;
 
 public record TimeEntryDto(
     Guid Id, Guid ResourceId, string ResourceName, Guid ProjectId, string ProjectName,
-    Guid? BookingId, DateOnly Date, TimeEntryCategory Category, decimal ActualHours,
-    EntryBilling Billing, string? Description, decimal? PayableHours, decimal? BillableHours,
+    Guid? BookingId, Guid? WorkPackageId, string? WorkPackageName,
+    DateOnly Date, TimeEntryCategory Category,
+    decimal ActualHours, EntryBilling Billing, string? Description,
+    decimal? PayableHours, decimal? BillableHours,
     decimal? MinimumAdjustmentHours, Guid? TimesheetId, TimesheetStatus? TimesheetStatus);
 
 public class TimeEntryRequest
@@ -17,6 +19,9 @@ public class TimeEntryRequest
     [Required]
     public Guid ProjectId { get; set; }
     public Guid? BookingId { get; set; }
+    /// <summary>Work package on unbooked rows — must belong to the project.
+    /// Forbidden together with BookingId (booked rows inherit the package).</summary>
+    public Guid? WorkPackageId { get; set; }
     [Required]
     public DateOnly Date { get; set; }
     public TimeEntryCategory Category { get; set; } = TimeEntryCategory.Work;

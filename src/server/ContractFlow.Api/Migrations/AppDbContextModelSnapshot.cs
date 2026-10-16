@@ -1022,6 +1022,31 @@ namespace ContractFlow.Api.Migrations
                     b.ToTable("ProjectMonthCloses");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.ProjectResource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceId");
+
+                    b.HasIndex("ProjectId", "ResourceId")
+                        .IsUnique();
+
+                    b.ToTable("ProjectResources");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Resource", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1343,11 +1368,16 @@ namespace ContractFlow.Api.Migrations
                     b.Property<Guid?>("TimesheetId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("WorkPackageId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("BookingId");
 
                     b.HasIndex("TimesheetId");
+
+                    b.HasIndex("WorkPackageId");
 
                     b.HasIndex("ProjectId", "Date");
 
@@ -1537,9 +1567,15 @@ namespace ContractFlow.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<bool>("NeedsReview")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Notes")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal?>("SaturdayDayRate")
                         .HasPrecision(18, 2)
@@ -1562,7 +1598,9 @@ namespace ContractFlow.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("WorkPackageId", "EffectiveFrom");
+                    b.HasIndex("ResourceId");
+
+                    b.HasIndex("WorkPackageId", "ResourceId", "EffectiveFrom");
 
                     b.ToTable("WorkPackageRates");
                 });
@@ -1899,6 +1937,25 @@ namespace ContractFlow.Api.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.ProjectResource", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ContractFlow.Api.Models.Domain.Resource", "Resource")
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+
+                    b.Navigation("Resource");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Resource", b =>
                 {
                     b.HasOne("ContractFlow.Api.Models.Domain.AppUser", "User")
@@ -1995,6 +2052,11 @@ namespace ContractFlow.Api.Migrations
                         .HasForeignKey("TimesheetId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("ContractFlow.Api.Models.Domain.WorkPackage", "WorkPackage")
+                        .WithMany()
+                        .HasForeignKey("WorkPackageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Booking");
 
                     b.Navigation("Project");
@@ -2002,6 +2064,8 @@ namespace ContractFlow.Api.Migrations
                     b.Navigation("Resource");
 
                     b.Navigation("Timesheet");
+
+                    b.Navigation("WorkPackage");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Timesheet", b =>
@@ -2067,11 +2131,18 @@ namespace ContractFlow.Api.Migrations
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.WorkPackageRate", b =>
                 {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Resource", "Resource")
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ContractFlow.Api.Models.Domain.WorkPackage", "WorkPackage")
                         .WithMany("Rates")
                         .HasForeignKey("WorkPackageId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Resource");
 
                     b.Navigation("WorkPackage");
                 });

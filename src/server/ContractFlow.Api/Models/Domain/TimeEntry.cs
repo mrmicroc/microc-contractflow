@@ -44,6 +44,11 @@ public class TimeEntry
     /// <summary>Optional link to the booking this work was performed under.</summary>
     public Guid? BookingId { get; set; }
     public Booking? Booking { get; set; }
+    /// <summary>Work package this row ran under — only on unbooked rows;
+    /// booked rows inherit the package from their booking. Drives which
+    /// package-rate / matrix cell prices the row.</summary>
+    public Guid? WorkPackageId { get; set; }
+    public WorkPackage? WorkPackage { get; set; }
 
     public DateOnly Date { get; set; }
     public TimeEntryCategory Category { get; set; } = TimeEntryCategory.Work;

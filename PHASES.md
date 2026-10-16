@@ -68,6 +68,12 @@ Items are marked ✅ only when implemented **and** tested. See
       set fields win over contract terms, empty fields inherit; covers
       hourly/day rates + mobilisation fee; mobilisation periods can be
       bound to a work package)
+- [x] Resource × work-package rate matrix — project resource roster
+      (ProjectResource, distinct from self-reporting access) feeds the
+      selectors; adding a member snapshots the in-force resolved rate into
+      NeedsReview cells on every work package; resolution merges per field
+      resource cell > package row > contract; unbooked time rows can name
+      their work package
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
 - [ ] Timesheet → Invoiced leg once an invoice covers the period

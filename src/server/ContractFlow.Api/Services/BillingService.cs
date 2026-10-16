@@ -95,10 +95,21 @@ public class BillingService(AppDbContext db)
             .Where(r => r.WorkPackage.ProjectId == projectId).ToListAsync(ct);
         var wpNames = wpRates.Select(r => r.WorkPackage).DistinctBy(l => l.Id)
             .ToDictionary(l => l.Id, l => l.Name);
-        WorkPackageRate? OverrideAt(Guid? wpId, DateOnly d) => wpId is null ? null
-            : wpRates.Where(r => r.WorkPackageId == wpId && r.EffectiveFrom <= d)
-                .OrderByDescending(r => r.EffectiveFrom).ThenByDescending(r => r.CreatedUtc)
-                .FirstOrDefault();
+        // Resolution per (package, date): the resource-specific matrix cell
+        // wins over the package-wide row; within each scope the latest
+        // effective version applies. MergeRates then merges per field:
+        // resource cell > package row > contract terms.
+        (WorkPackageRate? Gen, WorkPackageRate? Res) OverridesAt(
+            Guid? wpId, Guid? resId, DateOnly d)
+        {
+            if (wpId is null) return (null, null);
+            WorkPackageRate? Latest(Guid? rid) => wpRates
+                .Where(r => r.WorkPackageId == wpId && r.ResourceId == rid
+                    && r.EffectiveFrom <= d)
+                .OrderByDescending(r => r.EffectiveFrom)
+                .ThenByDescending(r => r.CreatedUtc).FirstOrDefault();
+            return (Latest(null), resId is null ? null : Latest(resId));
+        }
 
         // ── PAD component: the month bills utilised PAD × the PAD rate —
         // booked days are already inside the ledger, so their hours never
@@ -148,7 +159,8 @@ public class BillingService(AppDbContext db)
                 .Where(e => e.ResourceId == g.ResourceId && e.Date == g.Date
                     && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved
                     && Counted.Contains(e.Category))
-                .Select(e => new { e.ProjectId, e.ActualHours, e.BookingId, e.Billing })
+                .Select(e => new { e.ProjectId, e.ActualHours, e.BookingId,
+                    e.WorkPackageId, e.Billing })
                 .ToListAsync(ct);
             var bookingIds = allDay.Where(x => x.BookingId != null)
                 .Select(x => x.BookingId!.Value).Distinct().ToList();
@@ -168,7 +180,7 @@ public class BillingService(AppDbContext db)
             foreach (var grp in reportable.GroupBy(x => new
             {
                 HoursMode = x.Billing == EntryBilling.Hours,
-                Wp = x.BookingId is { } bid ? wpOf.GetValueOrDefault(bid) : (Guid?)null,
+                Wp = x.BookingId is { } bid ? wpOf.GetValueOrDefault(bid) : x.WorkPackageId,
             }))
             {
                 var splits = grp.GroupBy(x => x.ProjectId)
@@ -176,8 +188,8 @@ public class BillingService(AppDbContext db)
                 if (splits.All(s => s.ProjectId != projectId)) continue;
 
                 var daily = !grp.Key.HoursMode && mode == TimeBilling.DailyRate;
-                var o = OverrideAt(grp.Key.Wp, g.Date);
-                var rates = MergeRates(t, o, daily);
+                var (genO, resO) = OverridesAt(grp.Key.Wp, g.ResourceId, g.Date);
+                var rates = MergeRates(t, genO, resO, daily);
                 var day = TimeMath.CalculateDay(g.Date, splits, rates, t?.HolidayCalendar ?? "SE");
                 var line = day.Lines.FirstOrDefault(l => l.ProjectId == projectId);
                 if (line is null || line.Amount == 0m && line.EffectiveHours == 0m) continue;
@@ -195,7 +207,8 @@ public class BillingService(AppDbContext db)
                         + (pkg is null ? "" : $" · {pkg}"),
                     Explanation = day.Explanation
                         + (grp.Key.HoursMode ? " · billed as hours" : "")
-                        + (o is null ? "" : " · package rates apply"),
+                        + (resO is not null ? " · resource rates apply"
+                            : genO is not null ? " · package rates apply" : ""),
                     Quantity = daily ? line.DayFraction : line.EffectiveHours,
                     UnitPrice = rate, Amount = line.Amount,
                 });
@@ -231,10 +244,10 @@ public class BillingService(AppDbContext db)
         foreach (var b in cancellations.OrderBy(x => x.Date))
         {
             var t = termsAt(b.Date);
-            var wpO = OverrideAt(b.WorkPackageId, b.Date);
+            var (cGen, cRes) = OverridesAt(b.WorkPackageId, b.ResourceId, b.Date);
             if (b.CancellationChargeHours is > 0m)
             {
-                var rates = MergeRates(t, wpO, t?.TimeBilling == TimeBilling.DailyRate);
+                var rates = MergeRates(t, cGen, cRes, t?.TimeBilling == TimeBilling.DailyRate);
                 var kind = TimeMath.KindOf(b.Date, t?.HolidayCalendar ?? "SE");
                 decimal qty, unit;
                 if (t?.TimeBilling == TimeBilling.DailyRate)
@@ -256,7 +269,8 @@ public class BillingService(AppDbContext db)
                     Description = string.Create(Inv, $"Cancellation {b.Date:yyyy-MM-dd}"),
                     Explanation = string.Create(Inv,
                             $"{b.CancellationChargeHours.Value:0.##} h cancellation charge")
-                        + (wpO is null ? "" : " · package rates apply"),
+                        + (cRes is not null ? " · resource rates apply"
+                            : cGen is not null ? " · package rates apply" : ""),
                     Quantity = qty, UnitPrice = unit,
                     Amount = TimeMath.Round2(qty * unit),
                 });
@@ -296,13 +310,15 @@ public class BillingService(AppDbContext db)
         }
 
         // ── One mobilisation fee per confirmed period overlapping the month —
-        // a period bound to a work package may carry a package-specific fee (WorkPackageRate).
+        // a period bound to a work package may carry a package-specific fee
+        // (resource matrix cell first, then the package row, then contract).
         var periods = await db.MobilisationPeriods
             .Where(p => p.ProjectId == projectId && p.StartDate <= to && p.EndDate >= from)
             .OrderBy(p => p.StartDate).ToListAsync(ct);
         foreach (var p in periods)
         {
-            var fee = OverrideAt(p.WorkPackageId, p.StartDate)?.MobilisationFee
+            var (mGen, mRes) = OverridesAt(p.WorkPackageId, p.ResourceId, p.StartDate);
+            var fee = mRes?.MobilisationFee ?? mGen?.MobilisationFee
                 ?? termsAt(p.StartDate)?.MobilisationFee;
             if (fee is null or <= 0) continue;
             spec.Lines.Add(new InvoiceLine
@@ -322,22 +338,24 @@ public class BillingService(AppDbContext db)
         return spec;
     }
 
-    /// <summary>Rate set for a day: contract terms merged under any package
-    /// override (set fields win, null inherits). `daily` keeps day-rate fields;
-    /// off → pure hourly pricing (hourly-billed rows and hourly contracts).</summary>
-    private static DayRateSet MergeRates(ContractTerms? t, WorkPackageRate? o, bool daily) => new(
-        o?.HourlyRate ?? t?.HourlyRate,
-        o?.SaturdayRate ?? t?.SaturdayRate,
-        o?.SundayRate ?? t?.SundayRate,
-        o?.HolidayRate ?? t?.HolidayRate,
+    /// <summary>Rate set for a day, merged per field from three levels:
+    /// resource matrix cell (set fields win) → package-wide override → contract
+    /// terms. `daily` keeps day-rate fields; off → pure hourly pricing
+    /// (hourly-billed rows and hourly contracts).</summary>
+    private static DayRateSet MergeRates(ContractTerms? t, WorkPackageRate? gen,
+        WorkPackageRate? res, bool daily) => new(
+        res?.HourlyRate ?? gen?.HourlyRate ?? t?.HourlyRate,
+        res?.SaturdayRate ?? gen?.SaturdayRate ?? t?.SaturdayRate,
+        res?.SundayRate ?? gen?.SundayRate ?? t?.SundayRate,
+        res?.HolidayRate ?? gen?.HolidayRate ?? t?.HolidayRate,
         t?.OvertimeAfterHours ?? 8, t?.OvertimePercent ?? 150m,
         t?.MinBillableHoursPerDay,
-        DayRate: daily ? o?.DayRate ?? t?.DayRate : null,
-        SaturdayDayRate: daily ? o?.SaturdayDayRate ?? t?.SaturdayDayRate : null,
-        SundayDayRate: daily ? o?.SundayDayRate ?? t?.SundayDayRate : null,
-        HolidayDayRate: daily ? o?.HolidayDayRate ?? t?.HolidayDayRate : null,
-        HalfDayRate: daily ? o?.HalfDayRate ?? t?.HalfDayRate : null,
-        HalfDayMaxHours: daily ? o?.HalfDayMaxHours ?? t?.HalfDayMaxHours : null);
+        DayRate: daily ? res?.DayRate ?? gen?.DayRate ?? t?.DayRate : null,
+        SaturdayDayRate: daily ? res?.SaturdayDayRate ?? gen?.SaturdayDayRate ?? t?.SaturdayDayRate : null,
+        SundayDayRate: daily ? res?.SundayDayRate ?? gen?.SundayDayRate ?? t?.SundayDayRate : null,
+        HolidayDayRate: daily ? res?.HolidayDayRate ?? gen?.HolidayDayRate ?? t?.HolidayDayRate : null,
+        HalfDayRate: daily ? res?.HalfDayRate ?? gen?.HalfDayRate ?? t?.HalfDayRate : null,
+        HalfDayMaxHours: daily ? res?.HalfDayMaxHours ?? gen?.HalfDayMaxHours ?? t?.HalfDayMaxHours : null);
 
     // ── Subcontractor statement ─────────────────────────────────────────────
 

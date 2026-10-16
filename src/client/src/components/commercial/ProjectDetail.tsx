@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  addProjectResource,
   createWorkPackage,
   createWorkPackageRate,
   createQuantity,
@@ -12,15 +13,18 @@ import {
   getWorkPackageRates,
   getProject,
   getProjectAccess,
+  getProjectResources,
   getResources,
   grantProjectAccess,
+  removeProjectResource,
+  reviewWorkPackageRate,
   revokeProjectAccess,
 } from '@/lib/api';
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
 import type {
   WorkPackageRate, ProjectAccess, ProjectDetail as ProjectDetailDto,
-  ResourceSummary,
+  ProjectResource, ResourceSummary,
 } from '@/lib/types';
 import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -45,7 +49,9 @@ export function ProjectDetail({
   const [ratesFor, setRatesFor] = useState<string | null>(null);
   const [access, setAccess] = useState<ProjectAccess[]>([]);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
+  const [members, setMembers] = useState<ProjectResource[]>([]);
   const [grantId, setGrantId] = useState('');
+  const [memberId, setMemberId] = useState('');
 
   const canWrite = isAdmin(me);
   const canGrant = me !== null
@@ -58,10 +64,15 @@ export function ProjectDetail({
     [projectId],
   );
   useEffect(() => { void reload(); }, [reload]);
+  const reloadMembers = useCallback(
+    () => getProjectResources(projectId).then(setMembers).catch(() => {}),
+    [projectId],
+  );
   useEffect(() => {
     getProjectAccess(projectId).then(setAccess).catch(() => {});
     getResources().then(setResources).catch(() => {});
-  }, [projectId]);
+    void reloadMembers();
+  }, [projectId, reloadMembers]);
 
   if (!project) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
 
@@ -153,7 +164,8 @@ export function ProjectDetail({
                 {ratesFor === l.id && (
                   <tr className="border-b border-slate-100 bg-slate-50">
                     <td colSpan={3} className="px-3 py-2">
-                      <WorkPackageRates workPackageId={l.id} canWrite={canWrite} />
+                      <WorkPackageRates workPackageId={l.id} projectId={project.id}
+                        members={members} canWrite={canWrite} canGrant={canGrant} />
                     </td>
                   </tr>
                 )}
@@ -241,6 +253,64 @@ export function ProjectDetail({
       </div>
 
       {canSeeCommercial(me) && (
+        <Panel title={t('roster.title')} help={t('roster.help')}>
+          <table className="mb-3 w-full border-collapse">
+            <tbody>
+              {members.map((m) => (
+                <tr key={m.resourceId} className="border-b border-slate-100">
+                  <td className={tdCls}>{m.resourceName}</td>
+                  <td className={cn(tdCls, 'text-xs text-slate-500')}>
+                    {t(`resources.type${m.resourceType[0].toUpperCase()}${m.resourceType.slice(1)}`)}
+                  </td>
+                  <td className={tdCls}>
+                    {m.pendingReviews > 0 && (
+                      <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                        {t('roster.pendingReview', { count: m.pendingReviews })}
+                      </span>
+                    )}
+                  </td>
+                  <td className={tdCls}>
+                    {canGrant && (
+                      <button className={btnDangerCls}
+                        onClick={() => void removeProjectResource(project.id, m.resourceId)
+                          .then(reloadMembers)
+                          .catch((e) => setError(errorMessage(e)))}>
+                        {t('common.delete')}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {members.length === 0 && (
+                <tr><td className={tdCls} colSpan={4}>{t('roster.empty')}</td></tr>
+              )}
+            </tbody>
+          </table>
+          {canGrant && (
+            <div className="flex items-end gap-2">
+              <Field label={t('roster.addLabel')} help={t('roster.addHelp')}>
+                <SearchSelect
+                  value={memberId}
+                  onChange={setMemberId}
+                  emptyLabel={t('roster.pick')}
+                  options={resources
+                    .filter((r) => !members.some((m) => m.resourceId === r.id))
+                    .map((r) => ({ value: r.id, label: r.displayName }))}
+                />
+              </Field>
+              <button className={btnCls} disabled={!memberId}
+                onClick={() => void addProjectResource(project.id, memberId)
+                  .then(reloadMembers)
+                  .then(() => setMemberId(''))
+                  .catch((e) => setError(errorMessage(e)))}>
+                {t('roster.add')}
+              </button>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {canSeeCommercial(me) && (
         <Panel title={t('access.title')} help={t('access.help')}>
           <p className="mb-2 text-xs text-slate-500">{t('access.note')}</p>
           <table className="mb-3 w-full border-collapse">
@@ -295,13 +365,18 @@ export function ProjectDetail({
   );
 }
 
-/** Versioned package-rate overrides for one work package — set fields win over the
- * contract terms; fields left empty inherit (per-field fallback). */
-function WorkPackageRates({ workPackageId, canWrite }: { workPackageId: string; canWrite: boolean }) {
+/** Versioned package-rate overrides for one work package — package-wide rows
+ * plus resource×package matrix cells; set fields win over contract terms,
+ * empty inherit per field (resource cell > package row > contract). */
+function WorkPackageRates({ workPackageId, members, canWrite, canGrant }: {
+  workPackageId: string; projectId: string;
+  members: ProjectResource[]; canWrite: boolean; canGrant: boolean;
+}) {
   const { t } = useTranslation();
   const [rates, setRates] = useState<WorkPackageRate[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const empty = {
+    resourceId: '',
     effectiveFrom: new Date().toISOString().slice(0, 10),
     hourlyRate: '', saturdayRate: '', sundayRate: '', holidayRate: '',
     dayRate: '', saturdayDayRate: '', sundayDayRate: '', holidayDayRate: '',
@@ -333,6 +408,7 @@ function WorkPackageRates({ workPackageId, canWrite }: { workPackageId: string; 
     setErr(null);
     try {
       await createWorkPackageRate(workPackageId, {
+        resourceId: f.resourceId || null,
         effectiveFrom: f.effectiveFrom,
         hourlyRate: numOrNull(f.hourlyRate), saturdayRate: numOrNull(f.saturdayRate),
         sundayRate: numOrNull(f.sundayRate), holidayRate: numOrNull(f.holidayRate),
@@ -356,17 +432,26 @@ function WorkPackageRates({ workPackageId, canWrite }: { workPackageId: string; 
         <table className="mb-2 w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200 text-left">
+              <th className={thCls}>{t('workPackageRates.scope')}</th>
               <th className={thCls}>{t('common.effectiveFrom')}</th>
               <th className={thCls}>{t('terms.hourlyRate')}</th>
               <th className={thCls}>{t('terms.weekendRates')}</th>
               <th className={thCls}>{t('terms.dayRate')}</th>
               <th className={thCls}>{t('terms.mobilisationFee')}</th>
-              {canWrite && <th className={thCls}></th>}
+              {(canWrite || canGrant) && <th className={thCls}></th>}
             </tr>
           </thead>
           <tbody>
             {rates.map((r) => (
               <tr key={r.id} className="border-b border-slate-100">
+                <td className={tdCls}>
+                  {r.resourceName ?? t('workPackageRates.packageDefault')}
+                  {r.needsReview && (
+                    <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                      {t('workPackageRates.needsReview')}
+                    </span>
+                  )}
+                </td>
                 <td className={tdCls}>{r.effectiveFrom}</td>
                 <td className={tdCls}>{cell(r.hourlyRate)}</td>
                 <td className={tdCls}>
@@ -379,13 +464,24 @@ function WorkPackageRates({ workPackageId, canWrite }: { workPackageId: string; 
                   {r.halfDayRate != null && ` · ½ ${r.halfDayRate}`}
                 </td>
                 <td className={tdCls}>{cell(r.mobilisationFee)}</td>
-                {canWrite && (
+                {(canWrite || canGrant) && (
                   <td className={tdCls}>
-                    <button className={btnDangerCls}
-                      onClick={() => void deleteWorkPackageRate(workPackageId, r.id)
-                        .then(reload).catch((e) => setErr(errorMessage(e)))}>
-                      {t('common.delete')}
-                    </button>
+                    <span className="flex gap-1">
+                      {canGrant && r.needsReview && (
+                        <button className={btnSecondaryCls}
+                          onClick={() => void reviewWorkPackageRate(workPackageId, r.id)
+                            .then(reload).catch((e) => setErr(errorMessage(e)))}>
+                          {t('workPackageRates.markReviewed')}
+                        </button>
+                      )}
+                      {canWrite && (
+                        <button className={btnDangerCls}
+                          onClick={() => void deleteWorkPackageRate(workPackageId, r.id)
+                            .then(reload).catch((e) => setErr(errorMessage(e)))}>
+                          {t('common.delete')}
+                        </button>
+                      )}
+                    </span>
                   </td>
                 )}
               </tr>
@@ -397,8 +493,16 @@ function WorkPackageRates({ workPackageId, canWrite }: { workPackageId: string; 
         <p className="mb-2 text-xs text-slate-400">{t('workPackageRates.empty')}</p>
       )}
       {err && <p className="mb-1 text-xs text-red-600">{err}</p>}
-      {canWrite && (
+      {canGrant && (
         <div className="flex flex-wrap items-end gap-2">
+          <Field label={t('workPackageRates.scope')} help={t('workPackageRates.hScope')}>
+            <SearchSelect
+              value={f.resourceId}
+              onChange={(v) => setF({ ...f, resourceId: v })}
+              emptyLabel={t('workPackageRates.packageDefault')}
+              options={members.map((m) => ({ value: m.resourceId, label: m.resourceName }))}
+            />
+          </Field>
           <Field label={t('common.effectiveFrom')} help={t('workPackageRates.hEffective')}>
             <input className={inputCls} type="date" value={f.effectiveFrom}
               onChange={(e) => setF({ ...f, effectiveFrom: e.target.value })} />

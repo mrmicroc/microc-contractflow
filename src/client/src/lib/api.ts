@@ -37,6 +37,7 @@ import type {
   PadTransaction,
   ProjectAccess,
   ProjectDetail,
+  ProjectResource,
   ProjectRequestBody,
   ProjectSummary,
   ResourceDetail,
@@ -166,6 +167,21 @@ export const grantProjectAccess = (projectId: string, resourceId: string) =>
 export const revokeProjectAccess = (projectId: string, resourceId: string) =>
   apiDelete(`/api/projects/${projectId}/access/${resourceId}`);
 
+// Project resource roster — the commercial staffing that feeds rate-matrix
+// selectors. Adding a member inherits contract rates per package (flagged
+// for review); removing keeps the rate history.
+// Work packages the caller may see on this project (resource-facing read —
+// gated by reporting access on the project).
+export const getProjectWorkPackages = (projectId: string) =>
+  apiGet<WorkPackage[]>(`/api/projects/${projectId}/work-packages`);
+
+export const getProjectResources = (projectId: string) =>
+  apiGet<ProjectResource[]>(`/api/projects/${projectId}/resources`);
+export const addProjectResource = (projectId: string, resourceId: string) =>
+  apiPost<ProjectResource>(`/api/projects/${projectId}/resources`, { resourceId });
+export const removeProjectResource = (projectId: string, resourceId: string) =>
+  apiDelete(`/api/projects/${projectId}/resources/${resourceId}`);
+
 export const createWorkPackage = (b: WorkPackageRequestBody) => apiPost<WorkPackage>('/api/work-packages', b);
 export const updateWorkPackage = (id: string, b: WorkPackageRequestBody) =>
   apiPut<WorkPackage>(`/api/work-packages/${id}`, b);
@@ -178,6 +194,9 @@ export const createWorkPackageRate = (workPackageId: string, b: WorkPackageRateR
   apiPost<WorkPackageRate>(`/api/work-packages/${workPackageId}/rates`, b);
 export const deleteWorkPackageRate = (workPackageId: string, rateId: string) =>
   apiDelete(`/api/work-packages/${workPackageId}/rates/${rateId}`);
+// Clears the review flag on an inherited resource cell.
+export const reviewWorkPackageRate = (workPackageId: string, rateId: string) =>
+  apiPost<WorkPackageRate>(`/api/work-packages/${workPackageId}/rates/${rateId}/review`, {});
 
 export const createQuantity = (b: EstimatedQuantityRequestBody) =>
   apiPost<EstimatedQuantity>('/api/quantities', b);

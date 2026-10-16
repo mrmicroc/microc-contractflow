@@ -8,9 +8,9 @@ public static class ReportingMapper
 {
     public static TimeEntryDto Entry(TimeEntry x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
-        x.BookingId, x.Date, x.Category, x.ActualHours, x.Billing, x.Description,
-        x.PayableHours, x.BillableHours, x.MinimumAdjustmentHours,
-        x.TimesheetId, x.Timesheet?.Status);
+        x.BookingId, x.WorkPackageId, x.WorkPackage?.Name, x.Date, x.Category, x.ActualHours,
+        x.Billing, x.Description, x.PayableHours, x.BillableHours,
+        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status);
 
     public static TravelRecordDto Travel(TravelRecord x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project?.Name,

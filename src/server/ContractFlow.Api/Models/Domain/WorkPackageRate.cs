@@ -13,6 +13,21 @@ public class WorkPackageRate
     public Guid WorkPackageId { get; set; }
     public WorkPackage WorkPackage { get; set; } = null!;
 
+    /// <summary>
+    /// Set = the (resource × work package) matrix cell — this version prices
+    /// only that resource's work on the package. Null = the package-wide
+    /// default every resource falls back to.
+    /// </summary>
+    public Guid? ResourceId { get; set; }
+    public Resource? Resource { get; set; }
+
+    /// <summary>
+    /// Set when the row was auto-inherited from the contract on adding the
+    /// resource to the project — an admin must review it against the terms
+    /// before it is trusted. Cleared explicitly via the review endpoint.
+    /// </summary>
+    public bool NeedsReview { get; set; }
+
     /// <summary>First day this override set applies to.</summary>
     public DateOnly EffectiveFrom { get; set; }
 

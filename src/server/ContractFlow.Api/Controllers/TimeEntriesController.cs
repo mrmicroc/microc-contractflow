@@ -27,7 +27,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
     {
         var scoped = await ScopedResourceIdAsync(ct);
         var query = Db.TimeEntries
-            .Include(x => x.Resource).Include(x => x.Project)
+            .Include(x => x.Resource).Include(x => x.Project).Include(x => x.WorkPackage)
             .Include(x => x.Timesheet)
             .AsQueryable();
 
@@ -49,7 +49,8 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
     public async Task<IActionResult> Get(Guid id, CancellationToken ct)
     {
         var entry = await Db.TimeEntries
-            .Include(x => x.Resource).Include(x => x.Project).Include(x => x.Timesheet)
+            .Include(x => x.Resource).Include(x => x.Project).Include(x => x.WorkPackage)
+            .Include(x => x.Timesheet)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entry is null) return NotFound();
         var scoped = await ScopedResourceIdAsync(ct);
@@ -69,6 +70,11 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
                 b => b.Id == req.BookingId.Value && b.ResourceId == resourceId
                     && b.ProjectId == req.ProjectId, ct))
             return BadRequest(new { error = "Booking does not belong to this resource on this project." });
+        if (req.BookingId.HasValue && req.WorkPackageId.HasValue)
+            return BadRequest(new { error = "workPackageId applies only to unbooked rows — booked rows inherit the package." });
+        if (req.WorkPackageId.HasValue && !await Db.WorkPackages.AnyAsync(
+                w => w.Id == req.WorkPackageId.Value && w.ProjectId == req.ProjectId, ct))
+            return BadRequest(new { error = "Work package does not belong to this project." });
         if (await pad.MonthIsClosedAsync(req.ProjectId, req.Date.Year, req.Date.Month, ct))
             return Conflict(new { error = "monthClosed", message = "The project month is closed." });
         if (await AccessDeniedAsync(req.ProjectId, resourceId!.Value, ct) is { } denied)
@@ -80,6 +86,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
             ResourceId = resourceId!.Value,
             ProjectId = req.ProjectId,
             BookingId = req.BookingId,
+            WorkPackageId = req.WorkPackageId,
             Date = req.Date,
             Category = req.Category,
             ActualHours = req.ActualHours,
@@ -106,12 +113,18 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
                 b => b.Id == req.BookingId.Value && b.ResourceId == entry.ResourceId
                     && b.ProjectId == req.ProjectId, ct))
             return BadRequest(new { error = "Booking does not belong to this resource on this project." });
+        if (req.BookingId.HasValue && req.WorkPackageId.HasValue)
+            return BadRequest(new { error = "workPackageId applies only to unbooked rows — booked rows inherit the package." });
+        if (req.WorkPackageId.HasValue && !await Db.WorkPackages.AnyAsync(
+                w => w.Id == req.WorkPackageId.Value && w.ProjectId == req.ProjectId, ct))
+            return BadRequest(new { error = "Work package does not belong to this project." });
         if (await pad.MonthIsClosedAsync(req.ProjectId, req.Date.Year, req.Date.Month, ct))
             return Conflict(new { error = "monthClosed", message = "The project month is closed." });
         if (await AccessDeniedAsync(req.ProjectId, entry.ResourceId, ct) is { } err) return err;
 
         entry.ProjectId = req.ProjectId;
         entry.BookingId = req.BookingId;
+        entry.WorkPackageId = req.WorkPackageId;
         entry.Date = req.Date;
         entry.Category = req.Category;
         entry.ActualHours = req.ActualHours;
@@ -160,12 +173,14 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
 
     private async Task<TimeEntryDto> DtoAsync(Guid id, CancellationToken ct) =>
         ToDto(await Db.TimeEntries
-            .Include(x => x.Resource).Include(x => x.Project).Include(x => x.Timesheet)
+            .Include(x => x.Resource).Include(x => x.Project).Include(x => x.WorkPackage)
+            .Include(x => x.Timesheet)
             .FirstAsync(x => x.Id == id, ct));
 
     private static TimeEntryDto ToDto(TimeEntry x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
-        x.BookingId, x.Date, x.Category, x.ActualHours, x.Billing, x.Description,
-        x.PayableHours, x.BillableHours, x.MinimumAdjustmentHours,
-        x.TimesheetId, x.Timesheet?.Status);
+        x.BookingId, x.WorkPackageId, x.WorkPackage?.Name, x.Date, x.Category,
+        x.ActualHours,
+        x.Billing, x.Description, x.PayableHours, x.BillableHours,
+        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status);
 }

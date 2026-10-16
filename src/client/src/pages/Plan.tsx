@@ -7,6 +7,7 @@ import {
   errorMessage,
   getBookings,
   getProjects,
+  getProjectWorkPackages,
   getResources,
   rescheduleBooking,
   updateBooking,
@@ -17,7 +18,7 @@ import {
 } from '@/lib/bookings';
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
-import type { Booking, ProjectSummary, ResourceSummary } from '@/lib/types';
+import type { Booking, ProjectSummary, ResourceSummary, WorkPackage } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { canSeeCommercial, useMe } from '@/lib/useMe';
 import {
@@ -58,8 +59,21 @@ export function Plan() {
     projectId: '', resourceId: '', workPackageId: '', date: '', plannedHours: '8',
     activityRef: '', workDescription: '', status: 'forecast' as 'forecast' | 'tentative' | 'requested',
   });
+  const [pkgMap, setPkgMap] = useState<Record<string, WorkPackage[]>>({});
+  const pkgs = f.projectId ? (pkgMap[f.projectId] ?? []) : [];
 
   const week = weekDates(anchor);
+
+  // Work packages of the booking form's project — the picker only appears
+  // when the project has packages to target.
+  useEffect(() => {
+    if (!f.projectId) return;
+    let live = true;
+    getProjectWorkPackages(f.projectId)
+      .then((p) => { if (live) setPkgMap((m) => ({ ...m, [f.projectId]: p })); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [f.projectId]);
 
   const reload = useCallback(() => {
     const w = weekDates(anchor);
@@ -275,11 +289,20 @@ export function Plan() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Field label={t('booking.project')}>
                 <select className={inputCls} value={f.projectId}
-                  onChange={(e) => setF({ ...f, projectId: e.target.value })}>
+                  onChange={(e) => setF({ ...f, projectId: e.target.value, workPackageId: '' })}>
                   <option value="">—</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </Field>
+              {pkgs.length > 0 && (
+                <Field label={t('booking.workPackage')}>
+                  <select className={inputCls} value={f.workPackageId}
+                    onChange={(e) => setF({ ...f, workPackageId: e.target.value })}>
+                    <option value="">—</option>
+                    {pkgs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </Field>
+              )}
               <Field label={t('booking.resource')}>
                 <select className={inputCls} value={f.resourceId}
                   onChange={(e) => setF({ ...f, resourceId: e.target.value })}>

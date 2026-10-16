@@ -78,13 +78,15 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
 
     // ── Versioned package-rate overrides ────────────────────────────────────────
 
-    /// <summary>All rate-override versions for a workPackage, newest first.</summary>
+    /// <summary>All rate-override versions for a workPackage, newest first —
+    /// both package-wide rows and resource-specific matrix cells.</summary>
     [HttpGet("{id:guid}/rates")]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
     public async Task<IActionResult> ListRates(Guid id, CancellationToken ct)
     {
         if (!await db.WorkPackages.AnyAsync(l => l.Id == id, ct)) return NotFound();
         var rates = await db.WorkPackageRates
+            .Include(r => r.Resource)
             .Where(r => r.WorkPackageId == id)
             .OrderByDescending(r => r.EffectiveFrom).ThenByDescending(r => r.CreatedUtc)
             .ToListAsync(ct);
@@ -92,15 +94,25 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
     }
 
     /// <summary>Adds a new override version — fields left null inherit the
-    /// contract terms; set fields win when bookings target this workPackage.</summary>
+    /// contract terms; set fields win when bookings target this workPackage.
+    /// ResourceId scopes the row to one project member (a matrix cell).</summary>
     [HttpPost("{id:guid}/rates")]
-    [RequireRole(AppRole.Administrator)]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
     public async Task<IActionResult> CreateRate(Guid id, WorkPackageRateRequest req, CancellationToken ct)
     {
-        if (!await db.WorkPackages.AnyAsync(l => l.Id == id, ct)) return NotFound();
+        var wp = await db.WorkPackages.FindAsync([id], ct);
+        if (wp is null) return NotFound();
+        if (req.ResourceId is { } resId && !await db.ProjectResources.AnyAsync(
+                m => m.ProjectId == wp.ProjectId && m.ResourceId == resId, ct))
+            return BadRequest(new { error = "Resource is not added to this project." });
+        if (await db.WorkPackageRates.AnyAsync(r => r.WorkPackageId == id
+                && r.ResourceId == req.ResourceId && r.EffectiveFrom == req.EffectiveFrom, ct))
+            return Conflict(new { error = "A version already exists for this scope and date." });
+
         var rate = new WorkPackageRate
         {
             WorkPackageId = id,
+            ResourceId = req.ResourceId,
             EffectiveFrom = req.EffectiveFrom,
             HourlyRate = req.HourlyRate, SaturdayRate = req.SaturdayRate,
             SundayRate = req.SundayRate, HolidayRate = req.HolidayRate,
@@ -110,6 +122,23 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
             MobilisationFee = req.MobilisationFee, Notes = req.Notes,
         };
         db.WorkPackageRates.Add(rate);
+        await db.SaveChangesAsync(ct);
+        await db.Entry(rate).Reference(r => r.Resource).LoadAsync(ct);
+        return Ok(ToRateDto(rate));
+    }
+
+    /// <summary>Clears the review flag on an inherited matrix cell — the admin
+    /// confirms the resource's rates on this package match the intent.</summary>
+    [HttpPost("{id:guid}/rates/{rateId:guid}/review")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
+    public async Task<IActionResult> MarkReviewed(Guid id, Guid rateId, CancellationToken ct)
+    {
+        var rate = await db.WorkPackageRates.Include(r => r.Resource)
+            .FirstOrDefaultAsync(r => r.Id == rateId && r.WorkPackageId == id, ct);
+        if (rate is null) return NotFound();
+        if (rate.ResourceId is null)
+            return BadRequest(new { error = "Only resource-specific rates can be reviewed." });
+        rate.NeedsReview = false;
         await db.SaveChangesAsync(ct);
         return Ok(ToRateDto(rate));
     }
@@ -129,6 +158,7 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
 
     private static WorkPackageRateDto ToRateDto(WorkPackageRate r) => new(
         r.Id, r.WorkPackageId, r.EffectiveFrom.ToString("yyyy-MM-dd"),
+        r.ResourceId, r.Resource?.DisplayName, r.NeedsReview,
         r.HourlyRate, r.SaturdayRate, r.SundayRate, r.HolidayRate,
         r.DayRate, r.SaturdayDayRate, r.SundayDayRate, r.HolidayDayRate,
         r.HalfDayRate, r.HalfDayMaxHours, r.MobilisationFee, r.Notes);
