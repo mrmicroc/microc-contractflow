@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ContractFlow.Api.Data;
+using ContractFlow.Api.Services;
 using ContractFlow.Api.Tests.Infrastructure;
 
 namespace ContractFlow.Api.Tests.Controllers;
@@ -73,6 +74,76 @@ public class BookingsTests(ContractFlowWebApplicationFactory factory)
 
         var dash = await DashboardAsync(admin, ids, 2027, 6);
         Assert.Equal(0m, dash!.CommittedOpen);
+    }
+
+    [Fact]
+    public async Task Cancel_SteppedPolicy_UtilisesPartiallyAndReleasesRest()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var ids = await NewGraphAsync("steps");
+        // Ladder: ≥2 business days notice → 6 h charge (0.75 PAD at 8 h/PAD).
+        (await admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms",
+            new
+            {
+                effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+                timeBilling = "hourly", hourlyRate = 10m, padEnabled = true, padRate = 100m,
+                cancellationSteps = new[]
+                {
+                    new { minBusinessDaysBefore = 2, chargeHours = 6m },
+                },
+            })).EnsureSuccessStatusCode();
+
+        var date = BusinessDays.AddBusinessDays(
+            DateOnly.FromDateTime(DateTime.UtcNow), 2);
+        await Scaffold.SetBaselineAsync(admin, ids, date.Year, date.Month, 5m);
+        var booking = await Scaffold.CreateBookingAsync(admin, ids,
+            date.ToString("yyyy-MM-dd"));
+        (await admin.PostAsync($"/api/bookings/{booking.Id}/confirm", null))
+            .EnsureSuccessStatusCode();
+
+        var res = await admin.PostAsync($"/api/bookings/{booking.Id}/cancel", null);
+        res.EnsureSuccessStatusCode();
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("partial", body.GetProperty("padEffect").GetString());
+
+        // 1 PAD committed → 0.75 utilised (6 h charge) + 0.25 released.
+        var dash = await DashboardAsync(admin, ids, date.Year, date.Month);
+        Assert.Equal(0.75m, dash!.Utilised);
+        Assert.Equal(0m, dash.CommittedOpen);
+        Assert.Equal(5m - 0.75m, dash.Free);
+    }
+
+    [Fact]
+    public async Task Cancel_SteppedFixedFee_OnPadContract_ReleasesAll()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var ids = await NewGraphAsync("fee");
+        (await admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms",
+            new
+            {
+                effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+                timeBilling = "hourly", hourlyRate = 10m, padEnabled = true, padRate = 100m,
+                cancellationSteps = new[]
+                {
+                    new { minBusinessDaysBefore = 2, chargeAmount = 3000m },
+                },
+            })).EnsureSuccessStatusCode();
+
+        var date = BusinessDays.AddBusinessDays(
+            DateOnly.FromDateTime(DateTime.UtcNow), 2);
+        await Scaffold.SetBaselineAsync(admin, ids, date.Year, date.Month, 5m);
+        var booking = await Scaffold.CreateBookingAsync(admin, ids,
+            date.ToString("yyyy-MM-dd"));
+        (await admin.PostAsync($"/api/bookings/{booking.Id}/confirm", null))
+            .EnsureSuccessStatusCode();
+        (await admin.PostAsync($"/api/bookings/{booking.Id}/cancel", null))
+            .EnsureSuccessStatusCode();
+
+        // Fixed fee → the whole PAD commitment releases; the fee is a
+        // booking-level charge billed as a cancellation line.
+        var dash = await DashboardAsync(admin, ids, date.Year, date.Month);
+        Assert.Equal(0m, dash!.Utilised);
+        Assert.Equal(5m, dash.Free);
     }
 
     [Fact]

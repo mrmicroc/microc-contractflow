@@ -28,9 +28,15 @@ public record DayRateSet(
     /// hours and never itself triggers overtime.</summary>
     decimal? MinHoursPerDay,
     /// <summary>Flat price per attendance day — the daily-rate component.
-    /// Set ⇒ the day bills a fixed price split across projects, with no
-    /// overtime or minimum-hours adjustment on top.</summary>
+    /// Set ⇒ the day bills a fixed price split across projects (overtime
+    /// hours still add on top — see CalculateDay); the minimum-hours
+    /// adjustment never applies to a fixed day price.</summary>
     decimal? DayRate = null,
+    /// <summary>Day rates per day type — null falls back toward
+    /// <paramref name="DayRate"/> (holiday → sunday → saturday → weekday).</summary>
+    decimal? SaturdayDayRate = null,
+    decimal? SundayDayRate = null,
+    decimal? HolidayDayRate = null,
     /// <summary>Price when the day totals ≤ <paramref name="HalfDayMaxHours"/>
     /// — null = every attended day bills the full day rate.</summary>
     decimal? HalfDayRate = null,
@@ -94,6 +100,16 @@ public static class TimeMath
         _ => r.WeekdayRate,
     };
 
+    /// <summary>Day rate for a day kind with fallback toward the weekday day
+    /// rate — the daily-rate counterpart of <see cref="RateFor"/>.</summary>
+    public static decimal? DayRateFor(DayKind kind, DayRateSet r) => kind switch
+    {
+        DayKind.Holiday => r.HolidayDayRate ?? r.SundayDayRate ?? r.SaturdayDayRate ?? r.DayRate,
+        DayKind.Sunday => r.SundayDayRate ?? r.SaturdayDayRate ?? r.DayRate,
+        DayKind.Saturday => r.SaturdayDayRate ?? r.DayRate,
+        _ => r.DayRate,
+    };
+
     /// <summary>
     /// Calculates one attendance day. <paramref name="splits"/> carries the
     /// payable-relevant hours per project for the day (break rows excluded by
@@ -119,13 +135,21 @@ public static class TimeMath
         var ordinaryTotal = Math.Min(actual, otAfter);
         var otTotal = actual - ordinaryTotal;
 
-        // Daily-rate component: one flat price per attended day, split across
-        // projects. A half-day rate applies when configured and the day stays
-        // short; no OT or minimum adjustment stacks on a fixed day price.
+        // Daily-rate component: a flat price per attended day — per day type —
+        // split across projects. Half-day applies when configured and the day
+        // stays short. Overtime hours still add on top at the hour-equivalent
+        // of the day price (dayPrice ÷ norm hours × OT%); the minimum-hours
+        // adjustment never applies to a fixed day price.
         var daily = rates.DayRate is > 0m;
+        var kindDayRate = daily ? DayRateFor(kind, rates) ?? rates.DayRate!.Value : 0m;
         var halfDay = daily && rates.HalfDayRate is > 0m
             && rates.HalfDayMaxHours is > 0m && actual <= rates.HalfDayMaxHours.Value;
-        var dayPrice = daily ? (halfDay ? rates.HalfDayRate!.Value : rates.DayRate!.Value) : 0m;
+        var dayPrice = daily ? (halfDay ? rates.HalfDayRate!.Value : kindDayRate) : 0m;
+        var normHours = otAfter > 0 ? otAfter : 8;
+        var otExtra = daily && otTotal > 0m
+            ? otTotal * (kindDayRate / normHours) * otPct / 100m
+            : 0m;
+        var dayTotal = dayPrice + otExtra;
 
         // Step 4 — minimum adjustment on top of actuals.
         var minAdj = !daily && rates.MinHoursPerDay.HasValue && actual < rates.MinHoursPerDay.Value
@@ -149,7 +173,7 @@ public static class TimeMath
 
             var ordinary = eff - ot;
             var amount = daily
-                ? (last ? dayPrice - amtAcc : Round2(dayPrice * share))
+                ? (last ? dayTotal - amtAcc : Round2(dayTotal * share))
                 : rate.HasValue
                     ? Round2(ordinary * rate.Value + ot * rate.Value * otPct / 100m)
                     : 0m;
@@ -161,6 +185,7 @@ public static class TimeMath
         var amountTotal = lines.Sum(l => l.Amount);
         var explanation = daily
             ? string.Create(Inv, $"{kind}: {(halfDay ? "half" : "full")} day @ {dayPrice:0.##}") +
+              (otTotal > 0 ? string.Create(Inv, $" + {otTotal:0.##} h OT × {otPct:0.##}%") : "") +
               string.Create(Inv, $" → {amountTotal:0.##}")
             : rate.HasValue
             ? string.Create(Inv, $"{kind}: {ordinaryTotal:0.##} h @ {rate.Value:0.##}") +

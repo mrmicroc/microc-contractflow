@@ -57,6 +57,15 @@ public class ContractTerms
     /// <summary>Flat price per attendance day — the DailyRate component
     /// (<see cref="TimeBilling"/> = DailyRate).</summary>
     public decimal? DayRate { get; set; }
+    /// <summary>Day rate on Saturdays; null falls back toward
+    /// <see cref="DayRate"/>.</summary>
+    public decimal? SaturdayDayRate { get; set; }
+    /// <summary>Day rate on Sundays; falls back toward Saturday then the
+    /// ordinary day rate.</summary>
+    public decimal? SundayDayRate { get; set; }
+    /// <summary>Day rate on public holidays; falls back toward Sunday,
+    /// Saturday, then the ordinary day rate.</summary>
+    public decimal? HolidayDayRate { get; set; }
     /// <summary>Price when the day's hours stay at or under
     /// <see cref="HalfDayMaxHours"/>; null = always the full day rate.</summary>
     public decimal? HalfDayRate { get; set; }
@@ -87,8 +96,19 @@ public class ContractTerms
     public decimal MinPadPerBookedDay { get; set; } = 1m;
     /// <summary>Max share of unused baseline that may carry over — default 20 %.</summary>
     public decimal CarryOverMaxPercent { get; set; } = 20m;
-    /// <summary>Free cancellation deadline in business days — default 4.</summary>
+    /// <summary>How many following months a carried PAD may live in — 1 (the
+    /// default) means it must be used in the next month or expire at that
+    /// month's close. Higher values let the unused remainder re-carry.</summary>
+    public int CarryOverMonths { get; set; } = 1;
+    /// <summary>Free cancellation deadline in business days — default 4.
+    /// Fallback used only when <see cref="CancellationSteps"/> is empty.</summary>
     public int CancellationDeadlineBusinessDays { get; set; } = 4;
+    /// <summary>Cancellation ladder (JSON): cancelling at least
+    /// MinBusinessDaysBefore business days ahead charges ChargeHours
+    /// (converted to PAD utilisation on PAD contracts, billed as hours
+    /// otherwise) or a fixed ChargeAmount. Below the lowest rung the full
+    /// booking is charged. Empty → the binary deadline rule above.</summary>
+    public List<CancellationStep> CancellationSteps { get; set; } = [];
     /// <summary>Holiday calendar key ("SE" default) driving day-type resolution.</summary>
     public required string HolidayCalendar { get; set; }
 
@@ -98,4 +118,24 @@ public class ContractTerms
     /// <summary>Rate indexation rule description, e.g. annual index uplift.</summary>
     public string? Indexation { get; set; }
     public string? Notes { get; set; }
+}
+
+/// <summary>
+/// One rung of the cancellation ladder (design §4.3 refined): cancelling with
+/// at least <see cref="MinBusinessDaysBefore"/> Swedish business days of
+/// notice costs <see cref="ChargeHours"/> hours (or a fixed
+/// <see cref="ChargeAmount"/>). A rung with no charge = free cancellation.
+/// </summary>
+public class CancellationStep
+{
+    /// <summary>Cancelling at least this many business days ahead applies
+    /// this rung's charge.</summary>
+    public int MinBusinessDaysBefore { get; set; }
+    /// <summary>Hours debited on cancellation — converted to PAD utilisation
+    /// (÷ hours-per-PAD) on PAD contracts, billed as hours otherwise. Null =
+    /// no hour charge.</summary>
+    public decimal? ChargeHours { get; set; }
+    /// <summary>Fixed cancellation fee in the contract currency. Null = no
+    /// fixed fee.</summary>
+    public decimal? ChargeAmount { get; set; }
 }

@@ -70,8 +70,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(t => t.TimeBilling).HasConversion<string>().HasMaxLength(20);
             e.Property(t => t.PadRate).HasPrecision(18, 2);
             e.Property(t => t.DayRate).HasPrecision(18, 2);
+            e.Property(t => t.SaturdayDayRate).HasPrecision(18, 2);
+            e.Property(t => t.SundayDayRate).HasPrecision(18, 2);
+            e.Property(t => t.HolidayDayRate).HasPrecision(18, 2);
             e.Property(t => t.HalfDayRate).HasPrecision(18, 2);
             e.Property(t => t.HalfDayMaxHours).HasPrecision(9, 2);
+            // The cancellation ladder travels inside the version row as JSON —
+            // versioning then covers policy changes for free.
+            e.OwnsMany(t => t.CancellationSteps, s =>
+            {
+                s.ToJson();
+                s.Property(x => x.ChargeHours).HasPrecision(9, 2);
+                s.Property(x => x.ChargeAmount).HasPrecision(18, 2);
+            });
             e.Property(t => t.FixedPriceAmount).HasPrecision(18, 2);
             e.Property(t => t.HourlyRate).HasPrecision(18, 2);
             e.Property(t => t.SaturdayRate).HasPrecision(18, 2);
@@ -153,6 +164,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(b => b.Status).HasConversion<string>().HasMaxLength(20);
             e.Property(b => b.PlannedHours).HasPrecision(9, 4);
+            e.Property(b => b.CancellationChargeHours).HasPrecision(9, 4);
+            e.Property(b => b.CancellationChargeAmount).HasPrecision(18, 2);
             e.Property(b => b.ActivityRef).HasMaxLength(100);
             e.Property(b => b.EvidenceRef).HasMaxLength(200);
             e.Property(b => b.CustomerContact).HasMaxLength(200);

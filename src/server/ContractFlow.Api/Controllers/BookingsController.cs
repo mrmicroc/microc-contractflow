@@ -368,7 +368,13 @@ public class BookingsController(
     private IActionResult ForbidResult() =>
         new ObjectResult(new { error = "Forbidden." }) { StatusCode = 403 };
 
-    /// <summary>Release (timely) or Utilise (late) the open commitment per §4.3.</summary>
+    /// <summary>
+    /// Applies the versioned cancellation policy (§4.3): the steps ladder —
+    /// or the legacy binary deadline when no steps — resolves the charge.
+    /// PAD contracts materialise hour charges as utilised PAD (remainder
+    /// released); non-PAD contracts record the charge on the booking for the
+    /// month's invoice line.
+    /// </summary>
     private async Task<(string effect, decimal amount)> CancelPadEffectAsync(
         Booking booking, Guid? userId, CancellationToken ct)
     {
@@ -376,17 +382,40 @@ public class BookingsController(
             return ("none", 0m);
 
         var terms = await pad.TermsForAsync(booking.ProjectId, booking.Date, ct);
-        var deadlineDays = terms?.CancellationDeadlineBusinessDays ?? 4;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var timely = BusinessDays.IsTimelyCancellation(today, booking.Date, deadlineDays);
+        var daysBefore = BusinessDays.CountBusinessDays(today, booking.Date);
+        var charge = CancellationMath.Resolve(terms?.CancellationSteps, daysBefore,
+            booking.PlannedHours, terms?.CancellationDeadlineBusinessDays ?? 4);
 
-        var amount = await pad.SettleCommitmentAsync(
-            booking,
-            timely ? PadTransactionType.Release : PadTransactionType.Utilise,
-            userId,
-            timely ? "Timely cancellation" : "Late cancellation — chargeable",
-            ct);
-        return (timely ? "released" : "utilised", amount);
+        if (terms?.PadEnabled == true)
+        {
+            var open = await pad.OpenCommitmentAsync(booking.Id, ct);
+            if (open <= 0) return ("none", 0m);
+
+            if (charge.Amount is > 0m)
+            {
+                // Fixed fee — PAD released, the fee rides the booking into billing.
+                booking.CancellationChargeAmount = charge.Amount;
+                var releasedAll = await pad.SettleCommitmentAsync(booking,
+                    PadTransactionType.Release, userId,
+                    "Cancellation — fixed fee applies", ct);
+                return ("released", releasedAll);
+            }
+
+            var padHours = terms.PadHoursPerDay > 0 ? terms.PadHoursPerDay : 8m;
+            var utilisePad = charge.IsFree
+                ? 0m
+                : Math.Min(open, (charge.Hours ?? 0m) / padHours);
+            var (used, released) = await pad.SettlePartialAsync(booking, utilisePad, userId, ct);
+            return (used > 0m && released > 0m ? "partial"
+                : used > 0m ? "utilised" : "released", used);
+        }
+
+        // No PAD component — the charge rides the booking into the month's invoice.
+        booking.CancellationChargeHours = charge.Hours;
+        booking.CancellationChargeAmount = charge.Amount;
+        return (charge.IsFree ? "released" : "charged",
+            charge.Amount ?? charge.Hours ?? 0m);
     }
 
     private async Task<BookingDto> SingleDtoAsync(Guid id, CancellationToken ct) =>
@@ -445,7 +474,9 @@ public class BookingsController(
                 b.ResourceId, b.Resource.DisplayName, b.LocationId, b.Location?.Name,
                 b.Date, b.PlannedHours, b.ActivityRef, b.WorkDescription,
                 b.CustomerContact, b.EvidenceRef, b.Status, expectedPad,
-                b.AcknowledgedUtc, b.ReplacesBookingId, b.RescheduledToBookingId,
+                b.AcknowledgedUtc,
+                b.CancellationChargeHours, b.CancellationChargeAmount,
+                b.ReplacesBookingId, b.RescheduledToBookingId,
                 warnings.ToArray());
         }).ToList();
     }

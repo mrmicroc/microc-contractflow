@@ -80,4 +80,16 @@ public static class BusinessDays
     /// </summary>
     public static bool IsTimelyCancellation(DateOnly on, DateOnly start, int deadlineDays)
         => start >= AddBusinessDays(on, deadlineDays);
+
+    /// <summary>Business days of notice when cancelling `on` for a booking on
+    /// `start`: business days strictly after `on` up to and including `start`
+    /// (same-day or past cancellations = 0).</summary>
+    public static int CountBusinessDays(DateOnly on, DateOnly start)
+    {
+        if (start <= on) return 0;
+        var n = 0;
+        for (var d = on.AddDays(1); d <= start; d = d.AddDays(1))
+            if (IsBusinessDay(d)) n++;
+        return n;
+    }
 }

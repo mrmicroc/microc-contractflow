@@ -69,6 +69,45 @@ public class PadTests(ContractFlowWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task CloseMonth_CarryOver_ExpiresAfterConfiguredWindow()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var ids = await Scaffold.CommercialGraphAsync(admin, "carrywin");
+        // Two-month carry window — carried PAD survives one re-carry, then dies.
+        await admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "hourly", padEnabled = true, padRate = 100m,
+            carryOverMaxPercent = 50m, carryOverMonths = 2,
+        });
+
+        // Jan 2028: baseline 10, use 8 → 2 carries into Feb (cap allows 5).
+        await Scaffold.SetBaselineAsync(admin, ids, 2028, 1, 10m);
+        foreach (var day in new[] { "03", "04", "05", "06", "07", "10", "11", "12" })
+        {
+            var b = await Scaffold.CreateBookingAsync(admin, ids, $"2028-01-{day}");
+            await admin.PostAsync($"/api/bookings/{b.Id}/confirm", null);
+            await admin.PostAsync($"/api/bookings/{b.Id}/complete", null);
+        }
+        await admin.PostAsync($"/api/projects/{ids.ProjectId}/pad/2028/1/close", null);
+        Assert.Equal(2m, (await DashAsync(admin, ids, 2028, 2))!.CarryOverIn);
+
+        // Feb: nothing used → the whole carry re-carries (origin age 1 < 2).
+        await admin.PostAsync($"/api/projects/{ids.ProjectId}/pad/2028/2/close", null);
+        var feb = await DashAsync(admin, ids, 2028, 2);
+        Assert.Equal(2m, feb!.CarryOverOut);
+        Assert.Equal(0m, feb.Expired);
+        Assert.Equal(2m, (await DashAsync(admin, ids, 2028, 3))!.CarryOverIn);
+
+        // Mar: origin age hits the 2-month window → the carry finally expires.
+        await admin.PostAsync($"/api/projects/{ids.ProjectId}/pad/2028/3/close", null);
+        var mar = await DashAsync(admin, ids, 2028, 3);
+        Assert.Equal(2m, mar!.Expired);
+        Assert.Equal(0m, mar.CarryOverOut);
+        Assert.Equal(0m, (await DashAsync(admin, ids, 2028, 4))!.CarryOverIn);
+    }
+
+    [Fact]
     public async Task CloseMonth_Twice_ReturnsConflict()
     {
         var admin = factory.CreateUserClient(DevSeed.AdminId);

@@ -9,6 +9,9 @@ public record BookingDto(
     DateOnly Date, decimal PlannedHours, string? ActivityRef, string? WorkDescription,
     string? CustomerContact, string? EvidenceRef, BookingStatus Status,
     decimal? ExpectedPad, DateTime? AcknowledgedUtc,
+    /// <summary>Resolved cancellation charge (hours / fixed amount) — set when
+    /// a non-PAD booking is cancelled under a charging step.</summary>
+    decimal? CancellationChargeHours, decimal? CancellationChargeAmount,
     Guid? ReplacesBookingId, Guid? RescheduledToBookingId, string[] Warnings);
 
 public class BookingRequest

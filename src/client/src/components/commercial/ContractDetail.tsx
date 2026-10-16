@@ -5,6 +5,13 @@ import {
 } from '@/lib/api';
 import { numOrNull, resolveVersion } from '@/lib/versioned';
 import type { ContractDetail as ContractDetailDto, ContractTerms, TimeBilling } from '@/lib/types';
+
+/** Cancellation-ladder row in the form — strings while editing. */
+type StepRow = {
+  minBusinessDaysBefore: string;
+  chargeHours: string;
+  chargeAmount: string;
+};
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -33,6 +40,9 @@ type TermsForm = {
   expenseMarkupPercent: string;
   minBillableHoursPerDay: string;
   dayRate: string;
+  saturdayDayRate: string;
+  sundayDayRate: string;
+  holidayDayRate: string;
   halfDayRate: string;
   halfDayMaxHours: string;
   fixedPriceAmount: string;
@@ -41,7 +51,9 @@ type TermsForm = {
   padHoursPerDay: string;
   minPadPerBookedDay: string;
   carryOverMaxPercent: string;
+  carryOverMonths: string;
   cancellationDeadlineBusinessDays: string;
+  cancellationSteps: StepRow[];
   holidayCalendar: string;
   travelExpensePolicy: string;
   indexation: string;
@@ -54,10 +66,12 @@ const emptyTerms: TermsForm = {
   padRate: '', hourlyRate: '', saturdayRate: '', sundayRate: '', holidayRate: '',
   overtimeAfterHours: '8', overtimePercent: '150',
   mobilisationFee: '', expenseMarkupPercent: '0', minBillableHoursPerDay: '',
-  dayRate: '', halfDayRate: '', halfDayMaxHours: '',
+  dayRate: '', saturdayDayRate: '', sundayDayRate: '', holidayDayRate: '',
+  halfDayRate: '', halfDayMaxHours: '',
   fixedPriceAmount: '', fixedPriceDate: '', fixedPriceNote: '',
   padHoursPerDay: '8', minPadPerBookedDay: '1', carryOverMaxPercent: '20',
-  cancellationDeadlineBusinessDays: '4', holidayCalendar: 'SE',
+  carryOverMonths: '1', cancellationDeadlineBusinessDays: '4',
+  cancellationSteps: [], holidayCalendar: 'SE',
   travelExpensePolicy: '', indexation: '', notes: '',
 };
 
@@ -75,14 +89,24 @@ const fromTerms = (v: ContractTerms): TermsForm => ({
   mobilisationFee: v.mobilisationFee?.toString() ?? '',
   expenseMarkupPercent: v.expenseMarkupPercent.toString(),
   minBillableHoursPerDay: v.minBillableHoursPerDay?.toString() ?? '',
-  dayRate: v.dayRate?.toString() ?? '', halfDayRate: v.halfDayRate?.toString() ?? '',
+  dayRate: v.dayRate?.toString() ?? '',
+  saturdayDayRate: v.saturdayDayRate?.toString() ?? '',
+  sundayDayRate: v.sundayDayRate?.toString() ?? '',
+  holidayDayRate: v.holidayDayRate?.toString() ?? '',
+  halfDayRate: v.halfDayRate?.toString() ?? '',
   halfDayMaxHours: v.halfDayMaxHours?.toString() ?? '',
   fixedPriceAmount: v.fixedPriceAmount?.toString() ?? '',
   fixedPriceDate: v.fixedPriceDate ?? '', fixedPriceNote: v.fixedPriceNote ?? '',
   padHoursPerDay: v.padHoursPerDay.toString(),
   minPadPerBookedDay: v.minPadPerBookedDay.toString(),
   carryOverMaxPercent: v.carryOverMaxPercent.toString(),
+  carryOverMonths: v.carryOverMonths.toString(),
   cancellationDeadlineBusinessDays: v.cancellationDeadlineBusinessDays.toString(),
+  cancellationSteps: v.cancellationSteps.map((s) => ({
+    minBusinessDaysBefore: s.minBusinessDaysBefore.toString(),
+    chargeHours: s.chargeHours?.toString() ?? '',
+    chargeAmount: s.chargeAmount?.toString() ?? '',
+  })),
   holidayCalendar: v.holidayCalendar,
   travelExpensePolicy: v.travelExpensePolicy ?? '', indexation: v.indexation ?? '',
   notes: v.notes ?? '',
@@ -141,6 +165,9 @@ export function ContractDetail({
       expenseMarkupPercent: Number(tf.expenseMarkupPercent) || 0,
       minBillableHoursPerDay: numOrNull(tf.minBillableHoursPerDay),
       dayRate: numOrNull(tf.dayRate),
+      saturdayDayRate: numOrNull(tf.saturdayDayRate),
+      sundayDayRate: numOrNull(tf.sundayDayRate),
+      holidayDayRate: numOrNull(tf.holidayDayRate),
       halfDayRate: numOrNull(tf.halfDayRate),
       halfDayMaxHours: numOrNull(tf.halfDayMaxHours),
       fixedPriceAmount: numOrNull(tf.fixedPriceAmount),
@@ -149,7 +176,15 @@ export function ContractDetail({
       padHoursPerDay: Number(tf.padHoursPerDay) || 8,
       minPadPerBookedDay: Number(tf.minPadPerBookedDay) || 1,
       carryOverMaxPercent: Number(tf.carryOverMaxPercent) || 20,
+      carryOverMonths: Math.max(1, Number(tf.carryOverMonths) || 1),
       cancellationDeadlineBusinessDays: Number(tf.cancellationDeadlineBusinessDays) || 4,
+      cancellationSteps: tf.cancellationSteps
+        .map((s) => ({
+          minBusinessDaysBefore: Number(s.minBusinessDaysBefore),
+          chargeHours: numOrNull(s.chargeHours),
+          chargeAmount: numOrNull(s.chargeAmount),
+        }))
+        .filter((s) => s.minBusinessDaysBefore > 0),
       holidayCalendar: tf.holidayCalendar,
       travelExpensePolicy: tf.travelExpensePolicy || null,
       indexation: tf.indexation || null,
@@ -180,6 +215,26 @@ export function ContractDetail({
   };
 
   const fmt = (n: number | null) => (n === null ? '—' : String(n));
+
+  // Overtime applies to both hourly and daily-rate billing — shared pair.
+  const otFields = (
+    <>
+      <Field label={t('terms.overtimeAfterHours')} help={t('terms.hOvertimeAfterHours')}>
+        <input className={inputCls} inputMode="numeric" value={tf.overtimeAfterHours}
+          onChange={(e) => setTf({ ...tf, overtimeAfterHours: e.target.value })} />
+      </Field>
+      <Field label={t('terms.overtimePercent')} help={t('terms.hOvertimePercent')}>
+        <input className={inputCls} inputMode="decimal" value={tf.overtimePercent}
+          onChange={(e) => setTf({ ...tf, overtimePercent: e.target.value })} />
+      </Field>
+    </>
+  );
+
+  const setStep = (i: number, patch: Partial<StepRow>) =>
+    setTf({
+      ...tf,
+      cancellationSteps: tf.cancellationSteps.map((s, j) => (j === i ? { ...s, ...patch } : s)),
+    });
 
   /** Per-version billing-component summary for the versions table, e.g.
    * "Timpris 1000 · PAD 800". */
@@ -281,14 +336,7 @@ export function ContractDetail({
                     <input className={inputCls} inputMode="decimal" value={tf.holidayRate}
                       onChange={(e) => setTf({ ...tf, holidayRate: e.target.value })} />
                   </Field>
-                  <Field label={t('terms.overtimeAfterHours')} help={t('terms.hOvertimeAfterHours')}>
-                    <input className={inputCls} inputMode="numeric" value={tf.overtimeAfterHours}
-                      onChange={(e) => setTf({ ...tf, overtimeAfterHours: e.target.value })} />
-                  </Field>
-                  <Field label={t('terms.overtimePercent')} help={t('terms.hOvertimePercent')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.overtimePercent}
-                      onChange={(e) => setTf({ ...tf, overtimePercent: e.target.value })} />
-                  </Field>
+                  {otFields}
                   <Field label={t('terms.minBillableHoursPerDay')} help={t('terms.hMinBillable')}>
                     <input className={inputCls} inputMode="decimal" value={tf.minBillableHoursPerDay}
                       onChange={(e) => setTf({ ...tf, minBillableHoursPerDay: e.target.value })} />
@@ -305,6 +353,18 @@ export function ContractDetail({
                     <input className={inputCls} inputMode="decimal" value={tf.dayRate}
                       onChange={(e) => setTf({ ...tf, dayRate: e.target.value })} />
                   </Field>
+                  <Field label={t('terms.saturdayDayRate')} help={t('terms.hSaturdayDayRate')}>
+                    <input className={inputCls} inputMode="decimal" value={tf.saturdayDayRate}
+                      onChange={(e) => setTf({ ...tf, saturdayDayRate: e.target.value })} />
+                  </Field>
+                  <Field label={t('terms.sundayDayRate')} help={t('terms.hSundayDayRate')}>
+                    <input className={inputCls} inputMode="decimal" value={tf.sundayDayRate}
+                      onChange={(e) => setTf({ ...tf, sundayDayRate: e.target.value })} />
+                  </Field>
+                  <Field label={t('terms.holidayDayRate')} help={t('terms.hHolidayDayRate')}>
+                    <input className={inputCls} inputMode="decimal" value={tf.holidayDayRate}
+                      onChange={(e) => setTf({ ...tf, holidayDayRate: e.target.value })} />
+                  </Field>
                   <Field label={t('terms.halfDayRate')} help={t('terms.hHalfDayRate')}>
                     <input className={inputCls} inputMode="decimal" value={tf.halfDayRate}
                       onChange={(e) => setTf({ ...tf, halfDayRate: e.target.value })} />
@@ -313,6 +373,7 @@ export function ContractDetail({
                     <input className={inputCls} inputMode="decimal" value={tf.halfDayMaxHours}
                       onChange={(e) => setTf({ ...tf, halfDayMaxHours: e.target.value })} />
                   </Field>
+                  {otFields}
                 </div>
               </>
             )}
@@ -336,6 +397,10 @@ export function ContractDetail({
                   <Field label={t('terms.carryOverMaxPercent')} help={t('terms.hCarryOver')}>
                     <input className={inputCls} inputMode="decimal" value={tf.carryOverMaxPercent}
                       onChange={(e) => setTf({ ...tf, carryOverMaxPercent: e.target.value })} />
+                  </Field>
+                  <Field label={t('terms.carryOverMonths')} help={t('terms.hCarryOverMonths')}>
+                    <input className={inputCls} inputMode="numeric" value={tf.carryOverMonths}
+                      onChange={(e) => setTf({ ...tf, carryOverMonths: e.target.value })} />
                   </Field>
                 </div>
               </>
@@ -383,6 +448,39 @@ export function ContractDetail({
                 <input className={inputCls} value={tf.holidayCalendar}
                   onChange={(e) => setTf({ ...tf, holidayCalendar: e.target.value })} />
               </Field>
+            </div>
+            <div className="mt-2">
+              <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                {t('terms.cancellationSteps')}
+                <span className="cursor-help rounded-full border border-slate-300 px-1 text-[10px] text-slate-500"
+                  title={t('terms.hCancelSteps')}>?</span>
+              </p>
+              {tf.cancellationSteps.map((s, i) => (
+                <div key={i} className="mb-1 flex items-center gap-2">
+                  <input className={cn(inputCls, 'w-32')} inputMode="numeric"
+                    placeholder={t('terms.stepDaysBefore')}
+                    value={s.minBusinessDaysBefore}
+                    onChange={(e) => setStep(i, { minBusinessDaysBefore: e.target.value })} />
+                  <input className={cn(inputCls, 'w-32')} inputMode="decimal"
+                    placeholder={t('terms.stepChargeHours')} value={s.chargeHours}
+                    onChange={(e) => setStep(i, { chargeHours: e.target.value })} />
+                  <input className={cn(inputCls, 'w-32')} inputMode="decimal"
+                    placeholder={t('terms.stepChargeAmount')} value={s.chargeAmount}
+                    onChange={(e) => setStep(i, { chargeAmount: e.target.value })} />
+                  <button className={btnDangerCls}
+                    onClick={() => setTf({ ...tf, cancellationSteps: tf.cancellationSteps.filter((_, j) => j !== i) })}>
+                    {t('common.delete')}
+                  </button>
+                </div>
+              ))}
+              <button className={btnSecondaryCls}
+                onClick={() => setTf({
+                  ...tf,
+                  cancellationSteps: [...tf.cancellationSteps,
+                    { minBusinessDaysBefore: '', chargeHours: '', chargeAmount: '' }],
+                })}>
+                {t('terms.addStep')}
+              </button>
             </div>
 
             <h4 className={grpCls}>{t('terms.groupOther')}</h4>
@@ -449,7 +547,11 @@ export function ContractDetail({
                   </span>
                 </td>
                 <td className={tdCls}>{fmt(v.mobilisationFee)}</td>
-                <td className={tdCls}>{v.cancellationDeadlineBusinessDays}</td>
+                <td className={tdCls}>
+                  {v.cancellationSteps.length > 0
+                    ? t('terms.stepsConfigured', { count: v.cancellationSteps.length })
+                    : v.cancellationDeadlineBusinessDays}
+                </td>
                 {isAdmin(me) && (
                   <td className={tdCls}>
                     <button className={btnDangerCls} onClick={() => void removeTerms(v.id)}>

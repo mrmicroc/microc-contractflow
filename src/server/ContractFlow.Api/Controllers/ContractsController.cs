@@ -214,12 +214,25 @@ public class ContractsController(AppDbContext db) : ControllerBase
             PadEnabled = req.PadEnabled,
             FixedPriceEnabled = req.FixedPriceEnabled,
             DayRate = req.DayRate,
+            SaturdayDayRate = req.SaturdayDayRate,
+            SundayDayRate = req.SundayDayRate,
+            HolidayDayRate = req.HolidayDayRate,
             HalfDayRate = req.HalfDayRate,
             HalfDayMaxHours = req.HalfDayMaxHours,
             FixedPriceAmount = req.FixedPriceAmount,
             FixedPriceDate = req.FixedPriceDate,
             FixedPriceNote = req.FixedPriceNote,
             PadHoursPerDay = req.PadHoursPerDay,
+            CarryOverMonths = req.CarryOverMonths,
+            CancellationSteps = req.CancellationSteps
+                .Select(s => new CancellationStep
+                {
+                    MinBusinessDaysBefore = s.MinBusinessDaysBefore,
+                    ChargeHours = s.ChargeHours,
+                    ChargeAmount = s.ChargeAmount,
+                })
+                .OrderByDescending(s => s.MinBusinessDaysBefore)
+                .ToList(),
             MinPadPerBookedDay = req.MinPadPerBookedDay,
             CarryOverMaxPercent = req.CarryOverMaxPercent,
             CancellationDeadlineBusinessDays = req.CancellationDeadlineBusinessDays,
@@ -272,10 +285,17 @@ public class ContractsController(AppDbContext db) : ControllerBase
         t.Currency, t.TimeBilling, t.PadEnabled, t.FixedPriceEnabled,
         t.PadRate, t.HourlyRate, t.SaturdayRate, t.SundayRate,
         t.HolidayRate, t.OvertimeAfterHours, t.OvertimePercent, t.MobilisationFee,
-        t.ExpenseMarkupPercent, t.DayRate, t.HalfDayRate, t.HalfDayMaxHours,
+        t.ExpenseMarkupPercent,
+        t.DayRate, t.SaturdayDayRate, t.SundayDayRate, t.HolidayDayRate,
+        t.HalfDayRate, t.HalfDayMaxHours,
         t.FixedPriceAmount, t.FixedPriceDate, t.FixedPriceNote,
         t.PadHoursPerDay, t.MinPadPerBookedDay,
-        t.CarryOverMaxPercent, t.CancellationDeadlineBusinessDays,
+        t.CarryOverMaxPercent, t.CarryOverMonths,
+        t.CancellationDeadlineBusinessDays,
+        t.CancellationSteps
+            .Select(s => new CancellationStepDto(
+                s.MinBusinessDaysBefore, s.ChargeHours, s.ChargeAmount))
+            .ToList(),
         t.HolidayCalendar, t.MinBillableHoursPerDay,
         t.TravelExpensePolicy, t.Indexation, t.Notes);
 }

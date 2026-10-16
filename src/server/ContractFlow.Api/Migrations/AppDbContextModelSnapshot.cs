@@ -161,6 +161,14 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<decimal?>("CancellationChargeAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("CancellationChargeHours")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
 
@@ -360,6 +368,9 @@ namespace ContractFlow.Api.Migrations
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
 
+                    b.Property<int>("CarryOverMonths")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("ContractId")
                         .HasColumnType("uniqueidentifier");
 
@@ -408,6 +419,10 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<decimal?>("HolidayDayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal?>("HolidayRate")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -452,7 +467,15 @@ namespace ContractFlow.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal?>("SaturdayDayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal?>("SaturdayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("SundayDayRate")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
@@ -870,6 +893,12 @@ namespace ContractFlow.Api.Migrations
 
                     b.Property<string>("Note")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("OriginMonth")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OriginYear")
+                        .HasColumnType("int");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
@@ -1502,6 +1531,38 @@ namespace ContractFlow.Api.Migrations
                         .HasForeignKey("ContractId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.OwnsMany("ContractFlow.Api.Models.Domain.CancellationStep", "CancellationSteps", b1 =>
+                        {
+                            b1.Property<Guid>("ContractTermsId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("int");
+
+                            b1.Property<decimal?>("ChargeAmount")
+                                .HasPrecision(18, 2)
+                                .HasColumnType("decimal(18,2)");
+
+                            b1.Property<decimal?>("ChargeHours")
+                                .HasPrecision(9, 2)
+                                .HasColumnType("decimal(9,2)");
+
+                            b1.Property<int>("MinBusinessDaysBefore")
+                                .HasColumnType("int");
+
+                            b1.HasKey("ContractTermsId", "__synthesizedOrdinal");
+
+                            b1.ToTable("ContractTerms");
+
+                            b1.ToJson("CancellationSteps");
+
+                            b1.WithOwner()
+                                .HasForeignKey("ContractTermsId");
+                        });
+
+                    b.Navigation("CancellationSteps");
 
                     b.Navigation("Contract");
                 });

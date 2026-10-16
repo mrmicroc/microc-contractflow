@@ -67,12 +67,20 @@ public record ContractTermsDto(
     decimal? PadRate, decimal? HourlyRate, decimal? SaturdayRate,
     decimal? SundayRate, decimal? HolidayRate, int OvertimeAfterHours,
     decimal OvertimePercent, decimal? MobilisationFee, decimal ExpenseMarkupPercent,
-    decimal? DayRate, decimal? HalfDayRate, decimal? HalfDayMaxHours,
+    decimal? DayRate, decimal? SaturdayDayRate, decimal? SundayDayRate,
+    decimal? HolidayDayRate, decimal? HalfDayRate, decimal? HalfDayMaxHours,
     decimal? FixedPriceAmount, DateOnly? FixedPriceDate, string? FixedPriceNote,
     decimal PadHoursPerDay, decimal MinPadPerBookedDay, decimal CarryOverMaxPercent,
-    int CancellationDeadlineBusinessDays, string HolidayCalendar,
+    int CarryOverMonths,
+    int CancellationDeadlineBusinessDays, List<CancellationStepDto> CancellationSteps,
+    string HolidayCalendar,
     decimal? MinBillableHoursPerDay,
     string? TravelExpensePolicy, string? Indexation, string? Notes);
+
+/// <summary>One rung of the cancellation ladder — see
+/// <see cref="CancellationStep"/>.</summary>
+public record CancellationStepDto(
+    int MinBusinessDaysBefore, decimal? ChargeHours, decimal? ChargeAmount);
 
 /// <summary>Creates a new terms version — server assigns Version = max + 1.</summary>
 public class ContractTermsRequest
@@ -96,6 +104,9 @@ public class ContractTermsRequest
     public bool PadEnabled { get; set; }
     public bool FixedPriceEnabled { get; set; }
     public decimal? DayRate { get; set; }
+    public decimal? SaturdayDayRate { get; set; }
+    public decimal? SundayDayRate { get; set; }
+    public decimal? HolidayDayRate { get; set; }
     public decimal? HalfDayRate { get; set; }
     public decimal? HalfDayMaxHours { get; set; }
     public decimal? FixedPriceAmount { get; set; }
@@ -105,7 +116,13 @@ public class ContractTermsRequest
     public decimal PadHoursPerDay { get; set; } = 8m;
     public decimal MinPadPerBookedDay { get; set; } = 1m;
     public decimal CarryOverMaxPercent { get; set; } = 20m;
+    /// <summary>How many following months a carried PAD may live (1 = only the
+    /// next month). Default 1.</summary>
+    public int CarryOverMonths { get; set; } = 1;
     public int CancellationDeadlineBusinessDays { get; set; } = 4;
+    /// <summary>Cancellation ladder — when non-empty it replaces the binary
+    /// deadline rule above.</summary>
+    public List<CancellationStepDto> CancellationSteps { get; set; } = [];
     [Required, StringLength(20)]
     public required string HolidayCalendar { get; set; }
     /// <summary>Minimum billable hours per attendance day (§5 step 4). Null = none.</summary>

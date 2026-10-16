@@ -49,6 +49,10 @@ public enum InvoiceLineKind
     Pad,
     /// <summary>One-off fixed price (lump-sum component) on its dated month.</summary>
     FixedPrice,
+    /// <summary>Cancellation charge — hours or a fixed fee resolved by the
+    /// terms' cancellation ladder (non-PAD contracts; PAD contracts charge via
+    /// utilised PAD instead).</summary>
+    Cancellation,
     /// <summary>Free-text/manual line (adjustments stay explicit).</summary>
     Manual,
 }

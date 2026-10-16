@@ -56,6 +56,13 @@ public class Booking
     /// <summary>Set on the cancelled original — points forward to the replacement.</summary>
     public Guid? RescheduledToBookingId { get; set; }
 
+    /// <summary>Resolved cancellation charge in hours (non-PAD contracts —
+    /// billed on the cancelled month's invoice; on PAD contracts the charge
+    /// materialises as utilised PAD instead, so this stays null there).</summary>
+    public decimal? CancellationChargeHours { get; set; }
+    /// <summary>Resolved fixed cancellation fee in the contract currency.</summary>
+    public decimal? CancellationChargeAmount { get; set; }
+
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
 }

@@ -21,9 +21,12 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Planning calendar (month grid + week/day views with resource & project lanes)
 - [x] Bookings + status flow (Forecast → … → Confirmed → … → Completed)
 - [x] PAD ledger + monthly dashboard with drill-down
-- [x] Carry-over, expiry, month-end closing
+- [x] Carry-over, expiry, month-end closing (multi-month carry window,
+      origin-tracked residuals re-carry or expire per ContractTerms.CarryOverMonths)
 - [x] Additional PAD request/approval flow
-- [x] Cancellation & rescheduling rules (4-business-day rule, Swedish holidays)
+- [x] Cancellation & rescheduling rules (stepped notice ladder — hours or fixed
+      fee per rung; PAD contracts materialise charges as partial PAD utilisation,
+      non-PAD contracts bill a cancellation line; Swedish-holiday business days)
 - [x] Conflict warnings (double-booking, leave overlap)
 - [x] Personal .ics calendar feeds (token-gated, rotatable)
 - [x] My Work (resource assignment view)
@@ -48,6 +51,9 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Supplier invoice reconciliation (register incoming UE invoice, match
       against statement, per-kind diffs, approve → pay)
 - [x] Revenue / cost / margin reporting (per project × month, internal roles)
+- [x] Composable billing components on versioned terms (hourly / daily-rate —
+      incl. Sat/Sun/holiday day rates + OT on top / PAD / one-off fixed price /
+      cancellation charges)
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
 - [ ] Timesheet → Invoiced leg once an invoice covers the period

@@ -145,18 +145,39 @@ public class TimeMathTests
     }
 
     [Fact]
-    public void DailyRate_NeitherOvertimeNorMinimumStacks()
+    public void DailyRate_OvertimeAddsHourEquivalent_MinimumDoesNotStack()
     {
-        // A fixed day price never grows: 10 h with OT-after-8 and min-hours
-        // configured still bills exactly the day rate.
+        // Fixed day price + OT on top at the hour-equivalent of the day rate:
+        // 10 h → 8 000 + 2 h × (8 000 / 8) × 150 % = 11 000. Min-hours
+        // never applies — the day price is already fixed.
         var result = TimeMath.CalculateDay(
             new DateOnly(2026, 10, 12), [(A, 10m)],
             new DayRateSet(10m, null, null, null, 8, 150m, 8m, DayRate: 8000m));
 
         Assert.Equal(0m, result.MinimumAdjustment);
-        Assert.Equal(8000m, result.Amount);
-        // (OT hours are still tracked for information — they just don't price.)
-        Assert.Equal(2m, result.OvertimeTotal);
+        Assert.Equal(11000m, result.Amount);
+        Assert.Contains("OT", result.Explanation);
+    }
+
+    [Fact]
+    public void DailyRate_SaturdayAndHoliday_UseTheirOwnDayRates()
+    {
+        var rates = new DayRateSet(null, null, null, null, 8, 150m, null,
+            DayRate: 8000m, SaturdayDayRate: 10000m, HolidayDayRate: 12000m);
+
+        var sat = TimeMath.CalculateDay(new DateOnly(2026, 10, 10), [(A, 8m)], rates);
+        Assert.Equal(DayKind.Saturday, sat.Kind);
+        Assert.Equal(10000m, sat.Amount);
+
+        // 2026-01-01 is a Thursday and a Swedish public holiday.
+        var hol = TimeMath.CalculateDay(new DateOnly(2026, 1, 1), [(A, 8m)], rates);
+        Assert.Equal(DayKind.Holiday, hol.Kind);
+        Assert.Equal(12000m, hol.Amount);
+
+        // Sunday without a configured Sunday rate falls back toward Saturday.
+        var sun = TimeMath.CalculateDay(new DateOnly(2026, 10, 11), [(A, 8m)], rates);
+        Assert.Equal(DayKind.Sunday, sun.Kind);
+        Assert.Equal(10000m, sun.Amount);
     }
 
     [Fact]

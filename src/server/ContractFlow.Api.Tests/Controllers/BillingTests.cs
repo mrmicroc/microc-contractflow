@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ContractFlow.Api.Data;
 using ContractFlow.Api.Models.Domain;
+using ContractFlow.Api.Services;
 using ContractFlow.Api.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 
@@ -330,6 +331,42 @@ public class BillingTests(ContractFlowWebApplicationFactory factory)
         var novDetail = await Admin.GetFromJsonAsync<InvoiceDetail>(
             $"/api/invoices/{(await nov.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
         Assert.Empty(novDetail!.Lines);
+    }
+
+    [Fact]
+    public async Task Invoice_CancellationCharge_OnNonPadContract_BillsOwnLine()
+    {
+        var ids = await Scaffold.CommercialGraphAsync(Admin, "inv-cancel");
+        // Hourly-only contract with a stepped ladder: ≥2 business days → 6 h.
+        await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "hourly", hourlyRate = 1000m,
+            cancellationSteps = new[]
+            {
+                new { minBusinessDaysBefore = 2, chargeHours = 6m },
+            },
+        });
+
+        var date = BusinessDays.AddBusinessDays(
+            DateOnly.FromDateTime(DateTime.UtcNow), 2);
+        var booking = await Scaffold.CreateBookingAsync(Admin, ids,
+            date.ToString("yyyy-MM-dd"));
+        (await Admin.PostAsync($"/api/bookings/{booking.Id}/confirm", null))
+            .EnsureSuccessStatusCode();
+        (await Admin.PostAsync($"/api/bookings/{booking.Id}/cancel", null))
+            .EnsureSuccessStatusCode();
+
+        var gen = await Admin.PostAsJsonAsync("/api/invoices/generate",
+            new { projectId = ids.ProjectId, year = date.Year, month = date.Month });
+        var detail = await Admin.GetFromJsonAsync<InvoiceDetail>(
+            $"/api/invoices/{(await gen.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
+
+        var cancel = Assert.Single(detail!.Lines, l => l.Kind == "cancellation");
+        Assert.Equal(6m, cancel.Quantity);
+        Assert.Equal(1000m, cancel.UnitPrice);
+        Assert.Equal(6000m, cancel.Amount);
+        Assert.Equal(6000m, detail.Invoice.TotalAmount);
     }
 
     // ── Subcontractor statement ─────────────────────────────────────────────

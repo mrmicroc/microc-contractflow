@@ -39,6 +39,13 @@ public class PadTransaction
     /// <summary>The booking behind Commit/Release/Utilise rows, when any.</summary>
     public Guid? BookingId { get; set; }
     public Booking? Booking { get; set; }
+
+    /// <summary>For CarryOverIn/CarryOverOut rows: the month the PAD
+    /// originated as baseline — its age decides when it expires
+    /// (ContractTerms.CarryOverMonths). Null on older rows; treated as
+    /// "the month before the row's own month".</summary>
+    public int? OriginYear { get; set; }
+    public int? OriginMonth { get; set; }
     /// <summary>The request behind AdditionalApproved rows, when any.</summary>
     public Guid? AdditionalPadRequestId { get; set; }
     public string? Note { get; set; }

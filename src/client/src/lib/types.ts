@@ -102,6 +102,9 @@ export interface ContractTerms {
   expenseMarkupPercent: number;
   minBillableHoursPerDay: number | null;
   dayRate: number | null;
+  saturdayDayRate: number | null;
+  sundayDayRate: number | null;
+  holidayDayRate: number | null;
   halfDayRate: number | null;
   halfDayMaxHours: number | null;
   fixedPriceAmount: number | null;
@@ -110,11 +113,19 @@ export interface ContractTerms {
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;
+  carryOverMonths: number;
   cancellationDeadlineBusinessDays: number;
+  cancellationSteps: CancellationStep[];
   holidayCalendar: string;
   travelExpensePolicy: string | null;
   indexation: string | null;
   notes: string | null;
+}
+
+export interface CancellationStep {
+  minBusinessDaysBefore: number;
+  chargeHours: number | null;
+  chargeAmount: number | null;
 }
 
 export interface ContractTermsRequestBody {
@@ -134,6 +145,9 @@ export interface ContractTermsRequestBody {
   expenseMarkupPercent: number;
   minBillableHoursPerDay: number | null;
   dayRate: number | null;
+  saturdayDayRate: number | null;
+  sundayDayRate: number | null;
+  holidayDayRate: number | null;
   halfDayRate: number | null;
   halfDayMaxHours: number | null;
   fixedPriceAmount: number | null;
@@ -142,7 +156,9 @@ export interface ContractTermsRequestBody {
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;
+  carryOverMonths: number;
   cancellationDeadlineBusinessDays: number;
+  cancellationSteps: CancellationStep[];
   holidayCalendar: string;
   travelExpensePolicy: string | null;
   indexation: string | null;

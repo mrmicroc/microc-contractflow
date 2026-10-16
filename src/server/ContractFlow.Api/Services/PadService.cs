@@ -43,7 +43,8 @@ public class PadService(AppDbContext db)
     public async Task<PadTransaction> AppendAsync(
         Guid projectId, DateOnly month, PadTransactionType type, decimal amount,
         Guid? userId, CancellationToken ct,
-        Guid? bookingId = null, Guid? additionalPadRequestId = null, string? note = null)
+        Guid? bookingId = null, Guid? additionalPadRequestId = null, string? note = null,
+        (int Year, int Month)? origin = null)
     {
         var tx = new PadTransaction
         {
@@ -54,6 +55,8 @@ public class PadService(AppDbContext db)
             Amount = amount,
             BookingId = bookingId,
             AdditionalPadRequestId = additionalPadRequestId,
+            OriginYear = origin?.Year,
+            OriginMonth = origin?.Month,
             Note = note,
             CreatedByUserId = userId,
         };
@@ -119,6 +122,30 @@ public class PadService(AppDbContext db)
     }
 
     /// <summary>
+    /// Partial-charge cancellation settlement: utilises
+    /// <paramref name="utilisePad"/> PAD of the open commitment and releases
+    /// the remainder (stepped cancellation policy, design §4.3).
+    /// </summary>
+    public async Task<(decimal Utilised, decimal Released)> SettlePartialAsync(
+        Booking booking, decimal utilisePad, Guid? userId, CancellationToken ct)
+    {
+        var open = await OpenCommitmentAsync(booking.Id, ct);
+        if (open <= 0) return (0m, 0m);
+        var month = new DateOnly(booking.Date.Year, booking.Date.Month, 1);
+        var used = Math.Min(open, Math.Max(0m, utilisePad));
+        if (used > 0)
+            await AppendAsync(booking.ProjectId, month, PadTransactionType.Utilise,
+                used, userId, ct, bookingId: booking.Id,
+                note: "Cancellation — chargeable portion");
+        var rest = open - used;
+        if (rest > 0)
+            await AppendAsync(booking.ProjectId, month, PadTransactionType.Release,
+                rest, userId, ct, bookingId: booking.Id,
+                note: "Cancellation — released remainder");
+        return (used, rest);
+    }
+
+    /// <summary>
     /// Month-end close (design §6.4): releases any still-open commitments,
     /// computes carry-over (only from unused baseline, capped per contract
     /// terms) and expiry, writes the ledger entries for both months and locks
@@ -151,22 +178,57 @@ public class PadService(AppDbContext db)
         var lastDay = monthStart.AddMonths(1).AddDays(-1);
         var terms = await TermsForAsync(projectId, lastDay, ct);
         var maxPercent = terms?.CarryOverMaxPercent ?? 20m;
+        var carryMonths = Math.Max(1, terms?.CarryOverMonths ?? 1);
+        var closingIndex = year * 12 + month;
 
         var sums = PadMath.Sum(await MonthAsync(projectId, year, month, ct));
         var carryOver = PadMath.CarryOver(sums.Baseline, sums.Utilised, maxPercent);
         var expired = PadMath.Expiry(sums.Baseline, sums.Utilised, maxPercent);
 
-        if (carryOver > 0)
-            await AppendAsync(projectId, monthStart, PadTransactionType.CarryOverOut,
-                carryOver, userId, ct, note: "Carry-over to next month");
-        if (expired > 0)
-            await AppendAsync(projectId, monthStart, PadTransactionType.Expire,
-                expired, userId, ct, note: "Expired unused baseline");
-
         var next = monthStart.AddMonths(1);
+
+        // Age living carry-overs: residuals per origin month, then re-carry
+        // what's still inside the contract window and expire what's older.
+        var allTxs = await db.PadTransactions
+            .Where(t => t.ProjectId == projectId)
+            .ToListAsync(ct);
+        foreach (var r in PadMath.CarryResiduals(allTxs, year, month))
+        {
+            var age = closingIndex - (r.OriginYear * 12 + r.OriginMonth);
+            if (age < carryMonths)
+            {
+                await AppendAsync(projectId, monthStart, PadTransactionType.CarryOverOut,
+                    r.Residual, userId, ct,
+                    note: $"Re-carry of PAD from {r.OriginYear}-{r.OriginMonth:D2}",
+                    origin: (r.OriginYear, r.OriginMonth));
+                await AppendAsync(projectId, next, PadTransactionType.CarryOverIn,
+                    r.Residual, userId, ct,
+                    note: $"Carry-over from {r.OriginYear}-{r.OriginMonth:D2}",
+                    origin: (r.OriginYear, r.OriginMonth));
+            }
+            else
+            {
+                await AppendAsync(projectId, monthStart, PadTransactionType.Expire,
+                    r.Residual, userId, ct,
+                    note: $"Carry-over from {r.OriginYear}-{r.OriginMonth:D2} expired",
+                    origin: (r.OriginYear, r.OriginMonth));
+                expired += r.Residual;
+            }
+        }
+
         if (carryOver > 0)
+        {
+            await AppendAsync(projectId, monthStart, PadTransactionType.CarryOverOut,
+                carryOver, userId, ct,
+                note: "Carry-over to next month", origin: (year, month));
             await AppendAsync(projectId, next, PadTransactionType.CarryOverIn,
-                carryOver, userId, ct, note: $"Carry-over from {year}-{month:D2}");
+                carryOver, userId, ct,
+                note: $"Carry-over from {year}-{month:D2}", origin: (year, month));
+        }
+        if (PadMath.Expiry(sums.Baseline, sums.Utilised, maxPercent) is > 0m)
+            await AppendAsync(projectId, monthStart, PadTransactionType.Expire,
+                PadMath.Expiry(sums.Baseline, sums.Utilised, maxPercent), userId, ct,
+                note: "Expired unused baseline");
 
         db.ProjectMonthCloses.Add(new ProjectMonthClose
         {

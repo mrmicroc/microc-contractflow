@@ -150,9 +150,12 @@ public class BillingService(AppDbContext db)
                 t?.HourlyRate, t?.SaturdayRate, t?.SundayRate, t?.HolidayRate,
                 t?.OvertimeAfterHours ?? 8, t?.OvertimePercent ?? 150m,
                 t?.MinBillableHoursPerDay,
-                daily ? t?.DayRate : null,
-                daily ? t?.HalfDayRate : null,
-                daily ? t?.HalfDayMaxHours : null);
+                DayRate: daily ? t?.DayRate : null,
+                SaturdayDayRate: daily ? t?.SaturdayDayRate : null,
+                SundayDayRate: daily ? t?.SundayDayRate : null,
+                HolidayDayRate: daily ? t?.HolidayDayRate : null,
+                HalfDayRate: daily ? t?.HalfDayRate : null,
+                HalfDayMaxHours: daily ? t?.HalfDayMaxHours : null);
             var day = TimeMath.CalculateDay(g.Date, splits, rates, t?.HolidayCalendar ?? "SE");
             var line = day.Lines.FirstOrDefault(l => l.ProjectId == projectId);
             if (line is null || line.Amount == 0m && line.EffectiveHours == 0m) continue;
@@ -187,6 +190,67 @@ public class BillingService(AppDbContext db)
                 Quantity = 1m, UnitPrice = endTerms.FixedPriceAmount.Value,
                 Amount = endTerms.FixedPriceAmount.Value,
             });
+        }
+
+        // ── Cancellation charges on non-PAD contracts: the resolved charge
+        // (hours or a fixed fee) rides the cancelled booking into billing.
+        // Under PAD, hour charges already materialised as utilised PAD.
+        var cancellations = await db.Bookings
+            .Where(b => b.ProjectId == projectId
+                && b.Status == BookingStatus.Cancelled
+                && b.Date >= from && b.Date <= to
+                && ((b.CancellationChargeHours ?? 0m) > 0m
+                    || (b.CancellationChargeAmount ?? 0m) > 0m))
+            .ToListAsync(ct);
+        foreach (var b in cancellations.OrderBy(x => x.Date))
+        {
+            var t = termsAt(b.Date);
+            if (b.CancellationChargeHours is > 0m)
+            {
+                var rates = new DayRateSet(
+                    t?.HourlyRate, t?.SaturdayRate, t?.SundayRate, t?.HolidayRate,
+                    t?.OvertimeAfterHours ?? 8, t?.OvertimePercent ?? 150m, null,
+                    DayRate: t?.DayRate,
+                    SaturdayDayRate: t?.SaturdayDayRate,
+                    SundayDayRate: t?.SundayDayRate,
+                    HolidayDayRate: t?.HolidayDayRate);
+                var kind = TimeMath.KindOf(b.Date, t?.HolidayCalendar ?? "SE");
+                decimal qty, unit;
+                if (t?.TimeBilling == TimeBilling.DailyRate)
+                {
+                    // Hours charge priced as a fraction of the day rate.
+                    var norm = t.OvertimeAfterHours > 0 ? t.OvertimeAfterHours : 8;
+                    qty = b.CancellationChargeHours.Value / norm;
+                    unit = TimeMath.DayRateFor(kind, rates) ?? 0m;
+                }
+                else
+                {
+                    qty = b.CancellationChargeHours.Value;
+                    unit = TimeMath.RateFor(kind, rates) ?? 0m;
+                }
+                spec.Lines.Add(new InvoiceLine
+                {
+                    Id = Guid.NewGuid(), InvoiceSpecificationId = spec.Id,
+                    Kind = InvoiceLineKind.Cancellation, Date = b.Date,
+                    Description = string.Create(Inv, $"Cancellation {b.Date:yyyy-MM-dd}"),
+                    Explanation = string.Create(Inv,
+                        $"{b.CancellationChargeHours.Value:0.##} h cancellation charge"),
+                    Quantity = qty, UnitPrice = unit,
+                    Amount = TimeMath.Round2(qty * unit),
+                });
+            }
+            if (b.CancellationChargeAmount is > 0m)
+            {
+                spec.Lines.Add(new InvoiceLine
+                {
+                    Id = Guid.NewGuid(), InvoiceSpecificationId = spec.Id,
+                    Kind = InvoiceLineKind.Cancellation, Date = b.Date,
+                    Description = string.Create(Inv, $"Cancellation fee {b.Date:yyyy-MM-dd}"),
+                    Explanation = "Fixed cancellation fee per the contract's cancellation policy",
+                    Quantity = 1m, UnitPrice = b.CancellationChargeAmount.Value,
+                    Amount = b.CancellationChargeAmount.Value,
+                });
+            }
         }
 
         // ── Recharged expenses with contract mark-up (§5: 1200 +10% → 1320).
