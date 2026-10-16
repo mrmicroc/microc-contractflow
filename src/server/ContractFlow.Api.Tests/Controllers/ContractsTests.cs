@@ -11,7 +11,7 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
     public record ContractDto(Guid Id, Guid CustomerId, string Name, string[] Components,
         string StartDate, string? EndDate, bool IsActive);
     public record TermsDto(Guid Id, int Version, string EffectiveFrom,
-        string Currency, decimal? PadRate, decimal? HourlyRate,
+        string Currency, string HolidayCalendar, decimal? PadRate, decimal? HourlyRate,
         decimal CarryOverMaxPercent, int CancellationDeadlineBusinessDays);
 
     private async Task<ContractDto> CreateContractAsync(HttpClient client)
@@ -106,6 +106,26 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
         var res = await client.GetAsync(
             $"/api/contracts/{contract.Id}/terms/effective?on=2025-12-31");
         Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Terms_UnknownCalendar_IsRejected()
+    {
+        var client = factory.CreateUserClient(DevSeed.AdminId);
+        var contract = await CreateContractAsync(client);
+
+        var res = await client.PostAsJsonAsync($"/api/contracts/{contract.Id}/terms",
+            new { effectiveFrom = "2026-01-01", currency = "SEK",
+                  holidayCalendar = "MARS" });
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+
+        // A supported regional variant is accepted and normalised.
+        var ok = await client.PostAsJsonAsync($"/api/contracts/{contract.Id}/terms",
+            new { effectiveFrom = "2026-01-01", currency = "EUR",
+                  holidayCalendar = "gb-sct" });
+        ok.EnsureSuccessStatusCode();
+        var dto = await ok.Content.ReadFromJsonAsync<TermsDto>();
+        Assert.Equal("GB-SCT", dto!.HolidayCalendar);
     }
 
     [Fact]

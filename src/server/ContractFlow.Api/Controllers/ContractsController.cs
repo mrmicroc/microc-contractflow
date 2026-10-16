@@ -189,6 +189,10 @@ public class ContractsController(AppDbContext db) : ControllerBase
         Guid id, ContractTermsRequest req, CancellationToken ct)
     {
         if (!await db.Contracts.AnyAsync(c => c.Id == id, ct)) return NotFound();
+        if (!BusinessDays.SupportedCalendars.ContainsKey(req.HolidayCalendar.ToUpperInvariant()))
+            return BadRequest(new { error = "Unsupported holiday calendar." });
+        if (req.Currency.Length != 3 || !req.Currency.All(char.IsAsciiLetter))
+            return BadRequest(new { error = "Currency must be a three-letter code." });
 
         var nextVersion = await db.ContractTerms
             .Where(t => t.ContractId == id)
@@ -236,7 +240,7 @@ public class ContractsController(AppDbContext db) : ControllerBase
             MinPadPerBookedDay = req.MinPadPerBookedDay,
             CarryOverMaxPercent = req.CarryOverMaxPercent,
             CancellationDeadlineBusinessDays = req.CancellationDeadlineBusinessDays,
-            HolidayCalendar = req.HolidayCalendar,
+            HolidayCalendar = req.HolidayCalendar.ToUpperInvariant(),
             MinBillableHoursPerDay = req.MinBillableHoursPerDay,
             TravelExpensePolicy = req.TravelExpensePolicy,
             Indexation = req.Indexation,

@@ -20,8 +20,10 @@ Items are marked ✅ only when implemented **and** tested. See
       OT billed on top as rate/8 × OT% per hour over the threshold)
 - [x] Customer & end-client master data (VAT, address, country, contact lists;
       end client optional — "same as customer" when identical)
-- [x] Country-keyed holiday calendars (SE/NO/DK/FI/none) with `/api/meta/calendars`
-      dropdown — business-day math and holiday day-type per contract country
+- [x] Country-keyed holiday calendars — per-country providers incl. UK nation
+      variants (GB-ENG/GB-SCT/GB-NIR), DE, FR, IT and US federal, with
+      substitute/observance-day rules — plus `/api/meta/{calendars,countries,
+      currencies}` powering searchable pickers (ISO 3166/4217 full lists)
 - [x] Resource register + versioned compensation agreements
 - [x] Planning calendar (month grid + week/day views with resource & project lanes)
 - [x] Bookings + status flow (Forecast → … → Confirmed → … → Completed)

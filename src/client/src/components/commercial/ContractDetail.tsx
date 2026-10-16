@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  createContractTerms, createProject, deleteContractTerms, errorMessage, getCalendars, getContract,
+  createContractTerms, createProject, deleteContractTerms, errorMessage, getCalendars,
+  getContract, getCurrencies,
 } from '@/lib/api';
-import { countryName } from '@/lib/countries';
+import { calendarLabel, currencyName } from '@/lib/countries';
 import { numOrNull, resolveVersion } from '@/lib/versioned';
 import type {
-  ContractDetail as ContractDetailDto, ContractTerms, HolidayCalendarInfo, TimeBilling,
+  ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, TimeBilling,
 } from '@/lib/types';
 
 /** Cancellation-ladder row in the form — strings while editing. */
@@ -18,7 +19,7 @@ type StepRow = {
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, SearchSelect, tdCls, thCls,
 } from '@/components/forms';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -132,7 +133,8 @@ export function ContractDetail({
   const [projectFormOpen, setProjectFormOpen] = useState(false);
   const [tf, setTf] = useState<TermsForm>(emptyTerms);
   const [pf, setPf] = useState({ name: '', code: '', description: '', isActive: true });
-  const [calendars, setCalendars] = useState<HolidayCalendarInfo[]>([]);
+  const [calendars, setCalendars] = useState<MetaEntry[]>([]);
+  const [currencies, setCurrencies] = useState<MetaEntry[]>([]);
 
   // Parent mounts this with key={contractId}, so a new selection remounts with
   // fresh state — the effect only needs to fetch.
@@ -143,6 +145,7 @@ export function ContractDetail({
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => {
     getCalendars().then(setCalendars).catch(() => setCalendars([]));
+    getCurrencies().then(setCurrencies).catch(() => setCurrencies([]));
   }, []);
 
   if (!contract) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
@@ -292,8 +295,14 @@ export function ContractDetail({
                   onChange={(e) => setTf({ ...tf, effectiveFrom: e.target.value })} />
               </Field>
               <Field label={t('common.currency')} help={t('terms.hCurrency')}>
-                <input className={inputCls} value={tf.currency} maxLength={3}
-                  onChange={(e) => setTf({ ...tf, currency: e.target.value })} />
+                <SearchSelect
+                  value={tf.currency}
+                  options={currencies.map((c) => ({
+                    value: c.code,
+                    label: `${currencyName(c.code, i18n.language)} (${c.code})`,
+                  }))}
+                  onChange={(v) => setTf({ ...tf, currency: v })}
+                />
               </Field>
             </div>
 
@@ -452,15 +461,14 @@ export function ContractDetail({
                   onChange={(e) => setTf({ ...tf, cancellationDeadlineBusinessDays: e.target.value })} />
               </Field>
               <Field label={t('terms.holidayCalendar')} help={t('terms.hHolidayCalendar')}>
-                <select className={inputCls} value={tf.holidayCalendar}
-                  onChange={(e) => setTf({ ...tf, holidayCalendar: e.target.value })}>
-                  {calendars.map((c) => (
-                    <option key={c.code} value={c.code}>
-                      {c.code === 'NONE' ? c.name : `${countryName(c.code, i18n.language)} (${c.code})`}
-                    </option>
-                  ))}
-                  {calendars.length === 0 && <option value="SE">SE</option>}
-                </select>
+                <SearchSelect
+                  value={tf.holidayCalendar}
+                  options={calendars.map((c) => ({
+                    value: c.code,
+                    label: calendarLabel(c.code, c.name, i18n.language, t('terms.calendarNone')),
+                  }))}
+                  onChange={(v) => setTf({ ...tf, holidayCalendar: v || 'SE' })}
+                />
               </Field>
             </div>
             <div className="mt-2">

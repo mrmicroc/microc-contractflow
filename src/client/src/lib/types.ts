@@ -72,8 +72,8 @@ export interface EndClientRequestBody {
   notes: string | null;
 }
 
-/** GET /api/meta/calendars row — supported holiday calendars. */
-export interface HolidayCalendarInfo {
+/** GET /api/meta/{calendars,countries,currencies} row — code + English name. */
+export interface MetaEntry {
   code: string;
   name: string;
 }

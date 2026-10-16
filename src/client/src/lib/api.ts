@@ -21,7 +21,7 @@ import type {
   EndClientRequestBody,
   EstimatedQuantity,
   EstimatedQuantityRequestBody,
-  HolidayCalendarInfo,
+  MetaEntry,
   Expense,
   ExpenseRequestBody,
   InvoiceDetail,
@@ -108,7 +108,9 @@ export interface UserDto {
 }
 
 export const getMe = () => apiGet<UserDto>('/api/me');
-export const getCalendars = () => apiGet<HolidayCalendarInfo[]>('/api/meta/calendars');
+export const getCalendars = () => apiGet<MetaEntry[]>('/api/meta/calendars');
+export const getCountries = () => apiGet<MetaEntry[]>('/api/meta/countries');
+export const getCurrencies = () => apiGet<MetaEntry[]>('/api/meta/currencies');
 export const getUsers = () => apiGet<UserDto[]>('/api/users');
 
 // ── Commercial structure ────────────────────────────────────────────────────

@@ -73,6 +73,49 @@ public class BusinessDaysTests
         Assert.False(BusinessDays.IsBusinessDay(midsummerEve, "FI"));
     }
 
+    [Theory]
+    // United Kingdom — England & Wales bank holidays with substitute days.
+    [InlineData("GB-ENG", 2021, 12, 27)] // Christmas Sat → Monday substitute
+    [InlineData("GB-ENG", 2021, 12, 28)] // Boxing Sun → Tuesday substitute
+    [InlineData("GB-ENG", 2026, 5, 4)]   // Early May bank holiday
+    [InlineData("GB-ENG", 2026, 8, 31)]  // Summer bank holiday
+    // Scotland — Jan 1 Sun 2023 substitutes to Mon 2, so Jan 2 rolls to Tue 3.
+    [InlineData("GB-SCT", 2023, 1, 2)]
+    [InlineData("GB-SCT", 2023, 1, 3)]
+    [InlineData("GB-SCT", 2026, 8, 3)]   // Summer BH is the *first* Mon in Aug
+    // Northern Ireland — the two extra patron/boyne days.
+    [InlineData("GB-NIR", 2026, 3, 17)]  // St Patrick's Day
+    [InlineData("GB-NIR", 2026, 7, 13)]  // Jul 12 is a Sunday → Mon 13 substitute
+    // Germany — nationwide days only.
+    [InlineData("DE", 2025, 10, 3)]      // Tag der Deutschen Einheit (Friday)
+    [InlineData("DE", 2026, 5, 25)]      // Pfingstmontag (Whit Monday)
+    // France.
+    [InlineData("FR", 2026, 7, 14)]      // Fête nationale (Tuesday)
+    [InlineData("FR", 2026, 5, 8)]       // Victoire 1945 (Friday)
+    // Italy.
+    [InlineData("IT", 2026, 6, 2)]       // Festa della Repubblica (Tuesday)
+    [InlineData("IT", 2026, 12, 8)]      // Immacolata (Tuesday)
+    // United States — federal observance moves Saturday to Friday.
+    [InlineData("US", 2026, 7, 3)]       // Independence Day Sat → Fri observed
+    [InlineData("US", 2026, 11, 26)]     // Thanksgiving (4th Thursday)
+    [InlineData("US", 2026, 1, 19)]      // MLK Jr. Day (3rd Monday)
+    public void NotBusinessDay_OtherCountryHolidays(string cal, int y, int m, int d)
+        => Assert.False(BusinessDays.IsBusinessDay(new DateOnly(y, m, d), cal));
+
+    [Fact]
+    public void RegionalCalendars_DifferWithinTheUk()
+    {
+        // Aug 31 2026 (last Monday) is a bank holiday in England & Wales but a
+        // normal Monday in Scotland (their summer BH is Aug 3).
+        var aug31 = new DateOnly(2026, 8, 31);
+        Assert.False(BusinessDays.IsBusinessDay(aug31, "GB-ENG"));
+        Assert.True(BusinessDays.IsBusinessDay(aug31, "GB-SCT"));
+
+        // Germany's nationwide set excludes state days: Corpus Christi
+        // (2026-06-04, Thursday) is a holiday in Bavaria but not nationwide.
+        Assert.True(BusinessDays.IsBusinessDay(new DateOnly(2026, 6, 4), "DE"));
+    }
+
     [Fact]
     public void HolidaysFor_NoneOrUnknown_WeekendsOnly()
     {
