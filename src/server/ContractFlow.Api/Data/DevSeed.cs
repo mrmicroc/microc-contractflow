@@ -76,9 +76,9 @@ public static class DevSeed
             Code = "SN-01",
             Description = "Recurring substation inspections, northern region.",
         };
-        project.Locations.Add(new Location
+        project.WorkPackages.Add(new WorkPackage
         {
-            Name = "Substation Site A",
+            Name = "Substation A",
             Address = "1 Example Road",
         });
         project.EstimatedQuantities.Add(new EstimatedQuantity

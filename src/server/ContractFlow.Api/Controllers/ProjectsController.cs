@@ -65,7 +65,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
     {
         var project = await db.Projects
             .Include(p => p.Contract).ThenInclude(c => c.Customer)
-            .Include(p => p.Locations)
+            .Include(p => p.WorkPackages)
             .Include(p => p.EstimatedQuantities)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (project is null) return NotFound();
@@ -117,7 +117,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
     }
 
     /// <summary>
-    /// Deletes the project, cascading locations/quantities and its PAD ledger.
+    /// Deletes the project, cascading workPackages/quantities and its PAD ledger.
     /// Blocked while bookings exist — they anchor the audit trail; deactivate instead.
     /// </summary>
     [HttpDelete("{id:guid}")]
@@ -192,8 +192,8 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
     private static ProjectDetailDto ToDto(Project p) => new(
         p.Id, p.ContractId, p.Contract.Name, p.Contract.Customer.Name,
         p.Name, p.Code, p.Description, p.IsActive,
-        p.Locations.OrderBy(l => l.Name)
-            .Select(l => new LocationDto(l.Id, l.ProjectId, l.Name, l.Address, l.Notes))
+        p.WorkPackages.OrderBy(l => l.Name)
+            .Select(l => new WorkPackageDto(l.Id, l.ProjectId, l.Name, l.Address, l.Notes))
             .ToList(),
         p.EstimatedQuantities
             .Select(q => new EstimatedQuantityDto(

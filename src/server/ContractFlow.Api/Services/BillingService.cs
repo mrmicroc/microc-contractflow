@@ -89,14 +89,14 @@ public class BillingService(AppDbContext db)
             .FirstOrDefault();
         spec.Currency = termsAt(to)?.Currency ?? spec.Currency;
 
-        // Per-site rate overrides (LocationRate) — a set field wins over the
-        // contract terms when the booking targets that site; null inherits.
-        var locRates = await db.LocationRates.Include(r => r.Location)
-            .Where(r => r.Location.ProjectId == projectId).ToListAsync(ct);
-        var locNames = locRates.Select(r => r.Location).DistinctBy(l => l.Id)
+        // Per-package rate overrides (WorkPackageRate) — a set field wins over the
+        // contract terms when the booking targets that work package; null inherits.
+        var wpRates = await db.WorkPackageRates.Include(r => r.WorkPackage)
+            .Where(r => r.WorkPackage.ProjectId == projectId).ToListAsync(ct);
+        var wpNames = wpRates.Select(r => r.WorkPackage).DistinctBy(l => l.Id)
             .ToDictionary(l => l.Id, l => l.Name);
-        LocationRate? OverrideAt(Guid? locId, DateOnly d) => locId is null ? null
-            : locRates.Where(r => r.LocationId == locId && r.EffectiveFrom <= d)
+        WorkPackageRate? OverrideAt(Guid? wpId, DateOnly d) => wpId is null ? null
+            : wpRates.Where(r => r.WorkPackageId == wpId && r.EffectiveFrom <= d)
                 .OrderByDescending(r => r.EffectiveFrom).ThenByDescending(r => r.CreatedUtc)
                 .FirstOrDefault();
 
@@ -152,23 +152,23 @@ public class BillingService(AppDbContext db)
                 .ToListAsync(ct);
             var bookingIds = allDay.Where(x => x.BookingId != null)
                 .Select(x => x.BookingId!.Value).Distinct().ToList();
-            var locOf = bookingIds.Count == 0 ? new Dictionary<Guid, Guid?>() :
+            var wpOf = bookingIds.Count == 0 ? new Dictionary<Guid, Guid?>() :
                 await db.Bookings.Where(b => bookingIds.Contains(b.Id))
-                    .ToDictionaryAsync(b => b.Id, b => b.LocationId, ct);
+                    .ToDictionaryAsync(b => b.Id, b => b.WorkPackageId, ct);
 
             var reportable = allDay
                 .Where(x => !(padCovers && x.BookingId != null)).ToList();
             if (reportable.All(x => x.ProjectId != projectId)) continue;
 
-            // Partition by billing mode × site: 'hours' rows always price plain
+            // Partition by billing mode × work package: 'hours' rows always price plain
             // hourly (even on a day-rate contract), contract rows follow the
-            // version's model, and each distinct site prices at its override.
-            // A day split across differently-priced sites prices each partition
+            // version's model, and each distinct work package prices at its override.
+            // A day split across differently-priced packages prices each partition
             // independently — OT then applies per partition.
             foreach (var grp in reportable.GroupBy(x => new
             {
                 HoursMode = x.Billing == EntryBilling.Hours,
-                Loc = x.BookingId is { } bid ? locOf.GetValueOrDefault(bid) : (Guid?)null,
+                Wp = x.BookingId is { } bid ? wpOf.GetValueOrDefault(bid) : (Guid?)null,
             }))
             {
                 var splits = grp.GroupBy(x => x.ProjectId)
@@ -176,8 +176,8 @@ public class BillingService(AppDbContext db)
                 if (splits.All(s => s.ProjectId != projectId)) continue;
 
                 var daily = !grp.Key.HoursMode && mode == TimeBilling.DailyRate;
-                var o = OverrideAt(grp.Key.Loc, g.Date);
-                var rates = SiteRates(t, o, daily);
+                var o = OverrideAt(grp.Key.Wp, g.Date);
+                var rates = MergeRates(t, o, daily);
                 var day = TimeMath.CalculateDay(g.Date, splits, rates, t?.HolidayCalendar ?? "SE");
                 var line = day.Lines.FirstOrDefault(l => l.ProjectId == projectId);
                 if (line is null || line.Amount == 0m && line.EffectiveHours == 0m) continue;
@@ -185,17 +185,17 @@ public class BillingService(AppDbContext db)
                 var rate = daily
                     ? (line.DayFraction > 0m ? line.Amount / line.DayFraction : 0m)
                     : TimeMath.RateFor(day.Kind, rates) ?? 0m;
-                var site = grp.Key.Loc is { } lid ? locNames.GetValueOrDefault(lid) : null;
+                var pkg = grp.Key.Wp is { } lid ? wpNames.GetValueOrDefault(lid) : null;
                 spec.Lines.Add(new InvoiceLine
                 {
                     Id = Guid.NewGuid(), InvoiceSpecificationId = spec.Id,
                     Kind = InvoiceLineKind.Hours, Date = g.Date,
                     Description = string.Create(Inv,
                             $"{(daily ? "Day" : "Work")} {g.Date:yyyy-MM-dd}")
-                        + (site is null ? "" : $" · {site}"),
+                        + (pkg is null ? "" : $" · {pkg}"),
                     Explanation = day.Explanation
                         + (grp.Key.HoursMode ? " · billed as hours" : "")
-                        + (o is null ? "" : " · site rates apply"),
+                        + (o is null ? "" : " · package rates apply"),
                     Quantity = daily ? line.DayFraction : line.EffectiveHours,
                     UnitPrice = rate, Amount = line.Amount,
                 });
@@ -231,10 +231,10 @@ public class BillingService(AppDbContext db)
         foreach (var b in cancellations.OrderBy(x => x.Date))
         {
             var t = termsAt(b.Date);
-            var siteO = OverrideAt(b.LocationId, b.Date);
+            var wpO = OverrideAt(b.WorkPackageId, b.Date);
             if (b.CancellationChargeHours is > 0m)
             {
-                var rates = SiteRates(t, siteO, t?.TimeBilling == TimeBilling.DailyRate);
+                var rates = MergeRates(t, wpO, t?.TimeBilling == TimeBilling.DailyRate);
                 var kind = TimeMath.KindOf(b.Date, t?.HolidayCalendar ?? "SE");
                 decimal qty, unit;
                 if (t?.TimeBilling == TimeBilling.DailyRate)
@@ -256,7 +256,7 @@ public class BillingService(AppDbContext db)
                     Description = string.Create(Inv, $"Cancellation {b.Date:yyyy-MM-dd}"),
                     Explanation = string.Create(Inv,
                             $"{b.CancellationChargeHours.Value:0.##} h cancellation charge")
-                        + (siteO is null ? "" : " · site rates apply"),
+                        + (wpO is null ? "" : " · package rates apply"),
                     Quantity = qty, UnitPrice = unit,
                     Amount = TimeMath.Round2(qty * unit),
                 });
@@ -296,13 +296,13 @@ public class BillingService(AppDbContext db)
         }
 
         // ── One mobilisation fee per confirmed period overlapping the month —
-        // a period bound to a site may carry a site-specific fee (LocationRate).
+        // a period bound to a work package may carry a package-specific fee (WorkPackageRate).
         var periods = await db.MobilisationPeriods
             .Where(p => p.ProjectId == projectId && p.StartDate <= to && p.EndDate >= from)
             .OrderBy(p => p.StartDate).ToListAsync(ct);
         foreach (var p in periods)
         {
-            var fee = OverrideAt(p.LocationId, p.StartDate)?.MobilisationFee
+            var fee = OverrideAt(p.WorkPackageId, p.StartDate)?.MobilisationFee
                 ?? termsAt(p.StartDate)?.MobilisationFee;
             if (fee is null or <= 0) continue;
             spec.Lines.Add(new InvoiceLine
@@ -310,9 +310,9 @@ public class BillingService(AppDbContext db)
                 Id = Guid.NewGuid(), InvoiceSpecificationId = spec.Id,
                 Kind = InvoiceLineKind.Mobilisation, Date = p.StartDate, SourceId = p.Id,
                 Description = string.Create(Inv, $"Mobilisation {p.StartDate:yyyy-MM-dd} → {p.EndDate:yyyy-MM-dd}")
-                    + (p.LocationId is { } lid && locNames.TryGetValue(lid, out var ln) ? $" · {ln}" : ""),
+                    + (p.WorkPackageId is { } lid && wpNames.TryGetValue(lid, out var ln) ? $" · {ln}" : ""),
                 Explanation = "Fixed fee per confirmed mobilisation period"
-                    + (p.LocationId is null ? "" : " · site rate applies"),
+                    + (p.WorkPackageId is null ? "" : " · package rate applies"),
                 Quantity = 1m, UnitPrice = fee.Value, Amount = fee.Value,
             });
         }
@@ -322,10 +322,10 @@ public class BillingService(AppDbContext db)
         return spec;
     }
 
-    /// <summary>Rate set for a day: contract terms merged under any site
+    /// <summary>Rate set for a day: contract terms merged under any package
     /// override (set fields win, null inherits). `daily` keeps day-rate fields;
     /// off → pure hourly pricing (hourly-billed rows and hourly contracts).</summary>
-    private static DayRateSet SiteRates(ContractTerms? t, LocationRate? o, bool daily) => new(
+    private static DayRateSet MergeRates(ContractTerms? t, WorkPackageRate? o, bool daily) => new(
         o?.HourlyRate ?? t?.HourlyRate,
         o?.SaturdayRate ?? t?.SaturdayRate,
         o?.SundayRate ?? t?.SundayRate,

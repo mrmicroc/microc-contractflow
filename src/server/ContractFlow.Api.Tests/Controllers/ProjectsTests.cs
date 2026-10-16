@@ -10,10 +10,10 @@ public class ProjectsTests(ContractFlowWebApplicationFactory factory)
 {
     public record IdRef(Guid Id);
     public record ProjectDto(Guid Id, Guid ContractId, string Name, string? Code, bool IsActive);
-    public record LocationDto(Guid Id, string Name, string? Address);
+    public record WorkPackageDto(Guid Id, string Name, string? Address);
     public record QuantityDto(Guid Id, string Label, decimal Quantity, string Unit);
     public record ProjectDetail(Guid Id, string Name, string ContractName, string CustomerName,
-        LocationDto[] Locations, QuantityDto[] EstimatedQuantities);
+        WorkPackageDto[] WorkPackages, QuantityDto[] EstimatedQuantities);
 
     private async Task<ProjectDto> CreateProjectAsync(HttpClient client)
     {
@@ -43,29 +43,29 @@ public class ProjectsTests(ContractFlowWebApplicationFactory factory)
         Assert.Equal("North Works", detail.Name);
         Assert.Equal("Host Contract", detail.ContractName);
         Assert.Equal("Project Host Org", detail.CustomerName);
-        Assert.Empty(detail.Locations);
+        Assert.Empty(detail.WorkPackages);
         Assert.Empty(detail.EstimatedQuantities);
     }
 
     [Fact]
-    public async Task Locations_AddUpdateDelete_FlowWorks()
+    public async Task WorkPackages_AddUpdateDelete_FlowWorks()
     {
         var client = factory.CreateUserClient(DevSeed.AdminId);
         var project = await CreateProjectAsync(client);
 
-        var created = await client.PostAsJsonAsync("/api/locations",
+        var created = await client.PostAsJsonAsync("/api/work-packages",
             new { projectId = project.Id, name = "Site Alpha", address = "1 Road" });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
-        var location = await created.Content.ReadFromJsonAsync<LocationDto>();
-        Assert.NotNull(location);
+        var workPackage = await created.Content.ReadFromJsonAsync<WorkPackageDto>();
+        Assert.NotNull(workPackage);
 
-        await client.PutAsJsonAsync($"/api/locations/{location.Id}",
+        await client.PutAsJsonAsync($"/api/work-packages/{workPackage.Id}",
             new { projectId = project.Id, name = "Site Alpha West" });
 
         var detail = await client.GetFromJsonAsync<ProjectDetail>($"/api/projects/{project.Id}");
-        Assert.Equal("Site Alpha West", detail!.Locations.Single().Name);
+        Assert.Equal("Site Alpha West", detail!.WorkPackages.Single().Name);
 
-        var del = await client.DeleteAsync($"/api/locations/{location.Id}");
+        var del = await client.DeleteAsync($"/api/work-packages/{workPackage.Id}");
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
     }
 

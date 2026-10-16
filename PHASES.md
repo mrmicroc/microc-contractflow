@@ -11,7 +11,7 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Neutral seed data (no real company names or contract values)
 
 ## Phase 1 — Internal planning & PAD
-- [x] Customers / contracts / projects / locations with versioned terms —
+- [x] Customers / contracts / projects / work packages with versioned terms —
       billing is component-based per terms version (time billing: hourly |
       daily rate | none · PAD component · fixed price · mobilisation fee +
       expense markup), replacing the original binary contract model
@@ -64,10 +64,10 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Composable billing components on versioned terms (hourly / daily-rate —
       incl. Sat/Sun/holiday day rates + OT on top / PAD / one-off fixed price /
       cancellation charges)
-- [x] Site-rate overrides (versioned LocationRate per project location —
+- [x] Package-rate overrides (versioned WorkPackageRate per work package —
       set fields win over contract terms, empty fields inherit; covers
       hourly/day rates + mobilisation fee; mobilisation periods can be
-      bound to a site)
+      bound to a work package)
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
 - [ ] Timesheet → Invoiced leg once an invoice covers the period

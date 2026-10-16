@@ -44,7 +44,7 @@ export function MyWork() {
           <p className="mb-3 flex items-center gap-2 text-xs text-slate-600">
             {t('myWork.calendarFeed')}
             <code className="max-w-96 truncate rounded bg-slate-100 px-1.5 py-0.5">
-              {location.origin}{feedUrl}
+              {workPackage.origin}{feedUrl}
             </code>
             <button className={btnSecondaryCls}
               onClick={() => void rotateFeedUrl().then((r) => setFeedUrl(r.url))}>

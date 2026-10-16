@@ -217,7 +217,7 @@ export interface ProjectDetail {
   code: string | null;
   description: string | null;
   isActive: boolean;
-  locations: Location[];
+  workPackages: WorkPackage[];
   estimatedQuantities: EstimatedQuantity[];
 }
 
@@ -229,7 +229,7 @@ export interface ProjectRequestBody {
   isActive: boolean;
 }
 
-export interface Location {
+export interface WorkPackage {
   id: string;
   projectId: string;
   name: string;
@@ -237,7 +237,7 @@ export interface Location {
   notes: string | null;
 }
 
-export interface LocationRequestBody {
+export interface WorkPackageRequestBody {
   projectId: string;
   name: string;
   address: string | null;
@@ -245,10 +245,10 @@ export interface LocationRequestBody {
 }
 
 // One versioned site-rate override row — set fields win over contract terms,
-// null fields inherit (GET/POST /api/locations/{id}/rates).
-export interface LocationRate {
+// null fields inherit (GET/POST /api/work-packages/{id}/rates).
+export interface WorkPackageRate {
   id: string;
-  locationId: string;
+  workPackageId: string;
   effectiveFrom: string;
   hourlyRate: number | null;
   saturdayRate: number | null;
@@ -264,7 +264,7 @@ export interface LocationRate {
   notes: string | null;
 }
 
-export interface LocationRateRequestBody {
+export interface WorkPackageRateRequestBody {
   effectiveFrom: string;
   hourlyRate?: number | null;
   saturdayRate?: number | null;
@@ -386,8 +386,8 @@ export interface Booking {
   customerName: string;
   resourceId: string;
   resourceName: string;
-  locationId: string | null;
-  locationName: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
   date: string;
   plannedHours: number;
   activityRef: string | null;
@@ -405,7 +405,7 @@ export interface Booking {
 export interface BookingRequestBody {
   projectId: string;
   resourceId: string;
-  locationId: string | null;
+  workPackageId: string | null;
   date: string;
   plannedHours: number;
   activityRef: string | null;
@@ -614,8 +614,8 @@ export interface MobilisationPeriod {
   startDate: string;
   endDate: string;
   confirmedUtc: string;
-  locationId: string | null;
-  locationName: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
 }
 
 export interface MobilisationSuggestion {

@@ -357,7 +357,7 @@ function FeedUrl({ resourceId }: { resourceId: string }) {
   if (!url) return <span className="text-slate-400">—</span>;
   return (
     <span className="flex items-center gap-2">
-      <code className="max-w-72 truncate text-xs">{location.origin}{url}</code>
+      <code className="max-w-72 truncate text-xs">{workPackage.origin}{url}</code>
       <button className={btnSecondaryCls}
         onClick={() => void rotateFeedUrl(resourceId).then((r) => setUrl(r.url))}>
         {t('resources.regenerateFeed')}

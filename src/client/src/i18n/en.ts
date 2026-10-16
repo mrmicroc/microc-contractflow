@@ -98,7 +98,7 @@ export const en = {
     title: 'Contracts',
     help: 'Commercial agreements under the customer. Each contract\u2019s terms enable billing components — time billing (hourly or daily rate), a PAD day-budget, and a fixed price — which may combine. Click a row for its terms and projects.',
     detailHelp: 'Versioned commercial terms: which billing components apply, rates per day type, overtime, PAD rules, expense markup. A change creates a new version — historical months keep the terms of their time.',
-    projectsHelp: 'Projects booked under this contract — each has locations, estimated quantities and its own PAD ledger. Click a row for details.',
+    projectsHelp: 'Projects booked under this contract — each has workPackages, estimated quantities and its own PAD ledger. Click a row for details.',
     newContract: 'New contract',
     editContract: 'Edit contract',
     components: 'Billing components',
@@ -222,10 +222,10 @@ export const en = {
     hCode: 'Optional short code (e.g. work-order or cost-centre code) printed on reports.',
     hDescription: 'Free-text description of the project\u2019s scope.',
   },
-  locations: {
-    title: 'Locations',
-    help: 'Named work locations on this project. Bookings and travel legs reference these.',
-    add: 'Add location',
+  workPackages: {
+    title: 'Work packages',
+    help: 'Named work packages on this project — a site, a region, or any other scoped part of the delivery. Bookings, travel legs and rates reference these.',
+    add: 'Add work package',
     address: 'Address',
   },
   quantities: {
@@ -242,9 +242,9 @@ export const en = {
       m: 'm', m2: 'm²', m3: 'm³', ton: 'ton',
     },
   },
-  siteRates: {
-    toggle: 'Site rates',
-    help: 'Site-specific prices that override the contract terms for bookings at this location. Leave a field empty to inherit the contract value — overrides apply per field, not all-or-nothing. Each row is a new version effective from its date, so historical months keep their historical prices.',
+  workPackageRates: {
+    toggle: 'Package rates',
+    help: 'Package-specific prices that override the contract terms for bookings on this work package. Leave a field empty to inherit the contract value — overrides apply per field, not all-or-nothing. Each row is a new version effective from its date, so historical months keep their historical prices.',
     empty: 'No overrides — everything bills at the contract terms.',
     add: 'Add rate version',
     hEffective: 'The date this override takes effect. Work booked before it keeps the earlier price — overrides never rewrite the past.',
@@ -327,7 +327,7 @@ export const en = {
     customer: 'Customer',
     date: 'Date',
     resource: 'Resource',
-    location: 'Location',
+    workPackage: 'Work package',
     plannedHours: 'Planned hours',
     activityRef: 'Activity ref',
     workDescription: 'Work description',

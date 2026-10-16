@@ -32,8 +32,8 @@ public class Booking
     public Project Project { get; set; } = null!;
     public Guid ResourceId { get; set; }
     public Resource Resource { get; set; } = null!;
-    public Guid? LocationId { get; set; }
-    public Location? Location { get; set; }
+    public Guid? WorkPackageId { get; set; }
+    public WorkPackage? WorkPackage { get; set; }
 
     public DateOnly Date { get; set; }
     /// <summary>Planned duration in hours (default 8 = one full day). Drives the

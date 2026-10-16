@@ -96,9 +96,9 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
                 && p.StartDate <= req.EndDate && p.EndDate >= req.StartDate, ct))
             return Conflict(new { error = "overlap", message = "Overlaps an existing confirmed period." });
 
-        if (req.LocationId.HasValue && !await Db.Locations.AnyAsync(
-                l => l.Id == req.LocationId.Value && l.ProjectId == req.ProjectId, ct))
-            return BadRequest(new { error = "Location does not belong to this project." });
+        if (req.WorkPackageId.HasValue && !await Db.WorkPackages.AnyAsync(
+                l => l.Id == req.WorkPackageId.Value && l.ProjectId == req.ProjectId, ct))
+            return BadRequest(new { error = "WorkPackage does not belong to this project." });
 
         var me = await Me(ct);
         var period = new MobilisationPeriod
@@ -107,7 +107,7 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
             ResourceId = req.ResourceId,
             StartDate = req.StartDate,
             EndDate = req.EndDate,
-            LocationId = req.LocationId,
+            WorkPackageId = req.WorkPackageId,
             ConfirmedByUserId = me?.Id,
         };
         Db.MobilisationPeriods.Add(period);
@@ -176,18 +176,18 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
         return Ok(ReportingMapper.Mobilisation(await LoadAsync(id, ct)));
     }
 
-    /// <summary>Sets (or clears) which site the period mobilised to — decides
-    /// the site-specific mobilisation fee at billing.</summary>
-    [HttpPatch("{id:guid}/site")]
+    /// <summary>Sets (or clears) which work package the period mobilised to — decides
+    /// the package-specific mobilisation fee at billing.</summary>
+    [HttpPatch("{id:guid}/work-package")]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
-    public async Task<IActionResult> SetSite(Guid id, MobilisationSiteRequest req, CancellationToken ct)
+    public async Task<IActionResult> SetSite(Guid id, MobilisationWorkPackageRequest req, CancellationToken ct)
     {
         var period = await Db.MobilisationPeriods.FindAsync([id], ct);
         if (period is null) return NotFound();
-        if (req.LocationId.HasValue && !await Db.Locations.AnyAsync(
-                l => l.Id == req.LocationId.Value && l.ProjectId == period.ProjectId, ct))
-            return BadRequest(new { error = "Location does not belong to this project." });
-        period.LocationId = req.LocationId;
+        if (req.WorkPackageId.HasValue && !await Db.WorkPackages.AnyAsync(
+                l => l.Id == req.WorkPackageId.Value && l.ProjectId == period.ProjectId, ct))
+            return BadRequest(new { error = "WorkPackage does not belong to this project." });
+        period.WorkPackageId = req.WorkPackageId;
         await Db.SaveChangesAsync(ct);
         return Ok(ReportingMapper.Mobilisation(await LoadAsync(id, ct)));
     }
@@ -213,6 +213,6 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
 
     private Task<MobilisationPeriod> LoadAsync(Guid id, CancellationToken ct) =>
         Db.MobilisationPeriods
-            .Include(x => x.Project).Include(x => x.Resource).Include(x => x.Location)
+            .Include(x => x.Project).Include(x => x.Resource).Include(x => x.WorkPackage)
             .FirstAsync(x => x.Id == id, ct);
 }

@@ -120,7 +120,7 @@ public class ContractsController(AppDbContext db) : ControllerBase
     }
 
     /// <summary>
-    /// Deletes the contract and cascades its terms/projects/locations/quantities
+    /// Deletes the contract and cascades its terms/projects/workPackages/quantities
     /// and PAD ledger rows. Blocked while bookings (audit anchors) or
     /// compensation agreements reference it — deactivate instead.
     /// </summary>

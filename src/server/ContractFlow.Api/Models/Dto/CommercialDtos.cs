@@ -159,7 +159,7 @@ public class ContractTermsRequest
     public string? Notes { get; set; }
 }
 
-// ── Projects, locations, quantities ─────────────────────────────────────────
+// ── Projects, workPackages, quantities ─────────────────────────────────────────
 
 public record ProjectSummaryDto(
     Guid Id, Guid ContractId, string Name, string? Code, bool IsActive);
@@ -167,7 +167,7 @@ public record ProjectSummaryDto(
 public record ProjectDetailDto(
     Guid Id, Guid ContractId, string ContractName, string CustomerName,
     string Name, string? Code, string? Description, bool IsActive,
-    List<LocationDto> Locations, List<EstimatedQuantityDto> EstimatedQuantities);
+    List<WorkPackageDto> WorkPackages, List<EstimatedQuantityDto> EstimatedQuantities);
 
 public class ProjectRequest
 {
@@ -181,16 +181,16 @@ public class ProjectRequest
     public bool IsActive { get; set; } = true;
 }
 
-public record LocationDto(Guid Id, Guid ProjectId, string Name, string? Address, string? Notes);
+public record WorkPackageDto(Guid Id, Guid ProjectId, string Name, string? Address, string? Notes);
 
-/// <summary>One versioned site-rate override row (GET /api/locations/{id}/rates).</summary>
-public record LocationRateDto(
-    Guid Id, Guid LocationId, string EffectiveFrom,
+/// <summary>One versioned package-rate override row (GET /api/work-packages/{id}/rates).</summary>
+public record WorkPackageRateDto(
+    Guid Id, Guid WorkPackageId, string EffectiveFrom,
     decimal? HourlyRate, decimal? SaturdayRate, decimal? SundayRate, decimal? HolidayRate,
     decimal? DayRate, decimal? SaturdayDayRate, decimal? SundayDayRate, decimal? HolidayDayRate,
     decimal? HalfDayRate, decimal? HalfDayMaxHours, decimal? MobilisationFee, string? Notes);
 
-public class LocationRateRequest
+public class WorkPackageRateRequest
 {
     [Required]
     public DateOnly EffectiveFrom { get; set; }
@@ -217,7 +217,7 @@ public class ProjectAccessRequest
     public Guid ResourceId { get; set; }
 }
 
-public class LocationRequest
+public class WorkPackageRequest
 {
     [Required]
     public Guid ProjectId { get; set; }

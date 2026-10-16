@@ -104,7 +104,7 @@ public class AllowanceClaimRequest
 public record MobilisationPeriodDto(
     Guid Id, Guid ProjectId, string ProjectName, Guid ResourceId, string ResourceName,
     DateOnly StartDate, DateOnly EndDate, DateTime ConfirmedUtc,
-    Guid? LocationId, string? LocationName);
+    Guid? WorkPackageId, string? WorkPackageName);
 
 public record MobilisationSuggestionDto(
     Guid ProjectId, string ProjectName, DateOnly StartDate, DateOnly EndDate);
@@ -119,15 +119,15 @@ public class MobilisationConfirmRequest
     public DateOnly StartDate { get; set; }
     [Required]
     public DateOnly EndDate { get; set; }
-    /// <summary>Optional site the period mobilised to — decides which
-    /// site-rate override supplies the mobilisation fee.</summary>
-    public Guid? LocationId { get; set; }
+    /// <summary>Optional work package the period mobilised to — decides which
+    /// package-rate override supplies the mobilisation fee.</summary>
+    public Guid? WorkPackageId { get; set; }
 }
 
-/// <summary>Sets/clears the site a confirmed period mobilised to.</summary>
-public class MobilisationSiteRequest
+/// <summary>Sets/clears the work package a confirmed period mobilised to.</summary>
+public class MobilisationWorkPackageRequest
 {
-    public Guid? LocationId { get; set; }
+    public Guid? WorkPackageId { get; set; }
 }
 
 public class MobilisationSplitRequest

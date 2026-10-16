@@ -228,10 +228,10 @@ export const sv: DeepStringify<typeof en> = {
     hCode: 'Valfri kortkod (t.ex. arbetsorder- eller kostnadsställekod) som skrivs ut på rapporter.',
     hDescription: 'Fritextbeskrivning av projektets omfattning.',
   },
-  locations: {
-    title: 'Platser',
-    help: 'Namngivna arbetsplatser på projektet. Bokningar och resor refererar hit.',
-    add: 'Lägg till plats',
+  workPackages: {
+    title: 'Deluppdrag',
+    help: 'Namngivna deluppdrag på projektet — en arbetsplats, ett område eller en annan avgränsad del av leveransen. Bokningar, resor och taxor refererar hit.',
+    add: 'Lägg till deluppdrag',
     address: 'Adress',
   },
   quantities: {
@@ -248,9 +248,9 @@ export const sv: DeepStringify<typeof en> = {
       m: 'm', m2: 'm²', m3: 'm³', ton: 'ton',
     },
   },
-  siteRates: {
-    toggle: 'Platspriser',
-    help: 'Platsspecifika priser som gäller före kontraktsvillkoren för bokningar på den här platsen. Lämna ett fält tomt för att ärva kontraktsvärdet — överridningar gäller per fält, inte allt-eller-inget. Varje rad är en ny version från sitt datum, så historiska månader behåller sina historiska priser.',
+  workPackageRates: {
+    toggle: 'Taxa per deluppdrag',
+    help: 'Deluppragsspecifika priser som gäller före kontraktsvillkoren för bokningar på det här deluppdraget. Lämna ett fält tomt för att ärva kontraktsvärdet — överridningar gäller per fält, inte allt-eller-inget. Varje rad är en ny version från sitt datum, så historiska månader behåller sina historiska priser.',
     empty: 'Inga överridningar — allt debiteras enligt kontraktsvillkoren.',
     add: 'Lägg till prisversion',
     hEffective: 'Datumet då överridningen börjar gälla. Arbete bokat före behåller det tidigare priset — överridningar skriver aldrig om historik.',
@@ -333,7 +333,7 @@ export const sv: DeepStringify<typeof en> = {
     customer: 'Kund',
     date: 'Datum',
     resource: 'Resurs',
-    location: 'Plats',
+    workPackage: 'Deluppdrag',
     plannedHours: 'Planerade timmar',
     activityRef: 'Aktivitetsref',
     workDescription: 'Arbetsbeskrivning',

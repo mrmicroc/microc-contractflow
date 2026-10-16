@@ -26,10 +26,10 @@ import type {
   ExpenseRequestBody,
   InvoiceDetail,
   InvoiceSpecification,
-  Location,
-  LocationRate,
-  LocationRateRequestBody,
-  LocationRequestBody,
+  WorkPackage,
+  WorkPackageRate,
+  WorkPackageRateRequestBody,
+  WorkPackageRequestBody,
   MarginRow,
   MobilisationPeriod,
   MobilisationSuggestion,
@@ -166,18 +166,18 @@ export const grantProjectAccess = (projectId: string, resourceId: string) =>
 export const revokeProjectAccess = (projectId: string, resourceId: string) =>
   apiDelete(`/api/projects/${projectId}/access/${resourceId}`);
 
-export const createLocation = (b: LocationRequestBody) => apiPost<Location>('/api/locations', b);
-export const updateLocation = (id: string, b: LocationRequestBody) =>
-  apiPut<Location>(`/api/locations/${id}`, b);
-export const deleteLocation = (id: string) => apiDelete(`/api/locations/${id}`);
+export const createWorkPackage = (b: WorkPackageRequestBody) => apiPost<WorkPackage>('/api/work-packages', b);
+export const updateWorkPackage = (id: string, b: WorkPackageRequestBody) =>
+  apiPut<WorkPackage>(`/api/work-packages/${id}`, b);
+export const deleteWorkPackage = (id: string) => apiDelete(`/api/work-packages/${id}`);
 
-// Versioned site-rate overrides on a location.
-export const getLocationRates = (locationId: string) =>
-  apiGet<LocationRate[]>(`/api/locations/${locationId}/rates`);
-export const createLocationRate = (locationId: string, b: LocationRateRequestBody) =>
-  apiPost<LocationRate>(`/api/locations/${locationId}/rates`, b);
-export const deleteLocationRate = (locationId: string, rateId: string) =>
-  apiDelete(`/api/locations/${locationId}/rates/${rateId}`);
+// Versioned site-rate overrides on a workPackage.
+export const getWorkPackageRates = (workPackageId: string) =>
+  apiGet<WorkPackageRate[]>(`/api/work-packages/${workPackageId}/rates`);
+export const createWorkPackageRate = (workPackageId: string, b: WorkPackageRateRequestBody) =>
+  apiPost<WorkPackageRate>(`/api/work-packages/${workPackageId}/rates`, b);
+export const deleteWorkPackageRate = (workPackageId: string, rateId: string) =>
+  apiDelete(`/api/work-packages/${workPackageId}/rates/${rateId}`);
 
 export const createQuantity = (b: EstimatedQuantityRequestBody) =>
   apiPost<EstimatedQuantity>('/api/quantities', b);
@@ -342,10 +342,10 @@ export const suggestMobilisations = (resourceId: string, from: string, to: strin
     `/api/mobilisations/suggest?resourceId=${resourceId}&from=${from}&to=${to}`);
 export const confirmMobilisation = (b: {
   projectId: string; resourceId: string; startDate: string; endDate: string;
-  locationId?: string | null;
+  workPackageId?: string | null;
 }) => apiPost<MobilisationPeriod>('/api/mobilisations', b);
-export const setMobilisationSite = (id: string, locationId: string | null) =>
-  apiPatch<MobilisationPeriod>(`/api/mobilisations/${id}/site`, { locationId });
+export const setMobilisationWorkPackage = (id: string, workPackageId: string | null) =>
+  apiPatch<MobilisationPeriod>(`/api/mobilisations/${id}/work-package`, { workPackageId });
 export const splitMobilisation = (id: string, fromDate: string) =>
   apiPost<{ first: MobilisationPeriod; second: MobilisationPeriod }>(
     `/api/mobilisations/${id}/split`, { fromDate });

@@ -55,7 +55,7 @@ export function Plan() {
   const [ef, setEf] = useState({ date: '', plannedHours: '', workDescription: '', activityRef: '', status: '' });
   const [error, setError] = useState<string | null>(null);
   const [f, setF] = useState({
-    projectId: '', resourceId: '', locationId: '', date: '', plannedHours: '8',
+    projectId: '', resourceId: '', workPackageId: '', date: '', plannedHours: '8',
     activityRef: '', workDescription: '', status: 'forecast' as 'forecast' | 'tentative' | 'requested',
   });
 
@@ -193,7 +193,7 @@ export function Plan() {
       await createBooking({
         projectId: f.projectId,
         resourceId: f.resourceId,
-        locationId: f.locationId || null,
+        workPackageId: f.workPackageId || null,
         date: f.date,
         plannedHours: numOrNull(f.plannedHours) ?? 8,
         activityRef: f.activityRef || null,
@@ -203,7 +203,7 @@ export function Plan() {
         status: f.status,
       });
       setFormOpen(false);
-      setF({ projectId: '', resourceId: '', locationId: '', date: '', plannedHours: '8', activityRef: '', workDescription: '', status: 'forecast' });
+      setF({ projectId: '', resourceId: '', workPackageId: '', date: '', plannedHours: '8', activityRef: '', workDescription: '', status: 'forecast' });
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -420,7 +420,7 @@ export function Plan() {
             <div><span className="text-slate-500">{t('booking.statusLabel')}:</span> {t(`booking.status.${selected.status}`)}</div>
             <div><span className="text-slate-500">{t('booking.plannedHours')}:</span> {selected.plannedHours} h</div>
             <div><span className="text-slate-500">{t('booking.expectedPad')}:</span> {selected.expectedPad ?? '—'}</div>
-            <div><span className="text-slate-500">{t('booking.location')}:</span> {selected.locationName ?? '—'}</div>
+            <div><span className="text-slate-500">{t('booking.workPackage')}:</span> {selected.workPackageName ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.activityRef')}:</span> {selected.activityRef ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.workDescription')}:</span> {selected.workDescription ?? '—'}</div>
           </div>

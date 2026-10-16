@@ -37,7 +37,7 @@ public class BookingsController(
         var query = db.Bookings
             .Include(b => b.Project).ThenInclude(p => p.Contract).ThenInclude(c => c.Customer)
             .Include(b => b.Resource)
-            .Include(b => b.Location)
+            .Include(b => b.WorkPackage)
             .AsQueryable();
 
         if (me!.Role == AppRole.Resource)
@@ -76,16 +76,16 @@ public class BookingsController(
             return BadRequest(new { error = "Unknown project." });
         if (!await db.Resources.AnyAsync(r => r.Id == req.ResourceId && r.IsActive, ct))
             return BadRequest(new { error = "Unknown or inactive resource." });
-        if (req.LocationId.HasValue && !await db.Locations.AnyAsync(
-                l => l.Id == req.LocationId.Value && l.ProjectId == req.ProjectId, ct))
-            return BadRequest(new { error = "Location does not belong to the project." });
+        if (req.WorkPackageId.HasValue && !await db.WorkPackages.AnyAsync(
+                l => l.Id == req.WorkPackageId.Value && l.ProjectId == req.ProjectId, ct))
+            return BadRequest(new { error = "WorkPackage does not belong to the project." });
 
         var me = await currentUser.GetAsync(ct);
         var booking = new Booking
         {
             ProjectId = req.ProjectId,
             ResourceId = req.ResourceId,
-            LocationId = req.LocationId,
+            WorkPackageId = req.WorkPackageId,
             Date = req.Date,
             PlannedHours = req.PlannedHours,
             ActivityRef = req.ActivityRef,
@@ -134,10 +134,10 @@ public class BookingsController(
                 return BadRequest(new { error = "Unknown or inactive resource." });
             booking.ResourceId = req.ResourceId.Value;
         }
-        if (req.LocationId.HasValue && !await db.Locations.AnyAsync(
-                l => l.Id == req.LocationId.Value && l.ProjectId == booking.ProjectId, ct))
-            return BadRequest(new { error = "Location does not belong to the project." });
-        booking.LocationId = req.LocationId;
+        if (req.WorkPackageId.HasValue && !await db.WorkPackages.AnyAsync(
+                l => l.Id == req.WorkPackageId.Value && l.ProjectId == booking.ProjectId, ct))
+            return BadRequest(new { error = "WorkPackage does not belong to the project." });
+        booking.WorkPackageId = req.WorkPackageId;
         booking.PlannedHours = req.PlannedHours;
         booking.ActivityRef = req.ActivityRef;
         booking.WorkDescription = req.WorkDescription;
@@ -285,7 +285,7 @@ public class BookingsController(
         {
             ProjectId = booking.ProjectId,
             ResourceId = booking.ResourceId,
-            LocationId = booking.LocationId,
+            WorkPackageId = booking.WorkPackageId,
             Date = req.Date,
             PlannedHours = req.PlannedHours ?? booking.PlannedHours,
             ActivityRef = booking.ActivityRef,
@@ -354,7 +354,7 @@ public class BookingsController(
         db.Bookings
             .Include(b => b.Project).ThenInclude(p => p.Contract).ThenInclude(c => c.Customer)
             .Include(b => b.Resource)
-            .Include(b => b.Location)
+            .Include(b => b.WorkPackage)
             .FirstOrDefaultAsync(b => b.Id == id, ct);
 
     private async Task<bool> IsAdminOrManagerOrOwnerAsync(Booking b, CancellationToken ct)
@@ -472,7 +472,7 @@ public class BookingsController(
 
             return new BookingDto(
                 b.Id, b.ProjectId, b.Project.Name, b.Project.Contract.Customer.Name,
-                b.ResourceId, b.Resource.DisplayName, b.LocationId, b.Location?.Name,
+                b.ResourceId, b.Resource.DisplayName, b.WorkPackageId, b.WorkPackage?.Name,
                 b.Date, b.PlannedHours, b.ActivityRef, b.WorkDescription,
                 b.CustomerContact, b.EvidenceRef, b.Status, expectedPad,
                 b.AcknowledgedUtc,

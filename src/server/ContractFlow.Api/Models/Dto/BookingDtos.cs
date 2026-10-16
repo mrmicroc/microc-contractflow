@@ -5,7 +5,7 @@ namespace ContractFlow.Api.Models.Dto;
 
 public record BookingDto(
     Guid Id, Guid ProjectId, string ProjectName, string CustomerName,
-    Guid ResourceId, string ResourceName, Guid? LocationId, string? LocationName,
+    Guid ResourceId, string ResourceName, Guid? WorkPackageId, string? WorkPackageName,
     DateOnly Date, decimal PlannedHours, string? ActivityRef, string? WorkDescription,
     string? CustomerContact, string? EvidenceRef, BookingStatus Status,
     decimal? ExpectedPad, DateTime? AcknowledgedUtc,
@@ -20,7 +20,7 @@ public class BookingRequest
     public Guid ProjectId { get; set; }
     [Required]
     public Guid ResourceId { get; set; }
-    public Guid? LocationId { get; set; }
+    public Guid? WorkPackageId { get; set; }
     [Required]
     public DateOnly Date { get; set; }
     [Range(0.25, 24)]
@@ -38,7 +38,7 @@ public class BookingRequest
 
 public class BookingUpdateRequest
 {
-    public Guid? LocationId { get; set; }
+    public Guid? WorkPackageId { get; set; }
     [Range(0.25, 24)]
     public decimal PlannedHours { get; set; } = 8m;
     [StringLength(100)]

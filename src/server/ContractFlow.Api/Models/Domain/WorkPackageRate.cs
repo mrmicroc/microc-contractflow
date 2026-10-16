@@ -1,17 +1,17 @@
 namespace ContractFlow.Api.Models.Domain;
 
 /// <summary>
-/// Versioned per-site price overrides: when a booking targets this location,
+/// Versioned package-level price overrides: when a booking targets this work package,
 /// each set field wins over the contract terms in force — a null field falls
 /// back to the contract. A new row with a later EffectiveFrom is a new version;
-/// historical dates keep their historical site prices. Prices only — policy
+/// historical dates keep their historical package prices. Prices only — policy
 /// (OT rules, PAD, cancellation) stays on the contract.
 /// </summary>
-public class LocationRate
+public class WorkPackageRate
 {
     public Guid Id { get; set; }
-    public Guid LocationId { get; set; }
-    public Location Location { get; set; } = null!;
+    public Guid WorkPackageId { get; set; }
+    public WorkPackage WorkPackage { get; set; } = null!;
 
     /// <summary>First day this override set applies to.</summary>
     public DateOnly EffectiveFrom { get; set; }
@@ -28,7 +28,7 @@ public class LocationRate
     public decimal? HalfDayRate { get; set; }
     public decimal? HalfDayMaxHours { get; set; }
 
-    /// <summary>Mobilisation fee when a confirmed period targets this site.</summary>
+    /// <summary>Mobilisation fee when a confirmed period targets this package.</summary>
     public decimal? MobilisationFee { get; set; }
 
     public string? Notes { get; set; }

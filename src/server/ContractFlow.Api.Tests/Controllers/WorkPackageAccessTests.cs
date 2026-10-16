@@ -8,11 +8,11 @@ using Microsoft.EntityFrameworkCore;
 namespace ContractFlow.Api.Tests.Controllers;
 
 /// <summary>
-/// Site-rate overrides (LocationRate), project self-reporting access lists
+/// Package-rate overrides (WorkPackageRate), project self-reporting access lists
 /// (ProjectAccess + /api/projects/mine) and the per-entry billing mode —
 /// the "multiple sites, different rates, different crews" feature.
 /// </summary>
-public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
+public class WorkPackageAccessTests(ContractFlowWebApplicationFactory factory)
     : IClassFixture<ContractFlowWebApplicationFactory>
 {
     private static readonly Guid LinkedId = TimeReportingTests.LinkedId;
@@ -53,23 +53,23 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
         return ids;
     }
 
-    private async Task<Guid> AddLocationAsync(Guid projectId, string name)
+    private async Task<Guid> AddWorkPackageAsync(Guid projectId, string name)
     {
-        var res = await Admin.PostAsJsonAsync("/api/locations",
+        var res = await Admin.PostAsJsonAsync("/api/work-packages",
             new { projectId, name });
         res.EnsureSuccessStatusCode();
         return (await res.Content.ReadFromJsonAsync<IdRef>())!.Id;
     }
 
     /// <summary>Creates + confirms a booking for the linked resource
-    /// (optionally at a site) and returns the booking id.</summary>
+    /// (optionally on a work package) and returns the booking id.</summary>
     private async Task<Guid> ConfirmedBookingAsync(Scaffold.Ids ids, string date,
-        Guid? locationId = null)
+        Guid? workPackageId = null)
     {
         var res = await Admin.PostAsJsonAsync("/api/bookings", new
         {
             projectId = ids.ProjectId, resourceId = LinkedId, date,
-            plannedHours = 8m, status = "requested", locationId,
+            plannedHours = 8m, status = "requested", workPackageId,
         });
         res.EnsureSuccessStatusCode();
         var id = (await res.Content.ReadFromJsonAsync<IdRef>())!.Id;
@@ -78,7 +78,7 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
         return id;
     }
 
-    /// <summary>Books the linked resource on the project (at a site), posts
+    /// <summary>Books the linked resource on the project (on a work package), posts
     /// the entry on that booking as the resource, submits + approves the week.</summary>
     private async Task ApproveEntriesAsync(Scaffold.Ids ids, string monday,
         params object[] entries)
@@ -106,44 +106,44 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
         return (await Admin.GetFromJsonAsync<InvoiceDetail>($"/api/invoices/{inv!.Id}"))!;
     }
 
-    // ── Location rates: CRUD + roles ───────────────────────────────────────
+    // ── WorkPackage rates: CRUD + roles ───────────────────────────────────────
 
     [Fact]
-    public async Task LocationRates_Crud_AdminOnly()
+    public async Task WorkPackageRates_Crud_AdminOnly()
     {
         var ids = await GraphAsync("rate-crud", new
         {
             effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
             timeBilling = "hourly", padEnabled = false, hourlyRate = 1000m,
         });
-        var loc = await AddLocationAsync(ids.ProjectId, "Site A");
+        var wp = await AddWorkPackageAsync(ids.ProjectId, "Site A");
 
-        var denied = await Consultant.PostAsJsonAsync($"/api/locations/{loc}/rates",
+        var denied = await Consultant.PostAsJsonAsync($"/api/work-packages/{wp}/rates",
             new { effectiveFrom = "2026-01-01", hourlyRate = 1500m });
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
 
-        var res = await Admin.PostAsJsonAsync($"/api/locations/{loc}/rates",
+        var res = await Admin.PostAsJsonAsync($"/api/work-packages/{wp}/rates",
             new { effectiveFrom = "2026-01-01", hourlyRate = 1500m, notes = "difficult site" });
         res.EnsureSuccessStatusCode();
         var rate = await res.Content.ReadFromJsonAsync<RateDto>();
         Assert.Equal(1500m, rate!.HourlyRate);
 
-        var list = await Admin.GetFromJsonAsync<RateDto[]>($"/api/locations/{loc}/rates");
+        var list = await Admin.GetFromJsonAsync<RateDto[]>($"/api/work-packages/{wp}/rates");
         Assert.Single(list!);
-        var other = await AddLocationAsync(ids.ProjectId, "Site B");
+        var other = await AddWorkPackageAsync(ids.ProjectId, "Site B");
         Assert.Empty((await Admin.GetFromJsonAsync<RateDto[]>(
-            $"/api/locations/{other}/rates"))!);
+            $"/api/work-packages/{other}/rates"))!);
 
-        var del = await Admin.DeleteAsync($"/api/locations/{loc}/rates/{rate.Id}");
+        var del = await Admin.DeleteAsync($"/api/work-packages/{wp}/rates/{rate.Id}");
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
         Assert.Empty((await Admin.GetFromJsonAsync<RateDto[]>(
-            $"/api/locations/{loc}/rates"))!);
+            $"/api/work-packages/{wp}/rates"))!);
     }
 
     // ── Billing: override wins, per-field fallback, versioning ─────────────
 
-    /// <summary>Booked entries at a site with an hourly override price at the
-    /// override; a site without overrides keeps the contract rate.</summary>
+    /// <summary>Booked entries on a work package with an hourly override price at the
+    /// override; a package without overrides keeps the contract rate.</summary>
     [Fact]
     public async Task Billing_SiteOverride_Wins_PerFieldFallback()
     {
@@ -153,12 +153,12 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
             timeBilling = "hourly", padEnabled = false,
             hourlyRate = 1000m, saturdayRate = 2000m,
         });
-        var site = await AddLocationAsync(ids.ProjectId, "Override Site");
+        var site = await AddWorkPackageAsync(ids.ProjectId, "Override Site");
         // Override only the weekday rate — Saturday must fall back to contract.
-        await Admin.PostAsJsonAsync($"/api/locations/{site}/rates",
+        await Admin.PostAsJsonAsync($"/api/work-packages/{site}/rates",
             new { effectiveFrom = "2026-01-01", hourlyRate = 1500m });
 
-        // Wed 2029-01-03 at override site; Sat 2029-01-06 same site.
+        // Wed 2029-01-03 at override package; Sat 2029-01-06 same package.
         var wedId = await ConfirmedBookingAsync(ids, "2029-01-03", site);
         var satId = await ConfirmedBookingAsync(ids, "2029-01-06", site);
 
@@ -172,7 +172,7 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
         var wedLine = Assert.Single(detail.Lines, l => l.Date == "2029-01-03");
         Assert.Equal(1500m, wedLine.UnitPrice);
         Assert.Equal(12000m, wedLine.Amount);
-        Assert.Contains("site rates", wedLine.Explanation);
+        Assert.Contains("package rates", wedLine.Explanation);
         var satLine = Assert.Single(detail.Lines, l => l.Date == "2029-01-06");
         Assert.Equal(2000m, satLine.UnitPrice); // fell back to contract Saturday rate
         Assert.Equal(16000m, satLine.Amount);
@@ -188,10 +188,10 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
             effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
             timeBilling = "hourly", padEnabled = false, hourlyRate = 1000m,
         });
-        var site = await AddLocationAsync(ids.ProjectId, "Versioned Site");
-        await Admin.PostAsJsonAsync($"/api/locations/{site}/rates",
+        var site = await AddWorkPackageAsync(ids.ProjectId, "Versioned Site");
+        await Admin.PostAsJsonAsync($"/api/work-packages/{site}/rates",
             new { effectiveFrom = "2026-01-01", hourlyRate = 1200m });
-        await Admin.PostAsJsonAsync($"/api/locations/{site}/rates",
+        await Admin.PostAsJsonAsync($"/api/work-packages/{site}/rates",
             new { effectiveFrom = "2029-03-10", hourlyRate = 1800m });
 
         // Fri 2029-03-09 → old override; Mon 2029-03-12 → new override.
@@ -252,8 +252,8 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
         Assert.Contains("billed as hours", hrs.Explanation);
     }
 
-    /// <summary>Mobilisation fee resolves from the site's override when the
-    /// period is bound to a location; unbound periods use the contract fee.</summary>
+    /// <summary>Mobilisation fee resolves from the package's override when the
+    /// period is bound to a workPackage; unbound periods use the contract fee.</summary>
     [Fact]
     public async Task Billing_Mobilisation_SiteFee()
     {
@@ -263,14 +263,14 @@ public class SiteAccessTests(ContractFlowWebApplicationFactory factory)
             timeBilling = "hourly", padEnabled = false,
             hourlyRate = 1000m, mobilisationFee = 500m,
         });
-        var site = await AddLocationAsync(ids.ProjectId, "Remote Site");
-        await Admin.PostAsJsonAsync($"/api/locations/{site}/rates",
+        var site = await AddWorkPackageAsync(ids.ProjectId, "Remote Site");
+        await Admin.PostAsJsonAsync($"/api/work-packages/{site}/rates",
             new { effectiveFrom = "2026-01-01", mobilisationFee = 999m });
 
         var mob = await Admin.PostAsJsonAsync("/api/mobilisations", new
         {
             projectId = ids.ProjectId, resourceId = LinkedId,
-            startDate = "2029-05-05", endDate = "2029-05-07", locationId = site,
+            startDate = "2029-05-05", endDate = "2029-05-07", workPackageId = site,
         });
         mob.EnsureSuccessStatusCode();
 

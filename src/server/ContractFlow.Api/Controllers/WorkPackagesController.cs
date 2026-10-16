@@ -8,99 +8,99 @@ using Microsoft.EntityFrameworkCore;
 namespace ContractFlow.Api.Controllers;
 
 [ApiController]
-[Route("api/locations")]
-public class LocationsController(AppDbContext db) : ControllerBase
+[Route("api/work-packages")]
+public class WorkPackagesController(AppDbContext db) : ControllerBase
 {
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
     public async Task<IActionResult> List([FromQuery] Guid? projectId, CancellationToken ct)
     {
-        var query = db.Locations.AsQueryable();
+        var query = db.WorkPackages.AsQueryable();
         if (projectId.HasValue)
             query = query.Where(l => l.ProjectId == projectId.Value);
 
-        var locations = await query
+        var workPackages = await query
             .OrderBy(l => l.Name)
-            .Select(l => new LocationDto(l.Id, l.ProjectId, l.Name, l.Address, l.Notes))
+            .Select(l => new WorkPackageDto(l.Id, l.ProjectId, l.Name, l.Address, l.Notes))
             .ToListAsync(ct);
-        return Ok(locations);
+        return Ok(workPackages);
     }
 
     [HttpPost]
     [RequireRole(AppRole.Administrator)]
-    public async Task<IActionResult> Create(LocationRequest req, CancellationToken ct)
+    public async Task<IActionResult> Create(WorkPackageRequest req, CancellationToken ct)
     {
         if (!await db.Projects.AnyAsync(p => p.Id == req.ProjectId, ct))
             return BadRequest(new { error = "Unknown project." });
 
-        var location = new Location
+        var workPackage = new WorkPackage
         {
             ProjectId = req.ProjectId,
             Name = req.Name.Trim(),
             Address = req.Address,
             Notes = req.Notes,
         };
-        db.Locations.Add(location);
+        db.WorkPackages.Add(workPackage);
         await db.SaveChangesAsync(ct);
-        return Ok(new LocationDto(location.Id, location.ProjectId, location.Name,
-            location.Address, location.Notes));
+        return Ok(new WorkPackageDto(workPackage.Id, workPackage.ProjectId, workPackage.Name,
+            workPackage.Address, workPackage.Notes));
     }
 
     [HttpPut("{id:guid}")]
     [RequireRole(AppRole.Administrator)]
-    public async Task<IActionResult> Update(Guid id, LocationRequest req, CancellationToken ct)
+    public async Task<IActionResult> Update(Guid id, WorkPackageRequest req, CancellationToken ct)
     {
-        var location = await db.Locations.FindAsync([id], ct);
-        if (location is null) return NotFound();
+        var workPackage = await db.WorkPackages.FindAsync([id], ct);
+        if (workPackage is null) return NotFound();
         if (!await db.Projects.AnyAsync(p => p.Id == req.ProjectId, ct))
             return BadRequest(new { error = "Unknown project." });
 
-        location.ProjectId = req.ProjectId;
-        location.Name = req.Name.Trim();
-        location.Address = req.Address;
-        location.Notes = req.Notes;
+        workPackage.ProjectId = req.ProjectId;
+        workPackage.Name = req.Name.Trim();
+        workPackage.Address = req.Address;
+        workPackage.Notes = req.Notes;
         await db.SaveChangesAsync(ct);
-        return Ok(new LocationDto(location.Id, location.ProjectId, location.Name,
-            location.Address, location.Notes));
+        return Ok(new WorkPackageDto(workPackage.Id, workPackage.ProjectId, workPackage.Name,
+            workPackage.Address, workPackage.Notes));
     }
 
     [HttpDelete("{id:guid}")]
     [RequireRole(AppRole.Administrator)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
-        var location = await db.Locations.FindAsync([id], ct);
-        if (location is null) return NotFound();
+        var workPackage = await db.WorkPackages.FindAsync([id], ct);
+        if (workPackage is null) return NotFound();
 
-        db.Locations.Remove(location);
+        db.WorkPackages.Remove(workPackage);
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
-    // ── Versioned site-rate overrides ────────────────────────────────────────
+    // ── Versioned package-rate overrides ────────────────────────────────────────
 
-    /// <summary>All rate-override versions for a location, newest first.</summary>
+    /// <summary>All rate-override versions for a workPackage, newest first.</summary>
     [HttpGet("{id:guid}/rates")]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
     public async Task<IActionResult> ListRates(Guid id, CancellationToken ct)
     {
-        if (!await db.Locations.AnyAsync(l => l.Id == id, ct)) return NotFound();
-        var rates = await db.LocationRates
-            .Where(r => r.LocationId == id)
+        if (!await db.WorkPackages.AnyAsync(l => l.Id == id, ct)) return NotFound();
+        var rates = await db.WorkPackageRates
+            .Where(r => r.WorkPackageId == id)
             .OrderByDescending(r => r.EffectiveFrom).ThenByDescending(r => r.CreatedUtc)
             .ToListAsync(ct);
         return Ok(rates.Select(ToRateDto));
     }
 
     /// <summary>Adds a new override version — fields left null inherit the
-    /// contract terms; set fields win when bookings target this location.</summary>
+    /// contract terms; set fields win when bookings target this workPackage.</summary>
     [HttpPost("{id:guid}/rates")]
     [RequireRole(AppRole.Administrator)]
-    public async Task<IActionResult> CreateRate(Guid id, LocationRateRequest req, CancellationToken ct)
+    public async Task<IActionResult> CreateRate(Guid id, WorkPackageRateRequest req, CancellationToken ct)
     {
-        if (!await db.Locations.AnyAsync(l => l.Id == id, ct)) return NotFound();
-        var rate = new LocationRate
+        if (!await db.WorkPackages.AnyAsync(l => l.Id == id, ct)) return NotFound();
+        var rate = new WorkPackageRate
         {
-            LocationId = id,
+            WorkPackageId = id,
             EffectiveFrom = req.EffectiveFrom,
             HourlyRate = req.HourlyRate, SaturdayRate = req.SaturdayRate,
             SundayRate = req.SundayRate, HolidayRate = req.HolidayRate,
@@ -109,7 +109,7 @@ public class LocationsController(AppDbContext db) : ControllerBase
             HalfDayRate = req.HalfDayRate, HalfDayMaxHours = req.HalfDayMaxHours,
             MobilisationFee = req.MobilisationFee, Notes = req.Notes,
         };
-        db.LocationRates.Add(rate);
+        db.WorkPackageRates.Add(rate);
         await db.SaveChangesAsync(ct);
         return Ok(ToRateDto(rate));
     }
@@ -119,16 +119,16 @@ public class LocationsController(AppDbContext db) : ControllerBase
     [RequireRole(AppRole.Administrator)]
     public async Task<IActionResult> DeleteRate(Guid id, Guid rateId, CancellationToken ct)
     {
-        var rate = await db.LocationRates
-            .FirstOrDefaultAsync(r => r.Id == rateId && r.LocationId == id, ct);
+        var rate = await db.WorkPackageRates
+            .FirstOrDefaultAsync(r => r.Id == rateId && r.WorkPackageId == id, ct);
         if (rate is null) return NotFound();
-        db.LocationRates.Remove(rate);
+        db.WorkPackageRates.Remove(rate);
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
-    private static LocationRateDto ToRateDto(LocationRate r) => new(
-        r.Id, r.LocationId, r.EffectiveFrom.ToString("yyyy-MM-dd"),
+    private static WorkPackageRateDto ToRateDto(WorkPackageRate r) => new(
+        r.Id, r.WorkPackageId, r.EffectiveFrom.ToString("yyyy-MM-dd"),
         r.HourlyRate, r.SaturdayRate, r.SundayRate, r.HolidayRate,
         r.DayRate, r.SaturdayDayRate, r.SundayDayRate, r.HolidayDayRate,
         r.HalfDayRate, r.HalfDayMaxHours, r.MobilisationFee, r.Notes);

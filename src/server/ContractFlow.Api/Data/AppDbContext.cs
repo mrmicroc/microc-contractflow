@@ -11,8 +11,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Contract> Contracts => Set<Contract>();
     public DbSet<ContractTerms> ContractTerms => Set<ContractTerms>();
     public DbSet<Project> Projects => Set<Project>();
-    public DbSet<Location> Locations => Set<Location>();
-    public DbSet<LocationRate> LocationRates => Set<LocationRate>();
+    public DbSet<WorkPackage> WorkPackages => Set<WorkPackage>();
+    public DbSet<WorkPackageRate> WorkPackageRates => Set<WorkPackageRate>();
     public DbSet<ProjectAccess> ProjectAccesses => Set<ProjectAccess>();
     public DbSet<EstimatedQuantity> EstimatedQuantities => Set<EstimatedQuantity>();
     public DbSet<Resource> Resources => Set<Resource>();
@@ -125,18 +125,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(p => p.ContractId).OnDelete(DeleteBehavior.Cascade);
         });
 
-        builder.Entity<Location>(e =>
+        builder.Entity<WorkPackage>(e =>
         {
             e.Property(l => l.Name).HasMaxLength(200);
-            e.HasOne(l => l.Project).WithMany(p => p.Locations)
+            e.HasOne(l => l.Project).WithMany(p => p.WorkPackages)
                 .HasForeignKey(l => l.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
-        builder.Entity<LocationRate>(e =>
+        builder.Entity<WorkPackageRate>(e =>
         {
-            e.HasIndex(r => new { r.LocationId, r.EffectiveFrom });
-            e.HasOne(r => r.Location).WithMany(l => l.Rates)
-                .HasForeignKey(r => r.LocationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => new { r.WorkPackageId, r.EffectiveFrom });
+            e.HasOne(r => r.WorkPackage).WithMany(l => l.Rates)
+                .HasForeignKey(r => r.WorkPackageId).OnDelete(DeleteBehavior.Cascade);
             e.Property(r => r.HourlyRate).HasPrecision(18, 2);
             e.Property(r => r.SaturdayRate).HasPrecision(18, 2);
             e.Property(r => r.SundayRate).HasPrecision(18, 2);
@@ -223,8 +223,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(b => b.ProjectId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(b => b.Resource).WithMany()
                 .HasForeignKey(b => b.ResourceId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(b => b.Location).WithMany()
-                .HasForeignKey(b => b.LocationId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(b => b.WorkPackage).WithMany()
+                .HasForeignKey(b => b.WorkPackageId).OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<PadTransaction>(e =>
@@ -304,8 +304,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.Location).WithMany()
-                .HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.WorkPackage).WithMany()
+                .HasForeignKey(x => x.WorkPackageId).OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<Expense>(e =>

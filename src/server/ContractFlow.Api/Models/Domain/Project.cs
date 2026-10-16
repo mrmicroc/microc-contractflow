@@ -13,6 +13,6 @@ public class Project
     public bool IsActive { get; set; } = true;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
-    public List<Location> Locations { get; set; } = [];
+    public List<WorkPackage> WorkPackages { get; set; } = [];
     public List<EstimatedQuantity> EstimatedQuantities { get; set; } = [];
 }

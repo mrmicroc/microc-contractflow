@@ -1,15 +1,15 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  createLocation,
-  createLocationRate,
+  createWorkPackage,
+  createWorkPackageRate,
   createQuantity,
-  deleteLocation,
-  deleteLocationRate,
+  deleteWorkPackage,
+  deleteWorkPackageRate,
   deleteProject,
   deleteQuantity,
   errorMessage,
-  getLocationRates,
+  getWorkPackageRates,
   getProject,
   getProjectAccess,
   getResources,
@@ -19,7 +19,7 @@ import {
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
 import type {
-  LocationRate, ProjectAccess, ProjectDetail as ProjectDetailDto,
+  WorkPackageRate, ProjectAccess, ProjectDetail as ProjectDetailDto,
   ResourceSummary,
 } from '@/lib/types';
 import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
@@ -65,8 +65,8 @@ export function ProjectDetail({
 
   if (!project) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
 
-  const saveLocation = async () => {
-    await createLocation({
+  const saveWorkPackage = async () => {
+    await createWorkPackage({
       projectId: project.id,
       name: lf.name.trim(),
       address: lf.address.trim() || null,
@@ -118,17 +118,17 @@ export function ProjectDetail({
         <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>
       )}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <Panel title={`${t('locations.title')} — ${project.name}`} help={t('locations.help')}>
+      <Panel title={`${t('workPackages.title')} — ${project.name}`} help={t('workPackages.help')}>
         <table className="mb-3 w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200">
               <th className={thCls}>{t('common.name')}</th>
-              <th className={thCls}>{t('locations.address')}</th>
+              <th className={thCls}>{t('workPackages.address')}</th>
               {canSeeCommercial(me) && <th className={thCls}>{t('common.actions')}</th>}
             </tr>
           </thead>
           <tbody>
-            {project.locations.map((l) => (
+            {project.workPackages.map((l) => (
               <Fragment key={l.id}>
                 <tr className="border-b border-slate-100">
                   <td className={tdCls}>{l.name}</td>
@@ -138,11 +138,11 @@ export function ProjectDetail({
                       <span className="flex gap-1">
                         <button className={btnSecondaryCls}
                           onClick={() => setRatesFor(ratesFor === l.id ? null : l.id)}>
-                          {t('siteRates.toggle')}
+                          {t('workPackageRates.toggle')}
                         </button>
                         {canWrite && (
                           <button className={btnDangerCls}
-                            onClick={() => void deleteLocation(l.id).then(reload)}>
+                            onClick={() => void deleteWorkPackage(l.id).then(reload)}>
                             {t('common.delete')}
                           </button>
                         )}
@@ -153,13 +153,13 @@ export function ProjectDetail({
                 {ratesFor === l.id && (
                   <tr className="border-b border-slate-100 bg-slate-50">
                     <td colSpan={3} className="px-3 py-2">
-                      <SiteRates locationId={l.id} canWrite={canWrite} />
+                      <WorkPackageRates workPackageId={l.id} canWrite={canWrite} />
                     </td>
                   </tr>
                 )}
               </Fragment>
             ))}
-            {project.locations.length === 0 && (
+            {project.workPackages.length === 0 && (
               <tr><td className={tdCls} colSpan={3}>{t('common.none')}</td></tr>
             )}
           </tbody>
@@ -170,13 +170,13 @@ export function ProjectDetail({
               <input className={inputCls} value={lf.name}
                 onChange={(e) => setLf({ ...lf, name: e.target.value })} />
             </Field>
-            <Field label={t('locations.address')}>
+            <Field label={t('workPackages.address')}>
               <input className={inputCls} value={lf.address}
                 onChange={(e) => setLf({ ...lf, address: e.target.value })} />
             </Field>
             <button className={btnCls} disabled={!lf.name.trim()}
-              onClick={() => void saveLocation()}>
-              {t('locations.add')}
+              onClick={() => void saveWorkPackage()}>
+              {t('workPackages.add')}
             </button>
           </div>
         )}
@@ -295,11 +295,11 @@ export function ProjectDetail({
   );
 }
 
-/** Versioned site-rate overrides for one location — set fields win over the
+/** Versioned package-rate overrides for one work package — set fields win over the
  * contract terms; fields left empty inherit (per-field fallback). */
-function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boolean }) {
+function WorkPackageRates({ workPackageId, canWrite }: { workPackageId: string; canWrite: boolean }) {
   const { t } = useTranslation();
-  const [rates, setRates] = useState<LocationRate[]>([]);
+  const [rates, setRates] = useState<WorkPackageRate[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const empty = {
     effectiveFrom: new Date().toISOString().slice(0, 10),
@@ -310,8 +310,8 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
   const [f, setF] = useState(empty);
 
   const reload = useCallback(
-    () => getLocationRates(locationId).then(setRates).catch(() => setRates([])),
-    [locationId],
+    () => getWorkPackageRates(workPackageId).then(setRates).catch(() => setRates([])),
+    [workPackageId],
   );
   useEffect(() => { void reload(); }, [reload]);
 
@@ -332,7 +332,7 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
     if (bad.length) { setErr(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     setErr(null);
     try {
-      await createLocationRate(locationId, {
+      await createWorkPackageRate(workPackageId, {
         effectiveFrom: f.effectiveFrom,
         hourlyRate: numOrNull(f.hourlyRate), saturdayRate: numOrNull(f.saturdayRate),
         sundayRate: numOrNull(f.sundayRate), holidayRate: numOrNull(f.holidayRate),
@@ -351,7 +351,7 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
   const cell = (v: number | null) => v?.toString() ?? '—';
   return (
     <div>
-      <p className="mb-1 text-xs text-slate-500">{t('siteRates.help')}</p>
+      <p className="mb-1 text-xs text-slate-500">{t('workPackageRates.help')}</p>
       {rates.length > 0 && (
         <table className="mb-2 w-full border-collapse">
           <thead>
@@ -382,7 +382,7 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
                 {canWrite && (
                   <td className={tdCls}>
                     <button className={btnDangerCls}
-                      onClick={() => void deleteLocationRate(locationId, r.id)
+                      onClick={() => void deleteWorkPackageRate(workPackageId, r.id)
                         .then(reload).catch((e) => setErr(errorMessage(e)))}>
                       {t('common.delete')}
                     </button>
@@ -394,12 +394,12 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
         </table>
       )}
       {rates.length === 0 && (
-        <p className="mb-2 text-xs text-slate-400">{t('siteRates.empty')}</p>
+        <p className="mb-2 text-xs text-slate-400">{t('workPackageRates.empty')}</p>
       )}
       {err && <p className="mb-1 text-xs text-red-600">{err}</p>}
       {canWrite && (
         <div className="flex flex-wrap items-end gap-2">
-          <Field label={t('common.effectiveFrom')} help={t('siteRates.hEffective')}>
+          <Field label={t('common.effectiveFrom')} help={t('workPackageRates.hEffective')}>
             <input className={inputCls} type="date" value={f.effectiveFrom}
               onChange={(e) => setF({ ...f, effectiveFrom: e.target.value })} />
           </Field>
@@ -423,7 +423,7 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
               onChange={(e) => setF({ ...f, notes: e.target.value })} />
           </Field>
           <button className={btnCls} onClick={() => void save()}>
-            {t('siteRates.add')}
+            {t('workPackageRates.add')}
           </button>
         </div>
       )}

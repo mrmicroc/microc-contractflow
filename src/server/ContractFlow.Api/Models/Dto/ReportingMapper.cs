@@ -37,5 +37,5 @@ public static class ReportingMapper
 
     public static MobilisationPeriodDto Mobilisation(MobilisationPeriod p) => new(
         p.Id, p.ProjectId, p.Project.Name, p.ResourceId, p.Resource.DisplayName,
-        p.StartDate, p.EndDate, p.ConfirmedUtc, p.LocationId, p.Location?.Name);
+        p.StartDate, p.EndDate, p.ConfirmedUtc, p.WorkPackageId, p.WorkPackage?.Name);
 }
