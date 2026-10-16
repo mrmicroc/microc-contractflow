@@ -183,6 +183,40 @@ public class ProjectRequest
 
 public record LocationDto(Guid Id, Guid ProjectId, string Name, string? Address, string? Notes);
 
+/// <summary>One versioned site-rate override row (GET /api/locations/{id}/rates).</summary>
+public record LocationRateDto(
+    Guid Id, Guid LocationId, string EffectiveFrom,
+    decimal? HourlyRate, decimal? SaturdayRate, decimal? SundayRate, decimal? HolidayRate,
+    decimal? DayRate, decimal? SaturdayDayRate, decimal? SundayDayRate, decimal? HolidayDayRate,
+    decimal? HalfDayRate, decimal? HalfDayMaxHours, decimal? MobilisationFee, string? Notes);
+
+public class LocationRateRequest
+{
+    [Required]
+    public DateOnly EffectiveFrom { get; set; }
+    public decimal? HourlyRate { get; set; }
+    public decimal? SaturdayRate { get; set; }
+    public decimal? SundayRate { get; set; }
+    public decimal? HolidayRate { get; set; }
+    public decimal? DayRate { get; set; }
+    public decimal? SaturdayDayRate { get; set; }
+    public decimal? SundayDayRate { get; set; }
+    public decimal? HolidayDayRate { get; set; }
+    public decimal? HalfDayRate { get; set; }
+    public decimal? HalfDayMaxHours { get; set; }
+    public decimal? MobilisationFee { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>A resource allowed to self-report on the project (access list row).</summary>
+public record ProjectAccessDto(Guid ResourceId, string ResourceName, DateTime CreatedUtc);
+
+public class ProjectAccessRequest
+{
+    [Required]
+    public Guid ResourceId { get; set; }
+}
+
 public class LocationRequest
 {
     [Required]

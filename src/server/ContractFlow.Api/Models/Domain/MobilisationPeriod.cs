@@ -18,6 +18,12 @@ public class MobilisationPeriod
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
 
+    /// <summary>The site the period mobilised to — resolves per-site
+    /// mobilisation-fee overrides (<see cref="LocationRate"/>) at billing.
+    /// Null = the contract-level fee.</summary>
+    public Guid? LocationId { get; set; }
+    public Location? Location { get; set; }
+
     /// <summary>Only confirmed periods are persisted — suggested groupings are
     /// computed on demand by the suggest endpoint.</summary>
     public DateTime ConfirmedUtc { get; set; } = DateTime.UtcNow;

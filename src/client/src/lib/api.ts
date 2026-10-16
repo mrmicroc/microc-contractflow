@@ -27,12 +27,15 @@ import type {
   InvoiceDetail,
   InvoiceSpecification,
   Location,
+  LocationRate,
+  LocationRateRequestBody,
   LocationRequestBody,
   MarginRow,
   MobilisationPeriod,
   MobilisationSuggestion,
   PadDashboard,
   PadTransaction,
+  ProjectAccess,
   ProjectDetail,
   ProjectRequestBody,
   ProjectSummary,
@@ -77,6 +80,7 @@ async function apiSend<T>(method: string, path: string, body?: unknown): Promise
 
 export const apiPost = <T>(path: string, body?: unknown) => apiSend<T>('POST', path, body);
 export const apiPut = <T>(path: string, body: unknown) => apiSend<T>('PUT', path, body);
+export const apiPatch = <T>(path: string, body: unknown) => apiSend<T>('PATCH', path, body);
 export const apiDelete = (path: string) => apiSend<void>('DELETE', path);
 
 /** Multipart upload — the browser sets the Content-Type boundary itself. */
@@ -146,16 +150,34 @@ export const deleteContractTerms = (contractId: string, termId: string) =>
 
 export const getProjects = (contractId?: string) =>
   apiGet<ProjectSummary[]>(`/api/projects${contractId ? `?contractId=${contractId}` : ''}`);
+// Projects the caller may report on — resource-scoped (access list ∪ bookings).
+export const getMyProjects = () => apiGet<ProjectSummary[]>('/api/projects/mine');
 export const getProject = (id: string) => apiGet<ProjectDetail>(`/api/projects/${id}`);
 export const createProject = (b: ProjectRequestBody) => apiPost<ProjectSummary>('/api/projects', b);
 export const updateProject = (id: string, b: ProjectRequestBody) =>
   apiPut<ProjectSummary>(`/api/projects/${id}`, b);
 export const deleteProject = (id: string) => apiDelete(`/api/projects/${id}`);
 
+// Self-reporting access list on a project.
+export const getProjectAccess = (projectId: string) =>
+  apiGet<ProjectAccess[]>(`/api/projects/${projectId}/access`);
+export const grantProjectAccess = (projectId: string, resourceId: string) =>
+  apiPost<ProjectAccess>(`/api/projects/${projectId}/access`, { resourceId });
+export const revokeProjectAccess = (projectId: string, resourceId: string) =>
+  apiDelete(`/api/projects/${projectId}/access/${resourceId}`);
+
 export const createLocation = (b: LocationRequestBody) => apiPost<Location>('/api/locations', b);
 export const updateLocation = (id: string, b: LocationRequestBody) =>
   apiPut<Location>(`/api/locations/${id}`, b);
 export const deleteLocation = (id: string) => apiDelete(`/api/locations/${id}`);
+
+// Versioned site-rate overrides on a location.
+export const getLocationRates = (locationId: string) =>
+  apiGet<LocationRate[]>(`/api/locations/${locationId}/rates`);
+export const createLocationRate = (locationId: string, b: LocationRateRequestBody) =>
+  apiPost<LocationRate>(`/api/locations/${locationId}/rates`, b);
+export const deleteLocationRate = (locationId: string, rateId: string) =>
+  apiDelete(`/api/locations/${locationId}/rates/${rateId}`);
 
 export const createQuantity = (b: EstimatedQuantityRequestBody) =>
   apiPost<EstimatedQuantity>('/api/quantities', b);
@@ -320,7 +342,10 @@ export const suggestMobilisations = (resourceId: string, from: string, to: strin
     `/api/mobilisations/suggest?resourceId=${resourceId}&from=${from}&to=${to}`);
 export const confirmMobilisation = (b: {
   projectId: string; resourceId: string; startDate: string; endDate: string;
+  locationId?: string | null;
 }) => apiPost<MobilisationPeriod>('/api/mobilisations', b);
+export const setMobilisationSite = (id: string, locationId: string | null) =>
+  apiPatch<MobilisationPeriod>(`/api/mobilisations/${id}/site`, { locationId });
 export const splitMobilisation = (id: string, fromDate: string) =>
   apiPost<{ first: MobilisationPeriod; second: MobilisationPeriod }>(
     `/api/mobilisations/${id}/split`, { fromDate });

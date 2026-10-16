@@ -1,20 +1,32 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   createLocation,
+  createLocationRate,
   createQuantity,
   deleteLocation,
+  deleteLocationRate,
   deleteProject,
   deleteQuantity,
   errorMessage,
+  getLocationRates,
   getProject,
+  getProjectAccess,
+  getResources,
+  grantProjectAccess,
+  revokeProjectAccess,
 } from '@/lib/api';
 import { numOrNull } from '@/lib/versioned';
-import type { ProjectDetail as ProjectDetailDto } from '@/lib/types';
-import { isAdmin, useMe } from '@/lib/useMe';
+import type {
+  LocationRate, ProjectAccess, ProjectDetail as ProjectDetailDto,
+  ResourceSummary,
+} from '@/lib/types';
+import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, Field, inputCls, Panel, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel,
+  SearchSelect, tdCls, thCls,
 } from '@/components/forms';
+import { cn } from '@/lib/utils';
 
 export function ProjectDetail({
   projectId,
@@ -29,6 +41,14 @@ export function ProjectDetail({
   const [error, setError] = useState<string | null>(null);
   const [lf, setLf] = useState({ name: '', address: '', notes: '' });
   const [qf, setQf] = useState({ label: '', quantity: '', unit: '', notes: '' });
+  const [ratesFor, setRatesFor] = useState<string | null>(null);
+  const [access, setAccess] = useState<ProjectAccess[]>([]);
+  const [resources, setResources] = useState<ResourceSummary[]>([]);
+  const [grantId, setGrantId] = useState('');
+
+  const canWrite = isAdmin(me);
+  const canGrant = me !== null
+    && ['Administrator', 'ProjectManager'].includes(me.role);
 
   // Parent mounts this with key={projectId}, so a new selection remounts with
   // fresh state — the effect only needs to fetch.
@@ -37,6 +57,10 @@ export function ProjectDetail({
     [projectId],
   );
   useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    getProjectAccess(projectId).then(setAccess).catch(() => {});
+    getResources().then(setResources).catch(() => {});
+  }, [projectId]);
 
   if (!project) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
 
@@ -94,30 +118,47 @@ export function ProjectDetail({
             <tr className="border-b border-slate-200">
               <th className={thCls}>{t('common.name')}</th>
               <th className={thCls}>{t('locations.address')}</th>
-              {isAdmin(me) && <th className={thCls}>{t('common.actions')}</th>}
+              {canSeeCommercial(me) && <th className={thCls}>{t('common.actions')}</th>}
             </tr>
           </thead>
           <tbody>
             {project.locations.map((l) => (
-              <tr key={l.id} className="border-b border-slate-100">
-                <td className={tdCls}>{l.name}</td>
-                <td className={tdCls}>{l.address ?? '—'}</td>
-                {isAdmin(me) && (
-                  <td className={tdCls}>
-                    <button className={btnDangerCls}
-                      onClick={() => void deleteLocation(l.id).then(reload)}>
-                      {t('common.delete')}
-                    </button>
-                  </td>
+              <Fragment key={l.id}>
+                <tr className="border-b border-slate-100">
+                  <td className={tdCls}>{l.name}</td>
+                  <td className={tdCls}>{l.address ?? '—'}</td>
+                  {canSeeCommercial(me) && (
+                    <td className={tdCls}>
+                      <span className="flex gap-1">
+                        <button className={btnSecondaryCls}
+                          onClick={() => setRatesFor(ratesFor === l.id ? null : l.id)}>
+                          {t('siteRates.toggle')}
+                        </button>
+                        {canWrite && (
+                          <button className={btnDangerCls}
+                            onClick={() => void deleteLocation(l.id).then(reload)}>
+                            {t('common.delete')}
+                          </button>
+                        )}
+                      </span>
+                    </td>
+                  )}
+                </tr>
+                {ratesFor === l.id && (
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <td colSpan={3} className="px-3 py-2">
+                      <SiteRates locationId={l.id} canWrite={canWrite} />
+                    </td>
+                  </tr>
                 )}
-              </tr>
+              </Fragment>
             ))}
             {project.locations.length === 0 && (
               <tr><td className={tdCls} colSpan={3}>{t('common.none')}</td></tr>
             )}
           </tbody>
         </table>
-        {isAdmin(me) && (
+        {canWrite && (
           <div className="flex flex-wrap items-end gap-2">
             <Field label={t('common.name')}>
               <input className={inputCls} value={lf.name}
@@ -188,6 +229,180 @@ export function ProjectDetail({
         )}
       </Panel>
       </div>
+
+      {canSeeCommercial(me) && (
+        <Panel title={t('access.title')} help={t('access.help')}>
+          <p className="mb-2 text-xs text-slate-500">{t('access.note')}</p>
+          <table className="mb-3 w-full border-collapse">
+            <tbody>
+              {access.map((a) => (
+                <tr key={a.resourceId} className="border-b border-slate-100">
+                  <td className={tdCls}>{a.resourceName}</td>
+                  <td className={cn(tdCls, 'text-xs text-slate-500')}>
+                    {t('access.since')} {a.createdUtc.slice(0, 10)}
+                  </td>
+                  <td className={tdCls}>
+                    {canGrant && (
+                      <button className={btnDangerCls}
+                        onClick={() => void revokeProjectAccess(project.id, a.resourceId)
+                          .then(() => getProjectAccess(project.id).then(setAccess))
+                          .catch((e) => setError(errorMessage(e)))}>
+                        {t('common.delete')}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {access.length === 0 && (
+                <tr><td className={tdCls} colSpan={3}>{t('access.empty')}</td></tr>
+              )}
+            </tbody>
+          </table>
+          {canGrant && (
+            <div className="flex items-end gap-2">
+              <Field label={t('access.grantLabel')} help={t('access.grantHelp')}>
+                <SearchSelect
+                  value={grantId}
+                  onChange={setGrantId}
+                  emptyLabel={t('access.pick')}
+                  options={resources
+                    .filter((r) => !access.some((a) => a.resourceId === r.id))
+                    .map((r) => ({ value: r.id, label: r.displayName }))}
+                />
+              </Field>
+              <button className={btnCls} disabled={!grantId}
+                onClick={() => void grantProjectAccess(project.id, grantId)
+                  .then(() => getProjectAccess(project.id).then(setAccess))
+                  .then(() => setGrantId(''))
+                  .catch((e) => setError(errorMessage(e)))}>
+                {t('access.grant')}
+              </button>
+            </div>
+          )}
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+/** Versioned site-rate overrides for one location — set fields win over the
+ * contract terms; fields left empty inherit (per-field fallback). */
+function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boolean }) {
+  const { t } = useTranslation();
+  const [rates, setRates] = useState<LocationRate[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const empty = {
+    effectiveFrom: new Date().toISOString().slice(0, 10),
+    hourlyRate: '', saturdayRate: '', sundayRate: '', holidayRate: '',
+    dayRate: '', saturdayDayRate: '', sundayDayRate: '', holidayDayRate: '',
+    halfDayRate: '', halfDayMaxHours: '', mobilisationFee: '', notes: '',
+  };
+  const [f, setF] = useState(empty);
+
+  const reload = useCallback(
+    () => getLocationRates(locationId).then(setRates).catch(() => setRates([])),
+    [locationId],
+  );
+  useEffect(() => { void reload(); }, [reload]);
+
+  const save = async () => {
+    setErr(null);
+    try {
+      await createLocationRate(locationId, {
+        effectiveFrom: f.effectiveFrom,
+        hourlyRate: numOrNull(f.hourlyRate), saturdayRate: numOrNull(f.saturdayRate),
+        sundayRate: numOrNull(f.sundayRate), holidayRate: numOrNull(f.holidayRate),
+        dayRate: numOrNull(f.dayRate), saturdayDayRate: numOrNull(f.saturdayDayRate),
+        sundayDayRate: numOrNull(f.sundayDayRate), holidayDayRate: numOrNull(f.holidayDayRate),
+        halfDayRate: numOrNull(f.halfDayRate),
+        halfDayMaxHours: numOrNull(f.halfDayMaxHours),
+        mobilisationFee: numOrNull(f.mobilisationFee),
+        notes: f.notes.trim() || null,
+      });
+      setF(empty);
+      await reload();
+    } catch (e) { setErr(errorMessage(e)); }
+  };
+
+  const cell = (v: number | null) => v?.toString() ?? '—';
+  return (
+    <div>
+      <p className="mb-1 text-xs text-slate-500">{t('siteRates.help')}</p>
+      {rates.length > 0 && (
+        <table className="mb-2 w-full border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200 text-left">
+              <th className={thCls}>{t('terms.effectiveFrom')}</th>
+              <th className={thCls}>{t('terms.hourlyRate')}</th>
+              <th className={thCls}>{t('terms.weekendRates')}</th>
+              <th className={thCls}>{t('terms.dayRate')}</th>
+              <th className={thCls}>{t('terms.mobilisationFee')}</th>
+              {canWrite && <th className={thCls}></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rates.map((r) => (
+              <tr key={r.id} className="border-b border-slate-100">
+                <td className={tdCls}>{r.effectiveFrom}</td>
+                <td className={tdCls}>{cell(r.hourlyRate)}</td>
+                <td className={tdCls}>
+                  {[r.saturdayRate, r.sundayRate, r.holidayRate]
+                    .map((v) => (v == null ? '—' : v)).join(' / ')}
+                </td>
+                <td className={tdCls}>
+                  {[r.dayRate, r.saturdayDayRate, r.sundayDayRate, r.holidayDayRate]
+                    .map((v) => (v == null ? '—' : v)).join(' / ')}
+                  {r.halfDayRate != null && ` · ½ ${r.halfDayRate}`}
+                </td>
+                <td className={tdCls}>{cell(r.mobilisationFee)}</td>
+                {canWrite && (
+                  <td className={tdCls}>
+                    <button className={btnDangerCls}
+                      onClick={() => void deleteLocationRate(locationId, r.id)
+                        .then(reload).catch((e) => setErr(errorMessage(e)))}>
+                      {t('common.delete')}
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {rates.length === 0 && (
+        <p className="mb-2 text-xs text-slate-400">{t('siteRates.empty')}</p>
+      )}
+      {err && <p className="mb-1 text-xs text-red-600">{err}</p>}
+      {canWrite && (
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label={t('terms.effectiveFrom')} help={t('siteRates.hEffective')}>
+            <input className={inputCls} type="date" value={f.effectiveFrom}
+              onChange={(e) => setF({ ...f, effectiveFrom: e.target.value })} />
+          </Field>
+          {([
+            ['hourlyRate', 'terms.hourlyRate'],
+            ['saturdayRate', 'terms.satRate'],
+            ['sundayRate', 'terms.sunRate'],
+            ['holidayRate', 'terms.holRate'],
+            ['dayRate', 'terms.dayRate'],
+            ['halfDayRate', 'terms.halfDayRate'],
+            ['mobilisationFee', 'terms.mobilisationFee'],
+          ] as const).map(([key, label]) => (
+            <Field key={key} label={t(label)}>
+              <input className={cn(inputCls, 'w-24')} inputMode="decimal" placeholder="—"
+                value={f[key]}
+                onChange={(e) => setF({ ...f, [key]: e.target.value })} />
+            </Field>
+          ))}
+          <Field label={t('common.notes')}>
+            <input className={inputCls} value={f.notes}
+              onChange={(e) => setF({ ...f, notes: e.target.value })} />
+          </Field>
+          <button className={btnCls} onClick={() => void save()}>
+            {t('siteRates.add')}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

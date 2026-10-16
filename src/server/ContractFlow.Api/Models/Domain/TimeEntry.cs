@@ -13,6 +13,18 @@ public enum TimeEntryCategory
     Break,
 }
 
+/// <summary>How the customer is billed for a reported row (design §5).</summary>
+public enum EntryBilling
+{
+    /// <summary>Follow the contract terms' components — hourly or day-rate
+    /// pricing; on PAD contracts booking-bound rows are covered by the PAD line.</summary>
+    Contract,
+    /// <summary>Force plain hourly billing (contract hourly/day-type rates) —
+    /// for self-reported ad-hoc work like a short customer call that must not
+    /// consume a PAD day or trigger a day rate.</summary>
+    Hours,
+}
+
 /// <summary>
 /// One reported day-part on one project (a day may split across several
 /// projects → one entry per project). Execution ledger data, separate from the
@@ -37,6 +49,10 @@ public class TimeEntry
     public TimeEntryCategory Category { get; set; } = TimeEntryCategory.Work;
     /// <summary>Hours as reported by the resource — never overwritten.</summary>
     public decimal ActualHours { get; set; }
+    /// <summary>Customer-billing mode for this row (contract model vs. plain
+    /// hours). Only affects the invoice specification — resource compensation
+    /// always follows the compensation agreement.</summary>
+    public EntryBilling Billing { get; set; } = EntryBilling.Contract;
     public string? Description { get; set; }
 
     // Frozen at timesheet approval (null while draft):

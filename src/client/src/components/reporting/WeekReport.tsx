@@ -3,12 +3,14 @@ import { useTranslation } from 'react-i18next';
 import {
   createAllowance, createExpense, createTimeEntry, createTravelRecord,
   deleteAllowance, deleteExpense, deleteTimeEntry, deleteTravelRecord,
-  getAllowances, getExpenses, getTimeEntries, getTimesheets, getTravelRecords,
+  getAllowances, getExpenses, getMyProjects, getTimeEntries, getTimesheets,
+  getTravelRecords,
   submitTimesheet, updateExpense, updateTimeEntry, updateTravelRecord,
 } from '@/lib/api';
 import { isoWeekDates, isoWeekLabel, isoWeekMonday, isoWeekOf } from '@/lib/timekeeping';
 import type {
-  AllowanceClaim, Booking, Expense, TimeEntry, Timesheet, TravelRecord,
+  AllowanceClaim, Booking, EntryBilling, Expense, ProjectSummary, TimeEntry,
+  Timesheet, TravelRecord,
 } from '@/lib/types';
 import { btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls } from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
@@ -32,6 +34,7 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [allowances, setAllowances] = useState<AllowanceClaim[]>([]);
   const [sheets, setSheets] = useState<Timesheet[]>([]);
+  const [myProjects, setMyProjects] = useState<ProjectSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
@@ -48,16 +51,19 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
     getExpenses(r).then(setExpenses).catch(() => {});
     getAllowances(r).then(setAllowances).catch(() => {});
     getTimesheets().then(setSheets).catch(() => {});
+    getMyProjects().then(setMyProjects).catch(() => {});
   }, [anchor]);
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
 
-  // Project picklist from the resource's own bookings (+ already-used ids).
+  // Projects the resource may report on: access list ∪ active bookings
+  // (/api/projects/mine), plus anything already used on a row this week.
   const projectOptions = useMemo(() => {
     const map = new Map<string, string>();
+    for (const p of myProjects) map.set(p.id, p.name);
     for (const b of bookings) map.set(b.projectId, b.projectName);
     for (const e of entries) map.set(e.projectId, e.projectName);
-    return [...map.entries()];
-  }, [bookings, entries]);
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [myProjects, bookings, entries]);
 
   const weekSheet = sheets.find((s) => s.year === year && s.isoWeek === week
     && s.status !== 'returned' && s.status !== 'rejected');
@@ -183,7 +189,10 @@ function ProjectPicker({ options, value, onChange, label }: {
 function TimeSection({ days, range, projectOptions, entries, locked, onChanged, onError }:
   SectionProps & { entries: TimeEntry[] }) {
   const { t } = useTranslation();
-  const empty = { date: range.from, projectId: '', category: 'work', hours: '', description: '' };
+  const empty = {
+    date: range.from, projectId: '', category: 'work', hours: '',
+    billing: 'contract' as EntryBilling, description: '',
+  };
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState<string | null>(null);
 
@@ -192,7 +201,8 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
       const body = {
         projectId: form.projectId, date: form.date,
         category: form.category as TimeEntry['category'],
-        actualHours: Number(form.hours), description: form.description || null,
+        actualHours: Number(form.hours), billing: form.billing,
+        description: form.description || null,
       };
       if (editId) await updateTimeEntry(editId, body);
       else await createTimeEntry(body);
@@ -203,7 +213,8 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
     setEditId(e.id);
     setForm({
       date: e.date, projectId: e.projectId, category: e.category,
-      hours: String(e.actualHours), description: e.description ?? '',
+      hours: String(e.actualHours), billing: e.billing,
+      description: e.description ?? '',
     });
   };
 
@@ -217,6 +228,7 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
             <th className={thCls}>{t('myWork.project')}</th>
             <th className={thCls}>{t('myWork.category')}</th>
             <th className={thCls}>{t('myWork.hours')}</th>
+            <th className={thCls}>{t('myWork.billing')}</th>
             <th className={thCls}>{t('myWork.payableHours')}</th>
             <th className={thCls}>{t('myWork.billableHours')}</th>
             <th className={thCls}>{t('myWork.description')}</th>
@@ -230,6 +242,10 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
               <td className={tdCls}>{e.projectName}</td>
               <td className={tdCls}>{t(`myWork.category${e.category[0].toUpperCase()}${e.category.slice(1)}`)}</td>
               <td className={tdCls}>{e.actualHours}</td>
+              <td className={cn(tdCls, 'text-xs',
+                e.billing === 'hours' ? 'text-amber-700' : 'text-slate-500')}>
+                {t(`myWork.billingMode.${e.billing}`)}
+              </td>
               <td className={tdCls}>{e.payableHours ?? '—'}</td>
               <td className={tdCls}>{e.billableHours ?? '—'}</td>
               <td className={cn(tdCls, 'text-slate-500')}>{e.description}</td>
@@ -247,7 +263,7 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
             </tr>
           ))}
           {entries.length === 0 && (
-            <tr><td className={tdCls} colSpan={8}>{t('myWork.noRows')}</td></tr>
+            <tr><td className={tdCls} colSpan={9}>{t('myWork.noRows')}</td></tr>
           )}
         </tbody>
       </table>
@@ -271,6 +287,14 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
           <Field label={t('myWork.hours')}>
             <input className={cn(inputCls, 'w-20')} type="number" min="0.25" max="24" step="0.25"
               value={form.hours} onChange={(e) => setForm({ ...form, hours: e.target.value })} />
+          </Field>
+          <Field label={t('myWork.billing')} help={t('myWork.billingHelp')}>
+            <select className={selectCls} value={form.billing}
+              onChange={(e) => setForm({ ...form, billing: e.target.value as EntryBilling })}>
+              {(['contract', 'hours'] as const).map((b) => (
+                <option key={b} value={b}>{t(`myWork.billingMode.${b}`)}</option>
+              ))}
+            </select>
           </Field>
           <Field label={t('myWork.description')}>
             <input className={inputCls} value={form.description}

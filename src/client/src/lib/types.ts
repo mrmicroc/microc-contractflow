@@ -244,6 +244,49 @@ export interface LocationRequestBody {
   notes: string | null;
 }
 
+// One versioned site-rate override row — set fields win over contract terms,
+// null fields inherit (GET/POST /api/locations/{id}/rates).
+export interface LocationRate {
+  id: string;
+  locationId: string;
+  effectiveFrom: string;
+  hourlyRate: number | null;
+  saturdayRate: number | null;
+  sundayRate: number | null;
+  holidayRate: number | null;
+  dayRate: number | null;
+  saturdayDayRate: number | null;
+  sundayDayRate: number | null;
+  holidayDayRate: number | null;
+  halfDayRate: number | null;
+  halfDayMaxHours: number | null;
+  mobilisationFee: number | null;
+  notes: string | null;
+}
+
+export interface LocationRateRequestBody {
+  effectiveFrom: string;
+  hourlyRate?: number | null;
+  saturdayRate?: number | null;
+  sundayRate?: number | null;
+  holidayRate?: number | null;
+  dayRate?: number | null;
+  saturdayDayRate?: number | null;
+  sundayDayRate?: number | null;
+  holidayDayRate?: number | null;
+  halfDayRate?: number | null;
+  halfDayMaxHours?: number | null;
+  mobilisationFee?: number | null;
+  notes?: string | null;
+}
+
+// A resource allowed to self-report on a project (access-list row).
+export interface ProjectAccess {
+  resourceId: string;
+  resourceName: string;
+  createdUtc: string;
+}
+
 export interface EstimatedQuantity {
   id: string;
   projectId: string;
@@ -441,6 +484,9 @@ export type TimeEntryCategory = 'work' | 'waiting' | 'standby' | 'break';
 export type TravelMode = 'car' | 'train' | 'flight' | 'boat' | 'other';
 export type ExpenseCategory = 'travel' | 'meal' | 'accommodation' | 'material' | 'equipment' | 'other';
 export type TimesheetStatus = 'draft' | 'submitted' | 'approved' | 'returned' | 'rejected';
+// How a reported row is billed: 'contract' follows the agreement model
+// (day rate / PAD / hourly), 'hours' always bills plain hourly.
+export type EntryBilling = 'contract' | 'hours';
 
 export interface TimeEntry {
   id: string;
@@ -452,6 +498,7 @@ export interface TimeEntry {
   date: string;
   category: TimeEntryCategory;
   actualHours: number;
+  billing: EntryBilling;
   description: string | null;
   payableHours: number | null;
   billableHours: number | null;
@@ -467,6 +514,7 @@ export interface TimeEntryRequestBody {
   date: string;
   category: TimeEntryCategory;
   actualHours: number;
+  billing?: EntryBilling;
   description?: string | null;
 }
 
@@ -566,6 +614,8 @@ export interface MobilisationPeriod {
   startDate: string;
   endDate: string;
   confirmedUtc: string;
+  locationId: string | null;
+  locationName: string | null;
 }
 
 export interface MobilisationSuggestion {

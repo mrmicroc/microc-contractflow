@@ -8,7 +8,7 @@ public static class ReportingMapper
 {
     public static TimeEntryDto Entry(TimeEntry x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
-        x.BookingId, x.Date, x.Category, x.ActualHours, x.Description,
+        x.BookingId, x.Date, x.Category, x.ActualHours, x.Billing, x.Description,
         x.PayableHours, x.BillableHours, x.MinimumAdjustmentHours,
         x.TimesheetId, x.Timesheet?.Status);
 
@@ -37,5 +37,5 @@ public static class ReportingMapper
 
     public static MobilisationPeriodDto Mobilisation(MobilisationPeriod p) => new(
         p.Id, p.ProjectId, p.Project.Name, p.ResourceId, p.Resource.DisplayName,
-        p.StartDate, p.EndDate, p.ConfirmedUtc);
+        p.StartDate, p.EndDate, p.ConfirmedUtc, p.LocationId, p.Location?.Name);
 }

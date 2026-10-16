@@ -6,7 +6,7 @@ namespace ContractFlow.Api.Models.Dto;
 public record TimeEntryDto(
     Guid Id, Guid ResourceId, string ResourceName, Guid ProjectId, string ProjectName,
     Guid? BookingId, DateOnly Date, TimeEntryCategory Category, decimal ActualHours,
-    string? Description, decimal? PayableHours, decimal? BillableHours,
+    EntryBilling Billing, string? Description, decimal? PayableHours, decimal? BillableHours,
     decimal? MinimumAdjustmentHours, Guid? TimesheetId, TimesheetStatus? TimesheetStatus);
 
 public class TimeEntryRequest
@@ -22,6 +22,9 @@ public class TimeEntryRequest
     public TimeEntryCategory Category { get; set; } = TimeEntryCategory.Work;
     [Range(0.25, 24)]
     public decimal ActualHours { get; set; }
+    /// <summary>'contract' = billed per the terms' components; 'hours' = forced
+    /// hourly billing — for self-reported ad-hoc work.</summary>
+    public EntryBilling Billing { get; set; } = EntryBilling.Contract;
     [StringLength(500)]
     public string? Description { get; set; }
 }
@@ -100,7 +103,8 @@ public class AllowanceClaimRequest
 
 public record MobilisationPeriodDto(
     Guid Id, Guid ProjectId, string ProjectName, Guid ResourceId, string ResourceName,
-    DateOnly StartDate, DateOnly EndDate, DateTime ConfirmedUtc);
+    DateOnly StartDate, DateOnly EndDate, DateTime ConfirmedUtc,
+    Guid? LocationId, string? LocationName);
 
 public record MobilisationSuggestionDto(
     Guid ProjectId, string ProjectName, DateOnly StartDate, DateOnly EndDate);
@@ -115,6 +119,15 @@ public class MobilisationConfirmRequest
     public DateOnly StartDate { get; set; }
     [Required]
     public DateOnly EndDate { get; set; }
+    /// <summary>Optional site the period mobilised to — decides which
+    /// site-rate override supplies the mobilisation fee.</summary>
+    public Guid? LocationId { get; set; }
+}
+
+/// <summary>Sets/clears the site a confirmed period mobilised to.</summary>
+public class MobilisationSiteRequest
+{
+    public Guid? LocationId { get; set; }
 }
 
 public class MobilisationSplitRequest

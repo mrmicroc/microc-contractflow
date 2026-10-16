@@ -41,6 +41,9 @@ Items are marked ✅ only when implemented **and** tested. See
 ## Phase 2 — Resource reporting
 - [x] Assignment acknowledgement
 - [x] Time reporting (waiting/standby, multi-project days)
+- [x] Self-reporting without bookings — project access lists gate which
+      resources may log unbooked work (GET /api/projects/mine); per-row
+      billing mode (contract model vs. plain hours)
 - [x] Travel records + mobilisation grouping (suggest/confirm/split)
 - [x] Expenses + mileage + per diem
 - [x] Documents: receipts on expenses + evidence on bookings (IFileStorage —
@@ -61,6 +64,10 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Composable billing components on versioned terms (hourly / daily-rate —
       incl. Sat/Sun/holiday day rates + OT on top / PAD / one-off fixed price /
       cancellation charges)
+- [x] Site-rate overrides (versioned LocationRate per project location —
+      set fields win over contract terms, empty fields inherit; covers
+      hourly/day rates + mobilisation fee; mobilisation periods can be
+      bound to a site)
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
 - [ ] Timesheet → Invoiced leg once an invoice covers the period

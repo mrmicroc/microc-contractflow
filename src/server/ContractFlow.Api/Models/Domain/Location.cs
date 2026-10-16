@@ -10,4 +10,7 @@ public class Location
     public required string Name { get; set; }
     public string? Address { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>Versioned site-specific price overrides over the contract terms.</summary>
+    public List<LocationRate> Rates { get; set; } = [];
 }

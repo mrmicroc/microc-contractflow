@@ -12,6 +12,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ContractTerms> ContractTerms => Set<ContractTerms>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Location> Locations => Set<Location>();
+    public DbSet<LocationRate> LocationRates => Set<LocationRate>();
+    public DbSet<ProjectAccess> ProjectAccesses => Set<ProjectAccess>();
     public DbSet<EstimatedQuantity> EstimatedQuantities => Set<EstimatedQuantity>();
     public DbSet<Resource> Resources => Set<Resource>();
     public DbSet<ResourceLeave> ResourceLeaves => Set<ResourceLeave>();
@@ -130,6 +132,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(l => l.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        builder.Entity<LocationRate>(e =>
+        {
+            e.HasIndex(r => new { r.LocationId, r.EffectiveFrom });
+            e.HasOne(r => r.Location).WithMany(l => l.Rates)
+                .HasForeignKey(r => r.LocationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(r => r.HourlyRate).HasPrecision(18, 2);
+            e.Property(r => r.SaturdayRate).HasPrecision(18, 2);
+            e.Property(r => r.SundayRate).HasPrecision(18, 2);
+            e.Property(r => r.HolidayRate).HasPrecision(18, 2);
+            e.Property(r => r.DayRate).HasPrecision(18, 2);
+            e.Property(r => r.SaturdayDayRate).HasPrecision(18, 2);
+            e.Property(r => r.SundayDayRate).HasPrecision(18, 2);
+            e.Property(r => r.HolidayDayRate).HasPrecision(18, 2);
+            e.Property(r => r.HalfDayRate).HasPrecision(18, 2);
+            e.Property(r => r.HalfDayMaxHours).HasPrecision(9, 2);
+            e.Property(r => r.MobilisationFee).HasPrecision(18, 2);
+            e.Property(r => r.Notes).HasMaxLength(500);
+        });
+
+        builder.Entity<ProjectAccess>(e =>
+        {
+            e.HasIndex(a => new { a.ProjectId, a.ResourceId }).IsUnique();
+            e.HasOne(a => a.Project).WithMany()
+                .HasForeignKey(a => a.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(a => a.Resource).WithMany()
+                .HasForeignKey(a => a.ResourceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         builder.Entity<EstimatedQuantity>(e =>
         {
             e.Property(q => q.Label).HasMaxLength(200);
@@ -228,6 +258,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         builder.Entity<TimeEntry>(e =>
         {
             e.Property(x => x.Category).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Billing).HasConversion<string>().HasMaxLength(20);
             e.Property(x => x.ActualHours).HasPrecision(9, 2);
             e.Property(x => x.PayableHours).HasPrecision(9, 2);
             e.Property(x => x.BillableHours).HasPrecision(9, 2);
@@ -273,6 +304,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Location).WithMany()
+                .HasForeignKey(x => x.LocationId).OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<Expense>(e =>

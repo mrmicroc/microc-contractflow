@@ -71,6 +71,8 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
             return BadRequest(new { error = "Booking does not belong to this resource on this project." });
         if (await pad.MonthIsClosedAsync(req.ProjectId, req.Date.Year, req.Date.Month, ct))
             return Conflict(new { error = "monthClosed", message = "The project month is closed." });
+        if (await AccessDeniedAsync(req.ProjectId, resourceId!.Value, ct) is { } denied)
+            return denied;
 
         var me = await Me(ct);
         var entry = new TimeEntry
@@ -81,6 +83,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
             Date = req.Date,
             Category = req.Category,
             ActualHours = req.ActualHours,
+            Billing = req.Billing,
             Description = req.Description,
             CreatedByUserId = me?.Id,
         };
@@ -105,12 +108,14 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
             return BadRequest(new { error = "Booking does not belong to this resource on this project." });
         if (await pad.MonthIsClosedAsync(req.ProjectId, req.Date.Year, req.Date.Month, ct))
             return Conflict(new { error = "monthClosed", message = "The project month is closed." });
+        if (await AccessDeniedAsync(req.ProjectId, entry.ResourceId, ct) is { } err) return err;
 
         entry.ProjectId = req.ProjectId;
         entry.BookingId = req.BookingId;
         entry.Date = req.Date;
         entry.Category = req.Category;
         entry.ActualHours = req.ActualHours;
+        entry.Billing = req.Billing;
         entry.Description = req.Description;
         // Moving a draft row invalidates previously computed quantities.
         entry.PayableHours = entry.BillableHours = entry.MinimumAdjustmentHours = null;
@@ -132,6 +137,27 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         return NoContent();
     }
 
+    /// <summary>Self-reporting gate: only applies when the caller IS the
+    /// resource (admin/PM may write for anyone — they can grant access anyway).
+    /// Once a project carries an access list, only listed resources — or
+    /// anyone holding a non-terminal booking on it — may self-report. An
+    /// empty list keeps the project open to all resources.</summary>
+    private async Task<IActionResult?> AccessDeniedAsync(
+        Guid projectId, Guid resourceId, CancellationToken ct)
+    {
+        var scoped = await ScopedResourceIdAsync(ct);
+        if (scoped is null) return null; // admin/PM reporting on behalf
+        if (!await Db.ProjectAccesses.AnyAsync(a => a.ProjectId == projectId, ct))
+            return null; // no list → open
+        var allowed = await Db.ProjectAccesses.AnyAsync(
+            a => a.ProjectId == projectId && a.ResourceId == resourceId, ct);
+        if (!allowed)
+            allowed = await Db.Bookings.AnyAsync(b =>
+                b.ProjectId == projectId && b.ResourceId == resourceId
+                && b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.Rescheduled, ct);
+        return allowed ? null : ForbidResult();
+    }
+
     private async Task<TimeEntryDto> DtoAsync(Guid id, CancellationToken ct) =>
         ToDto(await Db.TimeEntries
             .Include(x => x.Resource).Include(x => x.Project).Include(x => x.Timesheet)
@@ -139,7 +165,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
 
     private static TimeEntryDto ToDto(TimeEntry x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
-        x.BookingId, x.Date, x.Category, x.ActualHours, x.Description,
+        x.BookingId, x.Date, x.Category, x.ActualHours, x.Billing, x.Description,
         x.PayableHours, x.BillableHours, x.MinimumAdjustmentHours,
         x.TimesheetId, x.Timesheet?.Status);
 }

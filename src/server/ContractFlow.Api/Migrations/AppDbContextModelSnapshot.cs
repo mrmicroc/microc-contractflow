@@ -869,6 +869,76 @@ namespace ContractFlow.Api.Migrations
                     b.ToTable("Locations");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.LocationRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("DayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateOnly>("EffectiveFrom")
+                        .HasColumnType("date");
+
+                    b.Property<decimal?>("HalfDayMaxHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<decimal?>("HalfDayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("HolidayDayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("HolidayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("HourlyRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("MobilisationFee")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<decimal?>("SaturdayDayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("SaturdayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("SundayDayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("SundayRate")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LocationId", "EffectiveFrom");
+
+                    b.ToTable("LocationRates");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.MobilisationPeriod", b =>
                 {
                     b.Property<Guid>("Id")
@@ -884,6 +954,9 @@ namespace ContractFlow.Api.Migrations
                     b.Property<DateOnly>("EndDate")
                         .HasColumnType("date");
 
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
@@ -894,6 +967,8 @@ namespace ContractFlow.Api.Migrations
                         .HasColumnType("date");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LocationId");
 
                     b.HasIndex("ProjectId");
 
@@ -988,6 +1063,31 @@ namespace ContractFlow.Api.Migrations
                     b.HasIndex("ContractId");
 
                     b.ToTable("Projects");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.ProjectAccess", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceId");
+
+                    b.HasIndex("ProjectId", "ResourceId")
+                        .IsUnique();
+
+                    b.ToTable("ProjectAccesses");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.ProjectMonthClose", b =>
@@ -1296,6 +1396,11 @@ namespace ContractFlow.Api.Migrations
                     b.Property<decimal?>("BillableHours")
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
+
+                    b.Property<string>("Billing")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<Guid?>("BookingId")
                         .HasColumnType("uniqueidentifier");
@@ -1720,8 +1825,24 @@ namespace ContractFlow.Api.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.LocationRate", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Location", "Location")
+                        .WithMany("Rates")
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Location");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.MobilisationPeriod", b =>
                 {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("ContractFlow.Api.Models.Domain.Project", "Project")
                         .WithMany()
                         .HasForeignKey("ProjectId")
@@ -1733,6 +1854,8 @@ namespace ContractFlow.Api.Migrations
                         .HasForeignKey("ResourceId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Location");
 
                     b.Navigation("Project");
 
@@ -1766,6 +1889,25 @@ namespace ContractFlow.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Contract");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.ProjectAccess", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ContractFlow.Api.Models.Domain.Resource", "Resource")
+                        .WithMany()
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+
+                    b.Navigation("Resource");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.ProjectMonthClose", b =>
@@ -1954,6 +2096,11 @@ namespace ContractFlow.Api.Migrations
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.InvoiceSpecification", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.Location", b =>
+                {
+                    b.Navigation("Rates");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Project", b =>

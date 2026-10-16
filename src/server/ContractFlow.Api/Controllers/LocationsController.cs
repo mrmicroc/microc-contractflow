@@ -75,4 +75,61 @@ public class LocationsController(AppDbContext db) : ControllerBase
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    // ── Versioned site-rate overrides ────────────────────────────────────────
+
+    /// <summary>All rate-override versions for a location, newest first.</summary>
+    [HttpGet("{id:guid}/rates")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
+    public async Task<IActionResult> ListRates(Guid id, CancellationToken ct)
+    {
+        if (!await db.Locations.AnyAsync(l => l.Id == id, ct)) return NotFound();
+        var rates = await db.LocationRates
+            .Where(r => r.LocationId == id)
+            .OrderByDescending(r => r.EffectiveFrom).ThenByDescending(r => r.CreatedUtc)
+            .ToListAsync(ct);
+        return Ok(rates.Select(ToRateDto));
+    }
+
+    /// <summary>Adds a new override version — fields left null inherit the
+    /// contract terms; set fields win when bookings target this location.</summary>
+    [HttpPost("{id:guid}/rates")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> CreateRate(Guid id, LocationRateRequest req, CancellationToken ct)
+    {
+        if (!await db.Locations.AnyAsync(l => l.Id == id, ct)) return NotFound();
+        var rate = new LocationRate
+        {
+            LocationId = id,
+            EffectiveFrom = req.EffectiveFrom,
+            HourlyRate = req.HourlyRate, SaturdayRate = req.SaturdayRate,
+            SundayRate = req.SundayRate, HolidayRate = req.HolidayRate,
+            DayRate = req.DayRate, SaturdayDayRate = req.SaturdayDayRate,
+            SundayDayRate = req.SundayDayRate, HolidayDayRate = req.HolidayDayRate,
+            HalfDayRate = req.HalfDayRate, HalfDayMaxHours = req.HalfDayMaxHours,
+            MobilisationFee = req.MobilisationFee, Notes = req.Notes,
+        };
+        db.LocationRates.Add(rate);
+        await db.SaveChangesAsync(ct);
+        return Ok(ToRateDto(rate));
+    }
+
+    /// <summary>Removes one override version (e.g. entered by mistake).</summary>
+    [HttpDelete("{id:guid}/rates/{rateId:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> DeleteRate(Guid id, Guid rateId, CancellationToken ct)
+    {
+        var rate = await db.LocationRates
+            .FirstOrDefaultAsync(r => r.Id == rateId && r.LocationId == id, ct);
+        if (rate is null) return NotFound();
+        db.LocationRates.Remove(rate);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    private static LocationRateDto ToRateDto(LocationRate r) => new(
+        r.Id, r.LocationId, r.EffectiveFrom.ToString("yyyy-MM-dd"),
+        r.HourlyRate, r.SaturdayRate, r.SundayRate, r.HolidayRate,
+        r.DayRate, r.SaturdayDayRate, r.SundayDayRate, r.HolidayDayRate,
+        r.HalfDayRate, r.HalfDayMaxHours, r.MobilisationFee, r.Notes);
 }
