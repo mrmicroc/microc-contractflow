@@ -202,13 +202,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         builder.Entity<CompensationAgreement>(e =>
         {
-            // Version is unique per resource + scope (contract-specific or default)
-            e.HasIndex(a => new { a.ResourceId, a.ContractId, a.Version }).IsUnique();
+            // Version is unique per resource + scope — two filtered indexes,
+            // one per scope kind (contract-scope rows have WorkPackageId null)
+            e.HasIndex(a => new { a.ResourceId, a.ContractId, a.Version }).IsUnique()
+                .HasFilter("[ContractId] IS NOT NULL AND [WorkPackageId] IS NULL");
+            e.HasIndex(a => new { a.ResourceId, a.ContractId, a.WorkPackageId, a.Version }).IsUnique()
+                .HasFilter("[WorkPackageId] IS NOT NULL");
             e.HasIndex(a => new { a.ResourceId, a.EffectiveFrom });
             e.HasOne(a => a.Resource).WithMany(r => r.Agreements)
                 .HasForeignKey(a => a.ResourceId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(a => a.Contract).WithMany()
                 .HasForeignKey(a => a.ContractId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(a => a.WorkPackage).WithMany()
+                .HasForeignKey(a => a.WorkPackageId).OnDelete(DeleteBehavior.SetNull);
             e.Property(a => a.Currency).HasMaxLength(3);
             e.Property(a => a.PerDiem).HasConversion<string>().HasMaxLength(20);
             e.Property(a => a.HourlyRate).HasPrecision(18, 2);

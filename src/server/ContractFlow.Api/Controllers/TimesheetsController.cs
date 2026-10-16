@@ -152,11 +152,14 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
                 .ToList();
             if (splits.Count == 0) continue;
 
-            // OT/min parameters resolve from the dominant project's rule set —
-            // single-project days (the common case) are exact.
-            var dominant = splits.OrderByDescending(s => s.Hours).First().ProjectId;
-            var payRates = PayableRateSet(agreements, projectContracts[dominant], day.Key);
-            var billRates = BillableRateSet(allTerms, projectContracts[dominant], day.Key);
+            // OT/min parameters resolve from the dominant (project, package)
+            // pair's rule set — single-project days (the common case) are exact.
+            var dominant = day.Where(e => Counted.Contains(e.Category))
+                .GroupBy(e => (e.ProjectId, e.WorkPackageId))
+                .OrderByDescending(x => x.Sum(e => e.ActualHours)).First().Key;
+            var payRates = PayableRateSet(
+                agreements, projectContracts[dominant.ProjectId], dominant.WorkPackageId, day.Key);
+            var billRates = BillableRateSet(allTerms, projectContracts[dominant.ProjectId], day.Key);
 
             var payDay = TimeMath.CalculateDay(day.Key, splits, payRates);
             var billDay = TimeMath.CalculateDay(day.Key, splits, billRates);
@@ -234,14 +237,16 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
             : actual;
 
     /// <summary>Rate set from the compensation agreement version in force on
-    /// the day — contract-specific scope preferred over the default.</summary>
+    /// the day — exact work-package scope first, then contract, then default.</summary>
     private static DayRateSet PayableRateSet(
-        List<CompensationAgreement> agreements, Guid contractId, DateOnly date)
+        List<CompensationAgreement> agreements, Guid contractId, Guid? workPackageId, DateOnly date)
     {
         var a = agreements
-            .Where(x => (x.ContractId == contractId || x.ContractId == null)
-                && x.EffectiveFrom <= date)
-            .OrderByDescending(x => x.ContractId == contractId)
+            .Where(x => x.EffectiveFrom <= date && (
+                (workPackageId != null && x.WorkPackageId == workPackageId) ||
+                (x.WorkPackageId == null && (x.ContractId == contractId || x.ContractId == null))))
+            .OrderByDescending(x => x.WorkPackageId != null)
+            .ThenByDescending(x => x.ContractId != null)
             .ThenByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.Version)
             .FirstOrDefault();
         return new DayRateSet(

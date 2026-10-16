@@ -394,9 +394,15 @@ public class BillingService(AppDbContext db)
         var projectContracts = await db.Projects
             .Where(p => entryProjects.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p.ContractId, ct);
-        var agreementAt = (Guid contractId, DateOnly d) => agreements
-            .Where(a => (a.ContractId == contractId || a.ContractId == null) && a.EffectiveFrom <= d)
-            .OrderByDescending(a => a.ContractId == contractId)
+        // Agreement resolution: exact work-package scope wins, then the
+        // contract scope, then the default. A package-scoped row never leaks
+        // into other packages or contract-level lookups.
+        var agreementAt = (Guid contractId, Guid? workPackageId, DateOnly d) => agreements
+            .Where(a => a.EffectiveFrom <= d && (
+                (workPackageId != null && a.WorkPackageId == workPackageId) ||
+                (a.WorkPackageId == null && (a.ContractId == contractId || a.ContractId == null))))
+            .OrderByDescending(a => a.WorkPackageId != null)
+            .ThenByDescending(a => a.ContractId != null)
             .ThenByDescending(a => a.EffectiveFrom).ThenByDescending(a => a.Version)
             .FirstOrDefault();
 
@@ -408,15 +414,18 @@ public class BillingService(AppDbContext db)
             .Where(e => e.ResourceId == resourceId && e.Date >= from && e.Date <= to
                 && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved
                 && Counted.Contains(e.Category))
-            .Select(e => new { e.Date, e.ProjectId, e.ActualHours })
+            .Select(e => new { e.Date, e.ProjectId, e.WorkPackageId, e.ActualHours })
             .ToListAsync(ct);
 
         foreach (var g in entries.GroupBy(e => e.Date).OrderBy(g => g.Key))
         {
             var splits = g.GroupBy(e => e.ProjectId)
                 .Select(x => (ProjectId: x.Key, Hours: x.Sum(e => e.ActualHours))).ToList();
-            var dominant = splits.OrderByDescending(s => s.Hours).First().ProjectId;
-            var a = agreementAt(projectContracts[dominant], g.Key);
+            // The dominant (project, package) pair picks the rule set — the
+            // scope governing most of the day's hours decides.
+            var dominant = g.GroupBy(e => (e.ProjectId, e.WorkPackageId))
+                .OrderByDescending(x => x.Sum(e => e.ActualHours)).First().Key;
+            var a = agreementAt(projectContracts[dominant.ProjectId], dominant.WorkPackageId, g.Key);
             var rates = new DayRateSet(
                 a?.HourlyRate, a?.SaturdayRate, a?.SundayRate, a?.HolidayRate,
                 a?.OvertimeAfterHours ?? 8, a?.OvertimePercent ?? 150m,
@@ -479,7 +488,7 @@ public class BillingService(AppDbContext db)
         {
             var a = agreementAt(
                 x.ProjectId.HasValue ? projectContracts.GetValueOrDefault(x.ProjectId.Value) : Guid.Empty,
-                x.Date)
+                null, x.Date)
                 ?? agreements.Where(y => y.ContractId == null && y.EffectiveFrom <= x.Date)
                     .OrderByDescending(y => y.EffectiveFrom).FirstOrDefault();
             if (a is null) continue;
@@ -539,10 +548,12 @@ public class BillingService(AppDbContext db)
             .Select(e => e.ResourceId).Distinct().ToListAsync(ct);
         var agreements = await db.CompensationAgreements
             .Where(a => resourceIds.Contains(a.ResourceId)).ToListAsync(ct);
-        var agreementAt = (Guid resourceId, Guid? cId, DateOnly d) => agreements
-            .Where(a => a.ResourceId == resourceId
-                && (a.ContractId == cId || a.ContractId == null) && a.EffectiveFrom <= d)
-            .OrderByDescending(a => a.ContractId == cId)
+        var agreementAt = (Guid resourceId, Guid? cId, Guid? wpId, DateOnly d) => agreements
+            .Where(a => a.ResourceId == resourceId && a.EffectiveFrom <= d && (
+                (wpId != null && a.WorkPackageId == wpId) ||
+                (a.WorkPackageId == null && (a.ContractId == cId || a.ContractId == null))))
+            .OrderByDescending(a => a.WorkPackageId != null)
+            .ThenByDescending(a => a.ContractId != null)
             .ThenByDescending(a => a.EffectiveFrom).ThenByDescending(a => a.Version)
             .FirstOrDefault();
 
@@ -562,12 +573,14 @@ public class BillingService(AppDbContext db)
                 .Where(e => e.ResourceId == g.Key.ResourceId && e.Date == g.Key.Date
                     && e.Timesheet != null && e.Timesheet.Status == TimesheetStatus.Approved
                     && Counted.Contains(e.Category))
-                .Select(e => new { e.ProjectId, e.ActualHours }).ToListAsync(ct);
+                .Select(e => new { e.ProjectId, e.WorkPackageId, e.ActualHours }).ToListAsync(ct);
             var splits = allDay.GroupBy(x => x.ProjectId)
                 .Select(x => (ProjectId: x.Key, Hours: x.Sum(e => e.ActualHours))).ToList();
-            var dominant = splits.OrderByDescending(s => s.Hours).First().ProjectId;
+            var dominant = allDay.GroupBy(x => (x.ProjectId, x.WorkPackageId))
+                .OrderByDescending(x => x.Sum(e => e.ActualHours)).First().Key;
             var a = agreementAt(
-                g.Key.ResourceId, dayContracts.GetValueOrDefault(dominant), g.Key.Date);
+                g.Key.ResourceId, dayContracts.GetValueOrDefault(dominant.ProjectId),
+                dominant.WorkPackageId, g.Key.Date);
             var rates = new DayRateSet(
                 a?.HourlyRate, a?.SaturdayRate, a?.SundayRate, a?.HolidayRate,
                 a?.OvertimeAfterHours ?? 8, a?.OvertimePercent ?? 150m,
@@ -593,7 +606,7 @@ public class BillingService(AppDbContext db)
             .ToListAsync(ct);
         foreach (var x in travel)
         {
-            var a = agreementAt(x.ResourceId, contractId, x.Date);
+            var a = agreementAt(x.ResourceId, contractId, null, x.Date);
             if (a is null) continue;
             if (x.DistanceKm is > 0 && a.MileageRate is > 0)
                 mileage += TimeMath.Round2(x.DistanceKm.Value * a.MileageRate.Value);

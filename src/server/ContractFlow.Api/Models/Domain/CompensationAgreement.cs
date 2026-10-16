@@ -24,6 +24,12 @@ public class CompensationAgreement
     /// <summary>Null = default agreement covering every contract.</summary>
     public Guid? ContractId { get; set; }
     public Contract? Contract { get; set; }
+    /// <summary>Optional work-package scope — the most specific level of the
+    /// agreement (must sit under <see cref="ContractId"/>'s projects). Null =
+    /// the whole contract. A package-scoped agreement never applies to other
+    /// packages or to contract-level resolution.</summary>
+    public Guid? WorkPackageId { get; set; }
+    public WorkPackage? WorkPackage { get; set; }
 
     /// <summary>1-based, assigned by the server (max + 1 within the same scope).</summary>
     public int Version { get; set; }

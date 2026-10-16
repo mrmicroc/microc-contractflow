@@ -40,6 +40,7 @@ public class ResourceLeaveRequest
 
 public record CompensationAgreementDto(
     Guid Id, Guid ResourceId, Guid? ContractId, string? ContractName,
+    Guid? WorkPackageId, string? WorkPackageName, string? WorkPackageProjectName,
     int Version, DateOnly EffectiveFrom, DateTime CreatedUtc,
     string Currency, decimal? HourlyRate, decimal? SaturdayRate, decimal? SundayRate,
     decimal? HolidayRate, int OvertimeAfterHours, decimal OvertimePercent,
@@ -47,11 +48,14 @@ public record CompensationAgreementDto(
     PerDiemPolicy PerDiem, decimal? PerDiemAmount, string? ExpensePolicy, string? Notes);
 
 /// <summary>Creates a new agreement version — server assigns Version = max + 1
-/// within the same resource + contract scope.</summary>
+/// within the same resource + (contract, work-package) scope.</summary>
 public class CompensationAgreementRequest
 {
     /// <summary>Null = the resource's default agreement across all contracts.</summary>
     public Guid? ContractId { get; set; }
+    /// <summary>Optional — scopes the agreement to one work package. When set,
+    /// <see cref="ContractId"/> must be the package's owning contract.</summary>
+    public Guid? WorkPackageId { get; set; }
     [Required]
     public DateOnly EffectiveFrom { get; set; }
     [Required, StringLength(3, MinimumLength = 3)]

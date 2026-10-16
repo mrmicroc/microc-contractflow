@@ -10,6 +10,8 @@ import {
   errorMessage,
   getAgreements,
   getContracts,
+  getContractWorkPackages,
+  getCustomers,
   getFeedUrl,
   getResource,
   getResources,
@@ -22,6 +24,8 @@ import { numOrNull } from '@/lib/versioned';
 import type {
   CompensationAgreement,
   ContractSummary,
+  ContractWorkPackage,
+  CustomerSummary,
   LeaveType,
   PerDiemPolicy,
   ResourceDetail,
@@ -32,7 +36,8 @@ import { cn } from '@/lib/utils';
 import { invalidNumericFields } from '@/lib/validation';
 import { canSeeAgreements, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, SearchSelect,
+  tdCls, thCls,
 } from '@/components/forms';
 
 export function Resources() {
@@ -371,14 +376,23 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
   const me = useMe();
   const [agreements, setAgreements] = useState<CompensationAgreement[]>([]);
   const [contracts, setContracts] = useState<ContractSummary[]>([]);
+  const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  // Work packages per contract — the third scope level only appears once a
+  // contract is picked, and only lists that contract's packages.
+  const [wpMap, setWpMap] = useState<Record<string, ContractWorkPackage[]>>({});
   const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [af, setAf] = useState({
-    contractId: '', effectiveFrom: '', currency: 'SEK', hourlyRate: '', saturdayRate: '',
+    customerId: '', contractId: '', workPackageId: '', effectiveFrom: '', currency: 'SEK',
+    hourlyRate: '', saturdayRate: '',
     sundayRate: '', holidayRate: '', overtimeAfterHours: '8', overtimePercent: '150',
     travelTimePercent: '', mileageRate: '', perDiem: 'none' as PerDiemPolicy,
     perDiemAmount: '', expensePolicy: '', notes: '',
   });
+  const contractPackages = af.contractId ? (wpMap[af.contractId] ?? []) : [];
+  const scopedContracts = af.customerId
+    ? contracts.filter((c) => c.customerId === af.customerId)
+    : contracts;
 
   const reload = useCallback(
     () => getAgreements(resourceId).then(setAgreements).catch(() => setAgreements([])),
@@ -387,7 +401,16 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
   useEffect(() => {
     void reload();
     void getContracts().then(setContracts).catch(() => setContracts([]));
+    void getCustomers().then(setCustomers).catch(() => setCustomers([]));
   }, [reload]);
+  useEffect(() => {
+    if (!af.contractId) return;
+    let live = true;
+    getContractWorkPackages(af.contractId)
+      .then((w) => { if (live) setWpMap((m) => ({ ...m, [af.contractId]: w })); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [af.contractId]);
 
   const save = async () => {
     const bad = invalidNumericFields(
@@ -408,6 +431,7 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
     setError(null);
     await createAgreement(resourceId, {
       contractId: af.contractId || null,
+      workPackageId: af.contractId ? (af.workPackageId || null) : null,
       effectiveFrom: af.effectiveFrom,
       currency: af.currency,
       hourlyRate: numOrNull(af.hourlyRate),
@@ -453,15 +477,36 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
       {formOpen && (
         <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <Field label={t('agreements.scope')}>
-              <select className={inputCls} value={af.contractId}
-                onChange={(e) => setAf({ ...af, contractId: e.target.value })}>
-                <option value="">{t('agreements.scopeDefault')}</option>
-                {contracts.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+            <Field label={t('agreements.customer')}>
+              <SearchSelect
+                value={af.customerId}
+                options={customers.map((c) => ({ value: c.id, label: c.name }))}
+                emptyLabel={t('agreements.allCustomers')}
+                onChange={(v) =>
+                  setAf({ ...af, customerId: v, contractId: '', workPackageId: '' })}
+              />
             </Field>
+            <Field label={t('agreements.scope')}>
+              <SearchSelect
+                value={af.contractId}
+                options={scopedContracts.map((c) => ({ value: c.id, label: c.name }))}
+                emptyLabel={t('agreements.scopeDefault')}
+                onChange={(v) => setAf({ ...af, contractId: v, workPackageId: '' })}
+              />
+            </Field>
+            {af.contractId && (
+              <Field label={t('agreements.workPackage')}>
+                <select className={inputCls} value={af.workPackageId}
+                  onChange={(e) => setAf({ ...af, workPackageId: e.target.value })}>
+                  <option value="">{t('agreements.scopeWholeContract')}</option>
+                  {contractPackages.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.projectName} · {w.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             <Field label={t('common.effectiveFrom')}>
               <input type="date" className={inputCls} value={af.effectiveFrom}
                 onChange={(e) => setAf({ ...af, effectiveFrom: e.target.value })} />
@@ -532,7 +577,11 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
           {agreements.map((a) => (
             <tr key={a.id} className="border-b border-slate-100">
               <td className={tdCls}>v{a.version}</td>
-              <td className={tdCls}>{a.contractName ?? t('agreements.scopeDefault')}</td>
+              <td className={tdCls}>
+                {a.workPackageId
+                  ? `${a.contractName} › ${a.workPackageProjectName} · ${a.workPackageName}`
+                  : (a.contractName ?? t('agreements.scopeDefault'))}
+              </td>
               <td className={tdCls}>{a.effectiveFrom}</td>
               <td className={tdCls}>{a.hourlyRate === null ? '—' : `${a.hourlyRate} ${a.currency}`}</td>
               <td className={tdCls}>{perDiemLabel(a.perDiem)}</td>

@@ -78,6 +78,14 @@ export interface MetaEntry {
   name: string;
 }
 
+/** GET /api/contracts/{id}/work-packages row — scope-picker option. */
+export interface ContractWorkPackage {
+  id: string;
+  name: string;
+  projectId: string;
+  projectName: string;
+}
+
 export interface ContractSummary {
   id: string;
   customerId: string;
@@ -371,6 +379,9 @@ export interface CompensationAgreement {
   resourceId: string;
   contractId: string | null;
   contractName: string | null;
+  workPackageId: string | null;
+  workPackageName: string | null;
+  workPackageProjectName: string | null;
   version: number;
   effectiveFrom: string;
   createdUtc: string;

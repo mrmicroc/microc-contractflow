@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using ContractFlow.Api.Data;
+using ContractFlow.Api.Models.Domain;
 using ContractFlow.Api.Tests.Infrastructure;
+using Microsoft.EntityFrameworkCore;
 
 namespace ContractFlow.Api.Tests.Controllers;
 
@@ -12,7 +15,8 @@ public class ResourcesTests(ContractFlowWebApplicationFactory factory)
     public record LeaveDto(Guid Id, string From, string To, string Type);
     public record ResourceDetail(Guid Id, string DisplayName, LeaveDto[] Leave);
     public record AgreementDto(Guid Id, Guid? ContractId, int Version, string EffectiveFrom,
-        string Currency, decimal? HourlyRate, decimal? TravelTimePercent, string PerDiem);
+        string Currency, decimal? HourlyRate, decimal? TravelTimePercent, string PerDiem,
+        Guid? WorkPackageId, string? WorkPackageName);
 
     private async Task<ResourceDto> CreateResourceAsync(HttpClient client)
     {
@@ -85,6 +89,175 @@ public class ResourcesTests(ContractFlowWebApplicationFactory factory)
         var finance = factory.CreateUserClient(DevSeed.FinanceId);
         var ok = await finance.GetAsync($"/api/resources/{resource.Id}/agreements");
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+    }
+
+    /// <summary>Creates a work package under a fresh project's contract.</summary>
+    private async Task<(Guid contractId, Guid wpId)> ContractWithPackageAsync(
+        HttpClient admin, string tag)
+    {
+        var ids = await Scaffold.CommercialGraphAsync(admin, tag);
+        var wp = await admin.PostAsJsonAsync("/api/work-packages",
+            new { projectId = ids.ProjectId, name = $"Pkg {tag}" });
+        wp.EnsureSuccessStatusCode();
+        var wpId = (await wp.Content.ReadFromJsonAsync<Scaffold.IdRef>())!.Id;
+        return (ids.ContractId, wpId);
+    }
+
+    [Fact]
+    public async Task Agreements_WorkPackageScope_Requires_OwningContract()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var resource = await CreateResourceAsync(admin);
+        var (contractId, wpId) = await ContractWithPackageAsync(admin, "wp-scope");
+        var other = await ContractWithPackageAsync(admin, "wp-other");
+
+        // Package scope without its contract → 400.
+        var noContract = await admin.PostAsJsonAsync(
+            $"/api/resources/{resource.Id}/agreements",
+            new { workPackageId = wpId, effectiveFrom = "2026-01-01", currency = "SEK" });
+        Assert.Equal(HttpStatusCode.BadRequest, noContract.StatusCode);
+
+        // Package under a different contract → 400.
+        var mismatch = await admin.PostAsJsonAsync(
+            $"/api/resources/{resource.Id}/agreements",
+            new
+            {
+                contractId = other.contractId, workPackageId = wpId,
+                effectiveFrom = "2026-01-01", currency = "SEK",
+            });
+        Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
+
+        // Unknown package → 400.
+        var unknown = await admin.PostAsJsonAsync(
+            $"/api/resources/{resource.Id}/agreements",
+            new
+            {
+                contractId, workPackageId = Guid.NewGuid(),
+                effectiveFrom = "2026-01-01", currency = "SEK",
+            });
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+
+        // Consistent scope → accepted with the package names carried back.
+        var ok = await admin.PostAsJsonAsync(
+            $"/api/resources/{resource.Id}/agreements",
+            new
+            {
+                contractId, workPackageId = wpId,
+                effectiveFrom = "2026-01-01", currency = "SEK", hourlyRate = 750m,
+            });
+        ok.EnsureSuccessStatusCode();
+        var dto = await ok.Content.ReadFromJsonAsync<AgreementDto>();
+        Assert.Equal(wpId, dto!.WorkPackageId);
+        Assert.Equal("Pkg wp-scope", dto.WorkPackageName);
+    }
+
+    [Fact]
+    public async Task Agreements_WorkPackageScope_Versions_Separately()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var resource = await CreateResourceAsync(admin);
+        var (contractId, wpId) = await ContractWithPackageAsync(admin, "wp-ver");
+
+        // Contract scope already at v2 → the package scope still starts at v1.
+        await admin.PostAsJsonAsync($"/api/resources/{resource.Id}/agreements",
+            new { contractId, effectiveFrom = "2026-01-01", currency = "SEK" });
+        await admin.PostAsJsonAsync($"/api/resources/{resource.Id}/agreements",
+            new { contractId, effectiveFrom = "2026-06-01", currency = "SEK" });
+        var scoped = await (await admin.PostAsJsonAsync(
+            $"/api/resources/{resource.Id}/agreements",
+            new
+            {
+                contractId, workPackageId = wpId,
+                effectiveFrom = "2026-01-01", currency = "SEK",
+            })).Content.ReadFromJsonAsync<AgreementDto>();
+        Assert.Equal(1, scoped!.Version);
+    }
+
+    [Fact]
+    public async Task ContractWorkPackages_List_Returns_Project_Labelled_Rows()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var (contractId, wpId) = await ContractWithPackageAsync(admin, "wp-list");
+
+        var rows = await admin.GetFromJsonAsync<JsonElement>(
+            $"/api/contracts/{contractId}/work-packages");
+        var row = Assert.Single(rows.EnumerateArray());
+        Assert.Equal(wpId, row.GetProperty("id").GetGuid());
+        Assert.Equal("Pkg wp-list", row.GetProperty("name").GetString());
+        Assert.Contains("Project wp-list", row.GetProperty("projectName").GetString()!);
+    }
+
+    [Fact]
+    public async Task Agreements_WorkPackageScope_Wins_In_Statement()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var consultant = factory.CreateUserClient(DevSeed.ResourceId);
+        var ids = await Scaffold.CommercialGraphAsync(admin, "wp-stmt");
+        var wpRes = await admin.PostAsJsonAsync("/api/work-packages",
+            new { projectId = ids.ProjectId, name = "Priced Pkg" });
+        wpRes.EnsureSuccessStatusCode();
+        var wpId = (await wpRes.Content.ReadFromJsonAsync<Scaffold.IdRef>())!.Id;
+
+        var linked = TimeReportingTests.LinkedId;
+        await factory.SeedAsync(async db =>
+        {
+            if (!await db.Resources.AnyAsync(r => r.Id == linked))
+            {
+                db.Resources.Add(new Resource
+                {
+                    Id = linked, DisplayName = "Linked Tester",
+                    Type = ResourceType.Subcontractor,
+                    UserId = DevSeed.ResourceId,
+                });
+                await db.SaveChangesAsync();
+            }
+        });
+
+        // Default 600 + package-scoped 750.
+        (await admin.PostAsJsonAsync($"/api/resources/{linked}/agreements",
+            new { effectiveFrom = "2026-01-01", currency = "SEK", hourlyRate = 600m }))
+            .EnsureSuccessStatusCode();
+        (await admin.PostAsJsonAsync($"/api/resources/{linked}/agreements",
+            new
+            {
+                contractId = ids.ContractId, workPackageId = wpId,
+                effectiveFrom = "2026-01-01", currency = "SEK", hourlyRate = 750m,
+            })).EnsureSuccessStatusCode();
+
+        // Monday on the package (750 expected), Tuesday unpackaged (600).
+        foreach (var (date, wp) in new[] { ("2028-06-05", wpId), ("2028-06-06", (Guid?)null) })
+        {
+            var entry = await consultant.PostAsJsonAsync("/api/time-entries", new
+            {
+                projectId = ids.ProjectId, date, category = "work",
+                actualHours = 8m, workPackageId = wp,
+            });
+            entry.EnsureSuccessStatusCode();
+        }
+        var submit = await consultant.PostAsJsonAsync("/api/timesheets/submit",
+            new { year = 2028, isoWeek = 23 });
+        submit.EnsureSuccessStatusCode();
+        var sheetId = (await submit.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("sheet").GetProperty("id").GetGuid();
+        (await admin.PostAsync($"/api/timesheets/{sheetId}/approve", null))
+            .EnsureSuccessStatusCode();
+
+        var gen = await admin.PostAsJsonAsync("/api/statements/generate",
+            new { resourceId = linked, year = 2028, month = 6 });
+        gen.EnsureSuccessStatusCode();
+        var stId = (await gen.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("id").GetGuid();
+        var detail = await admin.GetFromJsonAsync<JsonElement>($"/api/statements/{stId}");
+
+        var hoursLines = detail.GetProperty("lines").EnumerateArray()
+            .Where(l => l.GetProperty("kind").GetString() == "hours").ToList();
+        Assert.Equal(2, hoursLines.Count);
+        Assert.Equal(750m, hoursLines.Single(l =>
+            l.GetProperty("date").GetString()!.StartsWith("2028-06-05"))
+            .GetProperty("unitPrice").GetDecimal());
+        Assert.Equal(600m, hoursLines.Single(l =>
+            l.GetProperty("date").GetString()!.StartsWith("2028-06-06"))
+            .GetProperty("unitPrice").GetDecimal());
     }
 
     [Fact]

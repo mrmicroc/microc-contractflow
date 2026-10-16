@@ -74,6 +74,9 @@ Items are marked ✅ only when implemented **and** tested. See
       NeedsReview cells on every work package; resolution merges per field
       resource cell > package row > contract; unbooked time rows can name
       their work package
+- [x] Work-package-scoped compensation agreements — agreement scope cascades
+      customer → contract → work package (payable side mirrors the billable
+      matrix); resolution WP scope > contract scope > default
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
 - [ ] Timesheet → Invoiced leg once an invoice covers the period

@@ -122,6 +122,7 @@ public class ResourcesController(AppDbContext db) : ControllerBase
 
         var agreements = await db.CompensationAgreements
             .Include(a => a.Contract)
+            .Include(a => a.WorkPackage).ThenInclude(w => w!.Project)
             .Where(a => a.ResourceId == id)
             .OrderBy(a => a.ContractId == null ? 0 : 1)
             .ThenByDescending(a => a.Version)
@@ -138,9 +139,23 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         if (req.ContractId.HasValue &&
             !await db.Contracts.AnyAsync(c => c.Id == req.ContractId.Value, ct))
             return BadRequest(new { error = "Unknown contract." });
+        if (req.WorkPackageId.HasValue)
+        {
+            if (req.ContractId is null)
+                return BadRequest(new { error = "A work-package scope requires its contract." });
+            var owning = await db.WorkPackages
+                .Where(w => w.Id == req.WorkPackageId.Value)
+                .Select(w => (Guid?)w.Project.ContractId)
+                .FirstOrDefaultAsync(ct);
+            if (owning is null)
+                return BadRequest(new { error = "Unknown work package." });
+            if (owning.Value != req.ContractId.Value)
+                return BadRequest(new { error = "The work package does not belong to that contract." });
+        }
 
         var nextVersion = await db.CompensationAgreements
-            .Where(a => a.ResourceId == id && a.ContractId == req.ContractId)
+            .Where(a => a.ResourceId == id && a.ContractId == req.ContractId
+                && a.WorkPackageId == req.WorkPackageId)
             .Select(a => (int?)a.Version)
             .MaxAsync(ct) + 1 ?? 1;
 
@@ -148,6 +163,7 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         {
             ResourceId = id,
             ContractId = req.ContractId,
+            WorkPackageId = req.WorkPackageId,
             Version = nextVersion,
             EffectiveFrom = req.EffectiveFrom,
             Currency = req.Currency.ToUpperInvariant(),
@@ -170,6 +186,10 @@ public class ResourcesController(AppDbContext db) : ControllerBase
 
         agreement.Contract = req.ContractId.HasValue
             ? await db.Contracts.FindAsync([req.ContractId.Value], ct)
+            : null;
+        agreement.WorkPackage = req.WorkPackageId.HasValue
+            ? await db.WorkPackages.Include(w => w.Project)
+                .FirstAsync(w => w.Id == req.WorkPackageId.Value, ct)
             : null;
         return Ok(ToDto(agreement));
     }
@@ -236,6 +256,7 @@ public class ResourcesController(AppDbContext db) : ControllerBase
 
     private static CompensationAgreementDto ToDto(CompensationAgreement a) => new(
         a.Id, a.ResourceId, a.ContractId, a.Contract?.Name,
+        a.WorkPackageId, a.WorkPackage?.Name, a.WorkPackage?.Project?.Name,
         a.Version, a.EffectiveFrom, a.CreatedUtc,
         a.Currency, a.HourlyRate, a.SaturdayRate, a.SundayRate, a.HolidayRate,
         a.OvertimeAfterHours, a.OvertimePercent, a.TravelTimePercent,

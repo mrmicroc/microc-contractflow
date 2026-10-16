@@ -57,6 +57,21 @@ public class ContractsController(AppDbContext db) : ControllerBase
                 .ToList()));
     }
 
+    /// <summary>All work packages across the contract's projects — the scope
+    /// picker's options (e.g. agreement scoping), labelled by project.</summary>
+    [HttpGet("{id:guid}/work-packages")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
+    public async Task<IActionResult> ListWorkPackages(Guid id, CancellationToken ct)
+    {
+        if (!await db.Contracts.AnyAsync(c => c.Id == id, ct)) return NotFound();
+        var packages = await db.WorkPackages
+            .Where(w => w.Project.ContractId == id)
+            .OrderBy(w => w.Project.Name).ThenBy(w => w.Name)
+            .Select(w => new ContractWorkPackageDto(w.Id, w.Name, w.ProjectId, w.Project.Name))
+            .ToListAsync(ct);
+        return Ok(packages);
+    }
+
     [HttpPost]
     [RequireRole(AppRole.Administrator)]
     public async Task<IActionResult> Create(ContractRequest req, CancellationToken ct)

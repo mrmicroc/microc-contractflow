@@ -183,6 +183,10 @@ public class ProjectRequest
 
 public record WorkPackageDto(Guid Id, Guid ProjectId, string Name, string? Address, string? Notes);
 
+/// <summary>Contract-scoped work-package row (GET /api/contracts/{id}/work-packages)
+/// — the scope picker's options, labelled with their owning project.</summary>
+public record ContractWorkPackageDto(Guid Id, string Name, Guid ProjectId, string ProjectName);
+
 /// <summary>One versioned package-rate override row (GET /api/work-packages/{id}/rates).
 /// ResourceId set = resource×package matrix cell; null = package-wide default.</summary>
 public record WorkPackageRateDto(

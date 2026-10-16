@@ -300,15 +300,24 @@ namespace ContractFlow.Api.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("WorkPackageId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ContractId");
+
+                    b.HasIndex("WorkPackageId");
 
                     b.HasIndex("ResourceId", "EffectiveFrom");
 
                     b.HasIndex("ResourceId", "ContractId", "Version")
                         .IsUnique()
-                        .HasFilter("[ContractId] IS NOT NULL");
+                        .HasFilter("[ContractId] IS NOT NULL AND [WorkPackageId] IS NULL");
+
+                    b.HasIndex("ResourceId", "ContractId", "WorkPackageId", "Version")
+                        .IsUnique()
+                        .HasFilter("[WorkPackageId] IS NOT NULL");
 
                     b.ToTable("CompensationAgreements");
                 });
@@ -1680,9 +1689,16 @@ namespace ContractFlow.Api.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ContractFlow.Api.Models.Domain.WorkPackage", "WorkPackage")
+                        .WithMany()
+                        .HasForeignKey("WorkPackageId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.Navigation("Contract");
 
                     b.Navigation("Resource");
+
+                    b.Navigation("WorkPackage");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Contract", b =>

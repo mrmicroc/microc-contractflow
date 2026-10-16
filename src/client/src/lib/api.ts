@@ -11,6 +11,7 @@ import type {
   CompensationAgreement,
   ContractDetail,
   ContractRequestBody,
+  ContractWorkPackage,
   ContractSummary,
   ContractTerms,
   ContractTermsRequestBody,
@@ -136,6 +137,8 @@ export const deleteEndClient = (id: string) => apiDelete(`/api/endclients/${id}`
 export const getContracts = (customerId?: string) =>
   apiGet<ContractSummary[]>(`/api/contracts${customerId ? `?customerId=${customerId}` : ''}`);
 export const getContract = (id: string) => apiGet<ContractDetail>(`/api/contracts/${id}`);
+export const getContractWorkPackages = (contractId: string) =>
+  apiGet<ContractWorkPackage[]>(`/api/contracts/${contractId}/work-packages`);
 export const createContract = (b: ContractRequestBody) => apiPost<ContractSummary>('/api/contracts', b);
 export const updateContract = (id: string, b: ContractRequestBody) =>
   apiPut<ContractSummary>(`/api/contracts/${id}`, b);
@@ -275,6 +278,7 @@ export const rotateFeedUrl = (resourceId?: string) =>
 
 export interface AgreementRequestBody {
   contractId: string | null;
+  workPackageId: string | null;
   effectiveFrom: string;
   currency: string;
   hourlyRate: number | null;
