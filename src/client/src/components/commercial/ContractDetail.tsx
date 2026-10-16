@@ -120,10 +120,12 @@ export function ContractDetail({
   contractId,
   selectedProjectId,
   onSelectProject,
+  onChanged,
 }: {
   contractId: string;
   selectedProjectId: string | null;
   onSelectProject: (id: string) => void;
+  onChanged?: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const me = useMe();
@@ -158,69 +160,88 @@ export function ContractDetail({
   };
 
   const saveTerms = async () => {
-    await createContractTerms(contract.id, {
-      effectiveFrom: tf.effectiveFrom,
-      currency: tf.currency,
-      timeBilling: tf.timeBilling,
-      padEnabled: tf.padEnabled,
-      fixedPriceEnabled: tf.fixedPriceEnabled,
-      padRate: numOrNull(tf.padRate),
-      hourlyRate: numOrNull(tf.hourlyRate),
-      saturdayRate: numOrNull(tf.saturdayRate),
-      sundayRate: numOrNull(tf.sundayRate),
-      holidayRate: numOrNull(tf.holidayRate),
-      overtimeAfterHours: Number(tf.overtimeAfterHours) || 8,
-      overtimePercent: Number(tf.overtimePercent) || 150,
-      mobilisationFee: numOrNull(tf.mobilisationFee),
-      expenseMarkupPercent: Number(tf.expenseMarkupPercent) || 0,
-      minBillableHoursPerDay: numOrNull(tf.minBillableHoursPerDay),
-      dayRate: numOrNull(tf.dayRate),
-      saturdayDayRate: numOrNull(tf.saturdayDayRate),
-      sundayDayRate: numOrNull(tf.sundayDayRate),
-      holidayDayRate: numOrNull(tf.holidayDayRate),
-      halfDayRate: numOrNull(tf.halfDayRate),
-      halfDayMaxHours: numOrNull(tf.halfDayMaxHours),
-      fixedPriceAmount: numOrNull(tf.fixedPriceAmount),
-      fixedPriceDate: tf.fixedPriceDate || null,
-      fixedPriceNote: tf.fixedPriceNote || null,
-      padHoursPerDay: Number(tf.padHoursPerDay) || 8,
-      minPadPerBookedDay: Number(tf.minPadPerBookedDay) || 1,
-      carryOverMaxPercent: Number(tf.carryOverMaxPercent) || 20,
-      carryOverMonths: Math.max(1, Number(tf.carryOverMonths) || 1),
-      cancellationDeadlineBusinessDays: Number(tf.cancellationDeadlineBusinessDays) || 4,
-      cancellationSteps: tf.cancellationSteps
-        .map((s) => ({
-          minBusinessDaysBefore: Number(s.minBusinessDaysBefore),
-          chargeHours: numOrNull(s.chargeHours),
-          chargeAmount: numOrNull(s.chargeAmount),
-        }))
-        .filter((s) => s.minBusinessDaysBefore > 0),
-      holidayCalendar: tf.holidayCalendar,
-      travelExpensePolicy: tf.travelExpensePolicy || null,
-      indexation: tf.indexation || null,
-      notes: tf.notes || null,
-    });
+    setError(null);
+    // Fields the chosen components don't use stay editable in the form (nice
+    // for switching back and forth) but are never persisted — the saved
+    // version must not carry dead rates that imply a different model.
+    const isHourly = tf.timeBilling === 'hourly';
+    const isDaily = tf.timeBilling === 'dailyRate';
+    try {
+      await createContractTerms(contract.id, {
+        effectiveFrom: tf.effectiveFrom,
+        currency: tf.currency,
+        timeBilling: tf.timeBilling,
+        padEnabled: tf.padEnabled,
+        fixedPriceEnabled: tf.fixedPriceEnabled,
+        padRate: tf.padEnabled ? numOrNull(tf.padRate) : null,
+        hourlyRate: isHourly ? numOrNull(tf.hourlyRate) : null,
+        saturdayRate: isHourly ? numOrNull(tf.saturdayRate) : null,
+        sundayRate: isHourly ? numOrNull(tf.sundayRate) : null,
+        holidayRate: isHourly ? numOrNull(tf.holidayRate) : null,
+        overtimeAfterHours: Number(tf.overtimeAfterHours) || 8,
+        overtimePercent: Number(tf.overtimePercent) || 150,
+        mobilisationFee: numOrNull(tf.mobilisationFee),
+        expenseMarkupPercent: Number(tf.expenseMarkupPercent) || 0,
+        minBillableHoursPerDay: isHourly ? numOrNull(tf.minBillableHoursPerDay) : null,
+        dayRate: isDaily ? numOrNull(tf.dayRate) : null,
+        saturdayDayRate: isDaily ? numOrNull(tf.saturdayDayRate) : null,
+        sundayDayRate: isDaily ? numOrNull(tf.sundayDayRate) : null,
+        holidayDayRate: isDaily ? numOrNull(tf.holidayDayRate) : null,
+        halfDayRate: isDaily ? numOrNull(tf.halfDayRate) : null,
+        halfDayMaxHours: isDaily ? numOrNull(tf.halfDayMaxHours) : null,
+        fixedPriceAmount: tf.fixedPriceEnabled ? numOrNull(tf.fixedPriceAmount) : null,
+        fixedPriceDate: tf.fixedPriceEnabled ? tf.fixedPriceDate || null : null,
+        fixedPriceNote: tf.fixedPriceEnabled ? tf.fixedPriceNote || null : null,
+        padHoursPerDay: Number(tf.padHoursPerDay) || 8,
+        minPadPerBookedDay: Number(tf.minPadPerBookedDay) || 1,
+        carryOverMaxPercent: Number(tf.carryOverMaxPercent) || 20,
+        carryOverMonths: Math.max(1, Number(tf.carryOverMonths) || 1),
+        cancellationDeadlineBusinessDays: Number(tf.cancellationDeadlineBusinessDays) || 4,
+        cancellationSteps: tf.cancellationSteps
+          .map((s) => ({
+            minBusinessDaysBefore: Number(s.minBusinessDaysBefore),
+            chargeHours: numOrNull(s.chargeHours),
+            chargeAmount: numOrNull(s.chargeAmount),
+          }))
+          .filter((s) => s.minBusinessDaysBefore > 0),
+        holidayCalendar: tf.holidayCalendar,
+        travelExpensePolicy: tf.travelExpensePolicy || null,
+        indexation: tf.indexation || null,
+        notes: tf.notes || null,
+      });
+    } catch (e) {
+      setError(errorMessage(e));
+      return;
+    }
     setTermsFormOpen(false);
     await reload();
+    onChanged?.(); // refresh the contract list — badges show the new version
   };
 
   const saveProject = async () => {
-    await createProject({
-      contractId: contract.id,
-      name: pf.name.trim(),
-      code: pf.code.trim() || null,
-      description: pf.description.trim() || null,
-      isActive: pf.isActive,
-    });
+    setError(null);
+    try {
+      await createProject({
+        contractId: contract.id,
+        name: pf.name.trim(),
+        code: pf.code.trim() || null,
+        description: pf.description.trim() || null,
+        isActive: pf.isActive,
+      });
+    } catch (e) {
+      setError(errorMessage(e));
+      return;
+    }
     setProjectFormOpen(false);
     setPf({ name: '', code: '', description: '', isActive: true });
     await reload();
+    onChanged?.();
   };
 
   const removeTerms = async (termId: string) => {
     if (!window.confirm(t('common.confirmDelete'))) return;
     setError(null);
-    try { await deleteContractTerms(contract.id, termId); await reload(); }
+    try { await deleteContractTerms(contract.id, termId); await reload(); onChanged?.(); }
     catch (e) { setError(errorMessage(e)); }
   };
 

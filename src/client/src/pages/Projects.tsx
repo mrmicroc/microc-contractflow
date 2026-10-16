@@ -99,6 +99,7 @@ export function Projects() {
           contractId={contractId}
           selectedProjectId={projectId}
           onSelectProject={selectProject}
+          onChanged={reloadCustomer}
         />
       )}
 
