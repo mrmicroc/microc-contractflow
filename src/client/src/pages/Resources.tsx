@@ -29,9 +29,10 @@ import type {
   ResourceType,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { invalidNumericFields } from '@/lib/validation';
 import { canSeeAgreements, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, tdCls, thCls,
 } from '@/components/forms';
 
 export function Resources() {
@@ -389,6 +390,22 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
   }, [reload]);
 
   const save = async () => {
+    const bad = invalidNumericFields(
+      {
+        [t('agreements.hourlyRate')]: af.hourlyRate,
+        [t('agreements.saturdayRate')]: af.saturdayRate,
+        [t('agreements.sundayRate')]: af.sundayRate,
+        [t('agreements.holidayRate')]: af.holidayRate,
+        [t('agreements.overtimePercent')]: af.overtimePercent,
+        [t('agreements.travelTimePercent')]: af.travelTimePercent,
+        [t('agreements.mileageRate')]: af.mileageRate,
+        [t('agreements.perDiemAmount')]: af.perDiemAmount,
+      },
+      { [t('agreements.overtimeAfterHours')]: af.overtimeAfterHours },
+    );
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
+    if (!af.effectiveFrom) { setError(t('common.invalidNumbers', { fields: t('common.effectiveFrom') })); return; }
+    setError(null);
     await createAgreement(resourceId, {
       contractId: af.contractId || null,
       effectiveFrom: af.effectiveFrom,
@@ -454,24 +471,24 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
                 onChange={(e) => setAf({ ...af, currency: e.target.value })} />
             </Field>
             <Field label={t('agreements.hourlyRate')}>
-              <input className={inputCls} inputMode="decimal" value={af.hourlyRate}
-                onChange={(e) => setAf({ ...af, hourlyRate: e.target.value })} />
+              <NumInput className={inputCls} value={af.hourlyRate}
+                onChange={(v) => setAf({ ...af, hourlyRate: v })} />
             </Field>
             <Field label={t('agreements.saturdayRate')}>
-              <input className={inputCls} inputMode="decimal" value={af.saturdayRate}
-                onChange={(e) => setAf({ ...af, saturdayRate: e.target.value })} />
+              <NumInput className={inputCls} value={af.saturdayRate}
+                onChange={(v) => setAf({ ...af, saturdayRate: v })} />
             </Field>
             <Field label={t('agreements.sundayRate')}>
-              <input className={inputCls} inputMode="decimal" value={af.sundayRate}
-                onChange={(e) => setAf({ ...af, sundayRate: e.target.value })} />
+              <NumInput className={inputCls} value={af.sundayRate}
+                onChange={(v) => setAf({ ...af, sundayRate: v })} />
             </Field>
             <Field label={t('agreements.travelTimePercent')}>
-              <input className={inputCls} inputMode="decimal" value={af.travelTimePercent}
-                onChange={(e) => setAf({ ...af, travelTimePercent: e.target.value })} />
+              <NumInput className={inputCls} value={af.travelTimePercent}
+                onChange={(v) => setAf({ ...af, travelTimePercent: v })} />
             </Field>
             <Field label={t('agreements.mileageRate')}>
-              <input className={inputCls} inputMode="decimal" value={af.mileageRate}
-                onChange={(e) => setAf({ ...af, mileageRate: e.target.value })} />
+              <NumInput className={inputCls} value={af.mileageRate}
+                onChange={(v) => setAf({ ...af, mileageRate: v })} />
             </Field>
             <Field label={t('agreements.perDiem')}>
               <select className={inputCls} value={af.perDiem}
@@ -483,8 +500,8 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
             </Field>
             {af.perDiem === 'custom' && (
               <Field label={t('agreements.perDiemAmount')}>
-                <input className={inputCls} inputMode="decimal" value={af.perDiemAmount}
-                  onChange={(e) => setAf({ ...af, perDiemAmount: e.target.value })} />
+                <NumInput className={inputCls} value={af.perDiemAmount}
+                  onChange={(v) => setAf({ ...af, perDiemAmount: v })} />
               </Field>
             )}
           </div>

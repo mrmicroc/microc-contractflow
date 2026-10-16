@@ -53,6 +53,7 @@ export const sv: DeepStringify<typeof en> = {
     notes: 'Anteckningar',
     search: 'Skriv för att söka…',
     noMatches: 'Inga träffar',
+    invalidNumbers: 'Kolla dessa fält — de förväntar sig siffror: {{fields}}',
     loading: 'Laddar…',
     actions: 'Åtgärder',
     status: 'Status',
@@ -239,7 +240,13 @@ export const sv: DeepStringify<typeof en> = {
     add: 'Lägg till estimat',
     label: 'Beteckning',
     quantity: 'Kvantitet',
+    hQuantity: 'Hur många enheter du räknar med att arbetet omfattar — en planeringssiffra, inte ett debiteringsbelopp.',
     unit: 'Enhet',
+    hUnit: 'Vad kvantiteten räknar — t.ex. styck, timmar, meter. Fritext (välja ett förslag eller skriv eget); det etiketterar estimatet men styr ingen prissättning.',
+    units: {
+      pcs: 'st', hours: 'timmar', days: 'dagar', km: 'km',
+      m: 'm', m2: 'm²', m3: 'm³', ton: 'ton',
+    },
   },
   siteRates: {
     toggle: 'Platspriser',

@@ -16,11 +16,12 @@ import {
   type BookingAction,
 } from '@/lib/bookings';
 import { numOrNull } from '@/lib/versioned';
+import { invalidNumericFields } from '@/lib/validation';
 import type { Booking, ProjectSummary, ResourceSummary } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { canSeeCommercial, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
+  btnCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, tdCls, thCls,
 } from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
 
@@ -151,6 +152,8 @@ export function Plan() {
 
   const saveEdit = async () => {
     if (!selected) return;
+    const bad = invalidNumericFields({ [t('booking.plannedHours')]: ef.plannedHours });
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     setError(null);
     try {
       await updateBooking(selected.id, {
@@ -183,6 +186,8 @@ export function Plan() {
   };
 
   const save = async () => {
+    const bad = invalidNumericFields({ [t('booking.plannedHours')]: f.plannedHours });
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     setError(null);
     try {
       await createBooking({
@@ -288,8 +293,8 @@ export function Plan() {
                   onChange={(e) => setF({ ...f, date: e.target.value })} />
               </Field>
               <Field label={t('booking.plannedHours')}>
-                <input className={inputCls} inputMode="decimal" value={f.plannedHours}
-                  onChange={(e) => setF({ ...f, plannedHours: e.target.value })} />
+                <NumInput className={inputCls} value={f.plannedHours}
+                  onChange={(v) => setF({ ...f, plannedHours: v })} />
               </Field>
               <Field label={t('booking.activityRef')}>
                 <input className={inputCls} value={f.activityRef}
@@ -439,8 +444,8 @@ export function Plan() {
                   onChange={(e) => setEf({ ...ef, date: e.target.value })} />
               </Field>
               <Field label={t('booking.plannedHours')}>
-                <input className={inputCls} inputMode="decimal" value={ef.plannedHours}
-                  onChange={(e) => setEf({ ...ef, plannedHours: e.target.value })} />
+                <NumInput className={inputCls} value={ef.plannedHours}
+                  onChange={(v) => setEf({ ...ef, plannedHours: v })} />
               </Field>
               <Field label={t('booking.statusLabel')}>
                 <select className={inputCls} value={ef.status}

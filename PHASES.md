@@ -74,6 +74,9 @@ Items are marked ✅ only when implemented **and** tested. See
 
 ## Phase 4 — Go live
 - [ ] Azure deploy (SWA + App Service + SQL + Blob)
+- Note: the microc.se domain (intended for the external "partner panel" /
+      sign-in surface) is currently parked at hostek.se — DNS/hosting must be
+      repointed when the panel goes live.
 - [ ] microc.se "Logga in / Mina sidor" entry point
 - [ ] Email notifications
 - [ ] Backup strategy (optionally UNAS Pro via SMB)

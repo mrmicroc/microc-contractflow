@@ -6,6 +6,7 @@ import {
 } from '@/lib/api';
 import { calendarLabel, currencyName } from '@/lib/countries';
 import { numOrNull, resolveVersion } from '@/lib/versioned';
+import { invalidNumericFields, isInvalidDecimal, isInvalidInteger } from '@/lib/validation';
 import type {
   ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, TimeBilling,
 } from '@/lib/types';
@@ -19,7 +20,7 @@ type StepRow = {
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, SearchSelect, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, SearchSelect, tdCls, thCls,
 } from '@/components/forms';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -166,6 +167,49 @@ export function ContractDetail({
     // version must not carry dead rates that imply a different model.
     const isHourly = tf.timeBilling === 'hourly';
     const isDaily = tf.timeBilling === 'dailyRate';
+
+    // Block the save on any non-empty non-numeric value — letters must never
+    // silently degrade to "empty"/default (the user typed something).
+    const bad = invalidNumericFields(
+      {
+        [t('terms.padRate')]: tf.padRate,
+        [t('terms.hourlyRate')]: tf.hourlyRate,
+        [t('terms.saturdayRate')]: tf.saturdayRate,
+        [t('terms.sundayRate')]: tf.sundayRate,
+        [t('terms.holidayRate')]: tf.holidayRate,
+        [t('terms.overtimePercent')]: tf.overtimePercent,
+        [t('terms.mobilisationFee')]: tf.mobilisationFee,
+        [t('terms.expenseMarkupPercent')]: tf.expenseMarkupPercent,
+        [t('terms.minBillableHoursPerDay')]: tf.minBillableHoursPerDay,
+        [t('terms.dayRate')]: tf.dayRate,
+        [t('terms.saturdayDayRate')]: tf.saturdayDayRate,
+        [t('terms.sundayDayRate')]: tf.sundayDayRate,
+        [t('terms.holidayDayRate')]: tf.holidayDayRate,
+        [t('terms.halfDayRate')]: tf.halfDayRate,
+        [t('terms.halfDayMaxHours')]: tf.halfDayMaxHours,
+        [t('terms.fixedPriceAmount')]: tf.fixedPriceAmount,
+        [t('terms.padHoursPerDay')]: tf.padHoursPerDay,
+        [t('terms.minPadPerBookedDay')]: tf.minPadPerBookedDay,
+        [t('terms.carryOverMaxPercent')]: tf.carryOverMaxPercent,
+      },
+      {
+        [t('terms.overtimeAfterHours')]: tf.overtimeAfterHours,
+        [t('terms.carryOverMonths')]: tf.carryOverMonths,
+        [t('terms.cancellationDeadlineBusinessDays')]: tf.cancellationDeadlineBusinessDays,
+      },
+    );
+    tf.cancellationSteps.forEach((s, i) => {
+      const tag = `${t('terms.cancellationSteps')} #${i + 1}`;
+      if (s.minBusinessDaysBefore.trim() && isInvalidInteger(s.minBusinessDaysBefore))
+        bad.push(`${tag} · ${t('terms.stepDaysBefore')}`);
+      if (isInvalidDecimal(s.chargeHours)) bad.push(`${tag} · ${t('terms.stepChargeHours')}`);
+      if (isInvalidDecimal(s.chargeAmount)) bad.push(`${tag} · ${t('terms.stepChargeAmount')}`);
+    });
+    if (!tf.effectiveFrom) bad.push(t('common.effectiveFrom'));
+    if (bad.length) {
+      setError(t('common.invalidNumbers', { fields: bad.join(', ') }));
+      return;
+    }
     try {
       await createContractTerms(contract.id, {
         effectiveFrom: tf.effectiveFrom,
@@ -251,12 +295,12 @@ export function ContractDetail({
   const otFields = (
     <>
       <Field label={t('terms.overtimeAfterHours')} help={t('terms.hOvertimeAfterHours')}>
-        <input className={inputCls} inputMode="numeric" value={tf.overtimeAfterHours}
-          onChange={(e) => setTf({ ...tf, overtimeAfterHours: e.target.value })} />
+        <NumInput integerOnly className={inputCls} value={tf.overtimeAfterHours}
+          onChange={(v) => setTf({ ...tf, overtimeAfterHours: v })} />
       </Field>
       <Field label={t('terms.overtimePercent')} help={t('terms.hOvertimePercent')}>
-        <input className={inputCls} inputMode="decimal" value={tf.overtimePercent}
-          onChange={(e) => setTf({ ...tf, overtimePercent: e.target.value })} />
+        <NumInput className={inputCls} value={tf.overtimePercent}
+          onChange={(v) => setTf({ ...tf, overtimePercent: v })} />
       </Field>
     </>
   );
@@ -358,25 +402,25 @@ export function ContractDetail({
                 <h4 className={grpCls}>{t('terms.groupHourly')}</h4>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <Field label={t('terms.hourlyRate')} help={t('terms.hHourlyRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.hourlyRate}
-                      onChange={(e) => setTf({ ...tf, hourlyRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.hourlyRate}
+                      onChange={(v) => setTf({ ...tf, hourlyRate: v })} />
                   </Field>
                   <Field label={t('terms.saturdayRate')} help={t('terms.hSaturdayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.saturdayRate}
-                      onChange={(e) => setTf({ ...tf, saturdayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.saturdayRate}
+                      onChange={(v) => setTf({ ...tf, saturdayRate: v })} />
                   </Field>
                   <Field label={t('terms.sundayRate')} help={t('terms.hSundayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.sundayRate}
-                      onChange={(e) => setTf({ ...tf, sundayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.sundayRate}
+                      onChange={(v) => setTf({ ...tf, sundayRate: v })} />
                   </Field>
                   <Field label={t('terms.holidayRate')} help={t('terms.hHolidayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.holidayRate}
-                      onChange={(e) => setTf({ ...tf, holidayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.holidayRate}
+                      onChange={(v) => setTf({ ...tf, holidayRate: v })} />
                   </Field>
                   {otFields}
                   <Field label={t('terms.minBillableHoursPerDay')} help={t('terms.hMinBillable')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.minBillableHoursPerDay}
-                      onChange={(e) => setTf({ ...tf, minBillableHoursPerDay: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.minBillableHoursPerDay}
+                      onChange={(v) => setTf({ ...tf, minBillableHoursPerDay: v })} />
                   </Field>
                 </div>
               </>
@@ -387,28 +431,28 @@ export function ContractDetail({
                 <h4 className={grpCls}>{t('terms.groupDaily')}</h4>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <Field label={t('terms.dayRate')} help={t('terms.hDayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.dayRate}
-                      onChange={(e) => setTf({ ...tf, dayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.dayRate}
+                      onChange={(v) => setTf({ ...tf, dayRate: v })} />
                   </Field>
                   <Field label={t('terms.saturdayDayRate')} help={t('terms.hSaturdayDayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.saturdayDayRate}
-                      onChange={(e) => setTf({ ...tf, saturdayDayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.saturdayDayRate}
+                      onChange={(v) => setTf({ ...tf, saturdayDayRate: v })} />
                   </Field>
                   <Field label={t('terms.sundayDayRate')} help={t('terms.hSundayDayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.sundayDayRate}
-                      onChange={(e) => setTf({ ...tf, sundayDayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.sundayDayRate}
+                      onChange={(v) => setTf({ ...tf, sundayDayRate: v })} />
                   </Field>
                   <Field label={t('terms.holidayDayRate')} help={t('terms.hHolidayDayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.holidayDayRate}
-                      onChange={(e) => setTf({ ...tf, holidayDayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.holidayDayRate}
+                      onChange={(v) => setTf({ ...tf, holidayDayRate: v })} />
                   </Field>
                   <Field label={t('terms.halfDayRate')} help={t('terms.hHalfDayRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.halfDayRate}
-                      onChange={(e) => setTf({ ...tf, halfDayRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.halfDayRate}
+                      onChange={(v) => setTf({ ...tf, halfDayRate: v })} />
                   </Field>
                   <Field label={t('terms.halfDayMaxHours')} help={t('terms.hHalfDayMaxHours')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.halfDayMaxHours}
-                      onChange={(e) => setTf({ ...tf, halfDayMaxHours: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.halfDayMaxHours}
+                      onChange={(v) => setTf({ ...tf, halfDayMaxHours: v })} />
                   </Field>
                   {otFields}
                 </div>
@@ -420,24 +464,24 @@ export function ContractDetail({
                 <h4 className={grpCls}>{t('terms.groupPad')}</h4>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <Field label={t('terms.padRate')} help={t('terms.hPadRate')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.padRate}
-                      onChange={(e) => setTf({ ...tf, padRate: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.padRate}
+                      onChange={(v) => setTf({ ...tf, padRate: v })} />
                   </Field>
                   <Field label={t('terms.padHoursPerDay')} help={t('terms.hPadHoursPerDay')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.padHoursPerDay}
-                      onChange={(e) => setTf({ ...tf, padHoursPerDay: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.padHoursPerDay}
+                      onChange={(v) => setTf({ ...tf, padHoursPerDay: v })} />
                   </Field>
                   <Field label={t('terms.minPadPerBookedDay')} help={t('terms.hMinPadPerBookedDay')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.minPadPerBookedDay}
-                      onChange={(e) => setTf({ ...tf, minPadPerBookedDay: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.minPadPerBookedDay}
+                      onChange={(v) => setTf({ ...tf, minPadPerBookedDay: v })} />
                   </Field>
                   <Field label={t('terms.carryOverMaxPercent')} help={t('terms.hCarryOver')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.carryOverMaxPercent}
-                      onChange={(e) => setTf({ ...tf, carryOverMaxPercent: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.carryOverMaxPercent}
+                      onChange={(v) => setTf({ ...tf, carryOverMaxPercent: v })} />
                   </Field>
                   <Field label={t('terms.carryOverMonths')} help={t('terms.hCarryOverMonths')}>
-                    <input className={inputCls} inputMode="numeric" value={tf.carryOverMonths}
-                      onChange={(e) => setTf({ ...tf, carryOverMonths: e.target.value })} />
+                    <NumInput integerOnly className={inputCls} value={tf.carryOverMonths}
+                      onChange={(v) => setTf({ ...tf, carryOverMonths: v })} />
                   </Field>
                 </div>
               </>
@@ -448,8 +492,8 @@ export function ContractDetail({
                 <h4 className={grpCls}>{t('terms.groupFixedPrice')}</h4>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <Field label={t('terms.fixedPriceAmount')} help={t('terms.hFixedPriceAmount')}>
-                    <input className={inputCls} inputMode="decimal" value={tf.fixedPriceAmount}
-                      onChange={(e) => setTf({ ...tf, fixedPriceAmount: e.target.value })} />
+                    <NumInput className={inputCls} value={tf.fixedPriceAmount}
+                      onChange={(v) => setTf({ ...tf, fixedPriceAmount: v })} />
                   </Field>
                   <Field label={t('terms.fixedPriceDate')} help={t('terms.hFixedPriceDate')}>
                     <input type="date" className={inputCls} value={tf.fixedPriceDate}
@@ -466,20 +510,20 @@ export function ContractDetail({
             <h4 className={grpCls}>{t('terms.groupCharges')}</h4>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Field label={t('terms.mobilisationFee')} help={t('terms.hMobilisationFee')}>
-                <input className={inputCls} inputMode="decimal" value={tf.mobilisationFee}
-                  onChange={(e) => setTf({ ...tf, mobilisationFee: e.target.value })} />
+                <NumInput className={inputCls} value={tf.mobilisationFee}
+                  onChange={(v) => setTf({ ...tf, mobilisationFee: v })} />
               </Field>
               <Field label={t('terms.expenseMarkupPercent')} help={t('terms.hExpenseMarkup')}>
-                <input className={inputCls} inputMode="decimal" value={tf.expenseMarkupPercent}
-                  onChange={(e) => setTf({ ...tf, expenseMarkupPercent: e.target.value })} />
+                <NumInput className={inputCls} value={tf.expenseMarkupPercent}
+                  onChange={(v) => setTf({ ...tf, expenseMarkupPercent: v })} />
               </Field>
             </div>
 
             <h4 className={grpCls}>{t('terms.groupBooking')}</h4>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Field label={t('terms.cancellationDeadlineBusinessDays')} help={t('terms.hCancelDeadline')}>
-                <input className={inputCls} inputMode="numeric" value={tf.cancellationDeadlineBusinessDays}
-                  onChange={(e) => setTf({ ...tf, cancellationDeadlineBusinessDays: e.target.value })} />
+                <NumInput integerOnly className={inputCls} value={tf.cancellationDeadlineBusinessDays}
+                  onChange={(v) => setTf({ ...tf, cancellationDeadlineBusinessDays: v })} />
               </Field>
               <Field label={t('terms.holidayCalendar')} help={t('terms.hHolidayCalendar')}>
                 <SearchSelect
@@ -500,16 +544,16 @@ export function ContractDetail({
               </p>
               {tf.cancellationSteps.map((s, i) => (
                 <div key={i} className="mb-1 flex items-center gap-2">
-                  <input className={cn(inputCls, 'w-32')} inputMode="numeric"
+                  <NumInput integerOnly className={cn(inputCls, 'w-32')}
                     placeholder={t('terms.stepDaysBefore')}
                     value={s.minBusinessDaysBefore}
-                    onChange={(e) => setStep(i, { minBusinessDaysBefore: e.target.value })} />
-                  <input className={cn(inputCls, 'w-32')} inputMode="decimal"
+                    onChange={(v) => setStep(i, { minBusinessDaysBefore: v })} />
+                  <NumInput className={cn(inputCls, 'w-32')}
                     placeholder={t('terms.stepChargeHours')} value={s.chargeHours}
-                    onChange={(e) => setStep(i, { chargeHours: e.target.value })} />
-                  <input className={cn(inputCls, 'w-32')} inputMode="decimal"
+                    onChange={(v) => setStep(i, { chargeHours: v })} />
+                  <NumInput className={cn(inputCls, 'w-32')}
                     placeholder={t('terms.stepChargeAmount')} value={s.chargeAmount}
-                    onChange={(e) => setStep(i, { chargeAmount: e.target.value })} />
+                    onChange={(v) => setStep(i, { chargeAmount: v })} />
                   <button className={btnDangerCls}
                     onClick={() => setTf({ ...tf, cancellationSteps: tf.cancellationSteps.filter((_, j) => j !== i) })}>
                     {t('common.delete')}

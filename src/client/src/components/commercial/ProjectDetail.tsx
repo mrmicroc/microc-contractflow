@@ -17,13 +17,14 @@ import {
   revokeProjectAccess,
 } from '@/lib/api';
 import { numOrNull } from '@/lib/versioned';
+import { invalidNumericFields } from '@/lib/validation';
 import type {
   LocationRate, ProjectAccess, ProjectDetail as ProjectDetailDto,
   ResourceSummary,
 } from '@/lib/types';
 import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel,
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel,
   SearchSelect, tdCls, thCls,
 } from '@/components/forms';
 import { cn } from '@/lib/utils';
@@ -76,6 +77,11 @@ export function ProjectDetail({
   };
 
   const saveQuantity = async () => {
+    const bad = invalidNumericFields({
+      [t('quantities.quantity')]: qf.quantity,
+    });
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
+    setError(null);
     await createQuantity({
       projectId: project.id,
       label: qf.label.trim(),
@@ -213,13 +219,17 @@ export function ProjectDetail({
               <input className={inputCls} value={qf.label}
                 onChange={(e) => setQf({ ...qf, label: e.target.value })} />
             </Field>
-            <Field label={t('quantities.quantity')}>
-              <input className={inputCls} inputMode="decimal" value={qf.quantity}
-                onChange={(e) => setQf({ ...qf, quantity: e.target.value })} />
+            <Field label={t('quantities.quantity')} help={t('quantities.hQuantity')}>
+              <NumInput className={inputCls} value={qf.quantity}
+                onChange={(v) => setQf({ ...qf, quantity: v })} />
             </Field>
-            <Field label={t('quantities.unit')}>
-              <input className={inputCls} value={qf.unit}
+            <Field label={t('quantities.unit')} help={t('quantities.hUnit')}>
+              <input className={inputCls} value={qf.unit} list="unit-suggestions"
                 onChange={(e) => setQf({ ...qf, unit: e.target.value })} />
+              <datalist id="unit-suggestions">
+                {(['pcs', 'hours', 'days', 'km', 'm', 'm2', 'm3', 'ton'] as const)
+                  .map((u) => <option key={u} value={t(`quantities.units.${u}`)} />)}
+              </datalist>
             </Field>
             <button className={btnCls} disabled={!qf.label.trim() || !qf.unit.trim()}
               onClick={() => void saveQuantity()}>
@@ -306,6 +316,20 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
   useEffect(() => { void reload(); }, [reload]);
 
   const save = async () => {
+    const bad = invalidNumericFields({
+      [t('terms.hourlyRate')]: f.hourlyRate,
+      [t('terms.saturdayRate')]: f.saturdayRate,
+      [t('terms.sundayRate')]: f.sundayRate,
+      [t('terms.holidayRate')]: f.holidayRate,
+      [t('terms.dayRate')]: f.dayRate,
+      [t('terms.saturdayDayRate')]: f.saturdayDayRate,
+      [t('terms.sundayDayRate')]: f.sundayDayRate,
+      [t('terms.holidayDayRate')]: f.holidayDayRate,
+      [t('terms.halfDayRate')]: f.halfDayRate,
+      [t('terms.halfDayMaxHours')]: f.halfDayMaxHours,
+      [t('terms.mobilisationFee')]: f.mobilisationFee,
+    });
+    if (bad.length) { setErr(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     setErr(null);
     try {
       await createLocationRate(locationId, {
@@ -332,7 +356,7 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
         <table className="mb-2 w-full border-collapse">
           <thead>
             <tr className="border-b border-slate-200 text-left">
-              <th className={thCls}>{t('terms.effectiveFrom')}</th>
+              <th className={thCls}>{t('common.effectiveFrom')}</th>
               <th className={thCls}>{t('terms.hourlyRate')}</th>
               <th className={thCls}>{t('terms.weekendRates')}</th>
               <th className={thCls}>{t('terms.dayRate')}</th>
@@ -375,23 +399,23 @@ function SiteRates({ locationId, canWrite }: { locationId: string; canWrite: boo
       {err && <p className="mb-1 text-xs text-red-600">{err}</p>}
       {canWrite && (
         <div className="flex flex-wrap items-end gap-2">
-          <Field label={t('terms.effectiveFrom')} help={t('siteRates.hEffective')}>
+          <Field label={t('common.effectiveFrom')} help={t('siteRates.hEffective')}>
             <input className={inputCls} type="date" value={f.effectiveFrom}
               onChange={(e) => setF({ ...f, effectiveFrom: e.target.value })} />
           </Field>
           {([
             ['hourlyRate', 'terms.hourlyRate'],
-            ['saturdayRate', 'terms.satRate'],
-            ['sundayRate', 'terms.sunRate'],
-            ['holidayRate', 'terms.holRate'],
+            ['saturdayRate', 'terms.saturdayRate'],
+            ['sundayRate', 'terms.sundayRate'],
+            ['holidayRate', 'terms.holidayRate'],
             ['dayRate', 'terms.dayRate'],
             ['halfDayRate', 'terms.halfDayRate'],
             ['mobilisationFee', 'terms.mobilisationFee'],
           ] as const).map(([key, label]) => (
             <Field key={key} label={t(label)}>
-              <input className={cn(inputCls, 'w-24')} inputMode="decimal" placeholder="—"
+              <NumInput className={cn(inputCls, 'w-24')} placeholder="—"
                 value={f[key]}
-                onChange={(e) => setF({ ...f, [key]: e.target.value })} />
+                onChange={(v) => setF({ ...f, [key]: v })} />
             </Field>
           ))}
           <Field label={t('common.notes')}>

@@ -11,13 +11,14 @@ import {
   setBaseline,
 } from '@/lib/api';
 import { numOrNull } from '@/lib/versioned';
+import { invalidNumericFields } from '@/lib/validation';
 import type {
   AdditionalPadRequest, CloseMonthResult, PadDashboard, ProjectSummary,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, tdCls, thCls,
 } from '@/components/forms';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -99,6 +100,8 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
   useEffect(() => { void reload(); }, [reload]);
 
   const saveBaseline = async () => {
+    const bad = invalidNumericFields({ [t('monthEnd.baselineAmount')]: baselineAmt });
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     const amount = numOrNull(baselineAmt);
     if (amount === null) return;
     setError(null);
@@ -119,6 +122,8 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
   };
 
   const saveRequest = async () => {
+    const bad = invalidNumericFields({ [t('monthEnd.quantity')]: reqForm.quantity });
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     const quantity = numOrNull(reqForm.quantity);
     if (quantity === null) return;
     setError(null);
@@ -189,8 +194,8 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
         <Panel title={t('monthEnd.setBaseline')} help={t('monthEnd.baselineHelp')}>
           <div className="flex flex-wrap items-end gap-2">
             <Field label={t('monthEnd.baselineAmount')}>
-              <input className={inputCls} inputMode="decimal" value={baselineAmt}
-                onChange={(e) => setBaselineAmt(e.target.value)} />
+              <NumInput className={inputCls} value={baselineAmt}
+                onChange={(v) => setBaselineAmt(v)} />
             </Field>
             <Field label={t('common.notes')}>
               <input className={inputCls} value={baselineNote}
@@ -228,8 +233,8 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
           {reqOpen && (
             <div className="mb-3 flex flex-wrap items-end gap-2 rounded border border-slate-200 bg-slate-50 p-2">
               <Field label={t('monthEnd.quantity')}>
-                <input className={inputCls} inputMode="decimal" value={reqForm.quantity}
-                  onChange={(e) => setReqForm({ ...reqForm, quantity: e.target.value })} />
+                <NumInput className={inputCls} value={reqForm.quantity}
+                  onChange={(v) => setReqForm({ ...reqForm, quantity: v })} />
               </Field>
               <Field label={t('monthEnd.reason')}>
                 <input className={inputCls} value={reqForm.reason}

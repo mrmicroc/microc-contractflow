@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { getCountries } from '@/lib/api';
 import { countryName } from '@/lib/countries';
 import { filterOptions, type SearchOption } from '@/lib/options';
+import { isInvalidDecimal, isInvalidInteger } from '@/lib/validation';
 import { cn } from '@/lib/utils';
 import type { MetaEntry } from '@/lib/types';
 
@@ -16,6 +17,32 @@ export const btnDangerCls =
   'rounded border border-red-200 px-2 py-0.5 text-xs text-red-600 hover:bg-red-50';
 export const thCls = 'px-3 py-1.5 text-left text-xs font-semibold text-slate-500';
 export const tdCls = 'px-3 py-1.5 text-sm text-slate-700';
+
+/**
+ * Free-text numeric input — marks itself red as soon as the value is
+ * non-empty and non-numeric (or non-integer when integerOnly). The form's
+ * save handler must also block on invalidNumericFields() — this component
+ * only gives the immediate visual feedback.
+ */
+export function NumInput({ value, onChange, integerOnly, className, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  integerOnly?: boolean;
+  className?: string;
+  placeholder?: string;
+}) {
+  const bad = integerOnly ? isInvalidInteger(value) : isInvalidDecimal(value);
+  return (
+    <input
+      className={cn(className ?? inputCls,
+        bad && 'border-red-400 bg-red-50 text-red-700')}
+      inputMode={integerOnly ? 'numeric' : 'decimal'}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
 
 export function Field({ label, help, children }: {
   label: string;

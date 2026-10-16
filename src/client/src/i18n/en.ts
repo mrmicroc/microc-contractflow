@@ -47,6 +47,7 @@ export const en = {
     notes: 'Notes',
     search: 'Type to search…',
     noMatches: 'No matches',
+    invalidNumbers: 'Check these fields — they expect numbers: {{fields}}',
     loading: 'Loading…',
     actions: 'Actions',
     status: 'Status',
@@ -233,7 +234,13 @@ export const en = {
     add: 'Add estimate',
     label: 'Label',
     quantity: 'Quantity',
+    hQuantity: 'How many units you expect the work to amount to — a planning figure, not a billing amount.',
     unit: 'Unit',
+    hUnit: 'What the quantity counts — e.g. pieces, hours, metres. A free-text field (pick a suggestion or type your own); it labels the estimate, it does not drive pricing.',
+    units: {
+      pcs: 'pcs', hours: 'hours', days: 'days', km: 'km',
+      m: 'm', m2: 'm²', m3: 'm³', ton: 'ton',
+    },
   },
   siteRates: {
     toggle: 'Site rates',
