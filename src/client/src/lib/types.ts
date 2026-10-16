@@ -8,10 +8,19 @@ export type ResourceType = 'employee' | 'subcontractor' | 'directlyContracted';
 export type LeaveType = 'vacation' | 'leave' | 'unavailable';
 export type PerDiemPolicy = 'none' | 'statutory' | 'custom';
 
+export interface ContactPerson {
+  name: string;
+  role: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
 export interface CustomerSummary {
   id: string;
   name: string;
   externalReference: string | null;
+  vatNumber: string | null;
+  country: string | null;
   isActive: boolean;
   contractCount: number;
 }
@@ -20,6 +29,12 @@ export interface CustomerDetail {
   id: string;
   name: string;
   externalReference: string | null;
+  vatNumber: string | null;
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
+  country: string | null;
+  contacts: ContactPerson[];
   notes: string | null;
   isActive: boolean;
   contracts: ContractSummary[];
@@ -28,6 +43,12 @@ export interface CustomerDetail {
 export interface CustomerRequestBody {
   name: string;
   externalReference: string | null;
+  vatNumber: string | null;
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
+  country: string | null;
+  contacts: ContactPerson[];
   notes: string | null;
   isActive: boolean;
 }
@@ -35,12 +56,26 @@ export interface CustomerRequestBody {
 export interface EndClient {
   id: string;
   name: string;
+  country: string | null;
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
   notes: string | null;
 }
 
 export interface EndClientRequestBody {
   name: string;
+  country: string | null;
+  addressLine: string | null;
+  postalCode: string | null;
+  city: string | null;
   notes: string | null;
+}
+
+/** GET /api/meta/calendars row — supported holiday calendars. */
+export interface HolidayCalendarInfo {
+  code: string;
+  name: string;
 }
 
 export interface ContractSummary {

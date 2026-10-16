@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  createContractTerms, createProject, deleteContractTerms, errorMessage, getContract,
+  createContractTerms, createProject, deleteContractTerms, errorMessage, getCalendars, getContract,
 } from '@/lib/api';
+import { countryName } from '@/lib/countries';
 import { numOrNull, resolveVersion } from '@/lib/versioned';
-import type { ContractDetail as ContractDetailDto, ContractTerms, TimeBilling } from '@/lib/types';
+import type {
+  ContractDetail as ContractDetailDto, ContractTerms, HolidayCalendarInfo, TimeBilling,
+} from '@/lib/types';
 
 /** Cancellation-ladder row in the form — strings while editing. */
 type StepRow = {
@@ -121,7 +124,7 @@ export function ContractDetail({
   selectedProjectId: string | null;
   onSelectProject: (id: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const me = useMe();
   const [contract, setContract] = useState<ContractDetailDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +132,7 @@ export function ContractDetail({
   const [projectFormOpen, setProjectFormOpen] = useState(false);
   const [tf, setTf] = useState<TermsForm>(emptyTerms);
   const [pf, setPf] = useState({ name: '', code: '', description: '', isActive: true });
+  const [calendars, setCalendars] = useState<HolidayCalendarInfo[]>([]);
 
   // Parent mounts this with key={contractId}, so a new selection remounts with
   // fresh state — the effect only needs to fetch.
@@ -137,6 +141,9 @@ export function ContractDetail({
     [contractId],
   );
   useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    getCalendars().then(setCalendars).catch(() => setCalendars([]));
+  }, []);
 
   if (!contract) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
 
@@ -445,8 +452,15 @@ export function ContractDetail({
                   onChange={(e) => setTf({ ...tf, cancellationDeadlineBusinessDays: e.target.value })} />
               </Field>
               <Field label={t('terms.holidayCalendar')} help={t('terms.hHolidayCalendar')}>
-                <input className={inputCls} value={tf.holidayCalendar}
-                  onChange={(e) => setTf({ ...tf, holidayCalendar: e.target.value })} />
+                <select className={inputCls} value={tf.holidayCalendar}
+                  onChange={(e) => setTf({ ...tf, holidayCalendar: e.target.value })}>
+                  {calendars.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.code === 'NONE' ? c.name : `${countryName(c.code, i18n.language)} (${c.code})`}
+                    </option>
+                  ))}
+                  {calendars.length === 0 && <option value="SE">SE</option>}
+                </select>
               </Field>
             </div>
             <div className="mt-2">

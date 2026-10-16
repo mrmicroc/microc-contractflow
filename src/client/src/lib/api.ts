@@ -21,6 +21,7 @@ import type {
   EndClientRequestBody,
   EstimatedQuantity,
   EstimatedQuantityRequestBody,
+  HolidayCalendarInfo,
   Expense,
   ExpenseRequestBody,
   InvoiceDetail,
@@ -107,6 +108,7 @@ export interface UserDto {
 }
 
 export const getMe = () => apiGet<UserDto>('/api/me');
+export const getCalendars = () => apiGet<HolidayCalendarInfo[]>('/api/meta/calendars');
 export const getUsers = () => apiGet<UserDto[]>('/api/users');
 
 // ── Commercial structure ────────────────────────────────────────────────────

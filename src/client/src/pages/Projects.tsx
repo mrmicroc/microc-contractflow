@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  createEndClient, deleteEndClient, errorMessage, getCustomer, getEndClients, updateEndClient,
-} from '@/lib/api';
+import { getCustomer, getEndClients } from '@/lib/api';
 import type { CustomerDetail, EndClient } from '@/lib/types';
-import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
+import { canSeeCommercial, useMe } from '@/lib/useMe';
 import { CustomerSection } from '@/components/commercial/CustomerSection';
 import { ContractSection } from '@/components/commercial/ContractSection';
 import { ContractDetail } from '@/components/commercial/ContractDetail';
 import { ProjectDetail } from '@/components/commercial/ProjectDetail';
-import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls,
-} from '@/components/forms';
+import { EndClientSection } from '@/components/commercial/EndClientSection';
 
 export function Projects() {
   const { t } = useTranslation();
@@ -22,10 +18,6 @@ export function Projects() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [contractKey, setContractKey] = useState(0);
   const [endClients, setEndClients] = useState<EndClient[]>([]);
-  const [newEndClient, setNewEndClient] = useState('');
-  const [editEndClientId, setEditEndClientId] = useState<string | null>(null);
-  const [editEndClientName, setEditEndClientName] = useState('');
-  const [endClientError, setEndClientError] = useState<string | null>(null);
 
   const reloadEndClients = useCallback(
     () => getEndClients().then(setEndClients).catch(() => setEndClients([])),
@@ -60,32 +52,6 @@ export function Projects() {
 
   const selectProject = (id: string) => {
     setProjectId((prev) => (prev === id ? null : id));
-  };
-
-  const saveEndClient = async () => {
-    setEndClientError(null);
-    try {
-      await createEndClient({ name: newEndClient.trim(), notes: null });
-      setNewEndClient('');
-      await reloadEndClients();
-    } catch (e) { setEndClientError(errorMessage(e)); }
-  };
-
-  const saveEndClientEdit = async () => {
-    if (!editEndClientId) return;
-    setEndClientError(null);
-    try {
-      await updateEndClient(editEndClientId, { name: editEndClientName.trim(), notes: null });
-      setEditEndClientId(null);
-      await reloadEndClients();
-    } catch (e) { setEndClientError(errorMessage(e)); }
-  };
-
-  const removeEndClient = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
-    setEndClientError(null);
-    try { await deleteEndClient(id); await reloadEndClients(); }
-    catch (e) { setEndClientError(errorMessage(e)); }
   };
 
   if (me && !canSeeCommercial(me)) {
@@ -147,65 +113,7 @@ export function Projects() {
         />
       )}
 
-      {isAdmin(me) && (
-        <Panel title={t('endClients.title')} help={t('endClients.help')}>
-          {endClientError && (
-            <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{endClientError}</p>
-          )}
-          <table className="mb-3 w-full border-collapse">
-            <tbody>
-              {endClients.map((e) => (
-                <tr key={e.id} className="border-b border-slate-100">
-                  <td className={tdCls}>
-                    {editEndClientId === e.id ? (
-                      <input className={inputCls} value={editEndClientName}
-                        onChange={(ev) => setEditEndClientName(ev.target.value)} />
-                    ) : e.name}
-                  </td>
-                  <td className={tdCls}>
-                    <span className="flex gap-1">
-                      {editEndClientId === e.id ? (
-                        <>
-                          <button className={btnCls} disabled={!editEndClientName.trim()}
-                            onClick={() => void saveEndClientEdit()}>
-                            {t('common.save')}
-                          </button>
-                          <button className={btnSecondaryCls} onClick={() => setEditEndClientId(null)}>
-                            {t('common.cancel')}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button className={btnSecondaryCls}
-                            onClick={() => { setEditEndClientId(e.id); setEditEndClientName(e.name); }}>
-                            {t('common.edit')}
-                          </button>
-                          <button className={btnDangerCls} onClick={() => void removeEndClient(e.id)}>
-                            {t('common.delete')}
-                          </button>
-                        </>
-                      )}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {endClients.length === 0 && (
-                <tr><td className={tdCls} colSpan={2}>{t('common.none')}</td></tr>
-              )}
-            </tbody>
-          </table>
-          <div className="flex items-end gap-2">
-            <Field label={t('common.name')}>
-              <input className={inputCls} value={newEndClient}
-                onChange={(e) => setNewEndClient(e.target.value)} />
-            </Field>
-            <button className={btnCls} disabled={!newEndClient.trim()}
-              onClick={() => void saveEndClient()}>
-              {t('endClients.newEndClient')}
-            </button>
-          </div>
-        </Panel>
-      )}
+      <EndClientSection onChanged={reloadEndClients} />
     </div>
   );
 }

@@ -6,10 +6,15 @@ namespace ContractFlow.Api.Models.Dto;
 // ── Customers ───────────────────────────────────────────────────────────────
 
 public record CustomerSummaryDto(
-    Guid Id, string Name, string? ExternalReference, bool IsActive, int ContractCount);
+    Guid Id, string Name, string? ExternalReference, string? VatNumber,
+    string? Country, bool IsActive, int ContractCount);
+
+public record ContactPersonDto(string Name, string? Role, string? Email, string? Phone);
 
 public record CustomerDetailDto(
-    Guid Id, string Name, string? ExternalReference, string? Notes, bool IsActive,
+    Guid Id, string Name, string? ExternalReference, string? VatNumber,
+    string? AddressLine, string? PostalCode, string? City, string? Country,
+    List<ContactPersonDto> Contacts, string? Notes, bool IsActive,
     List<ContractSummaryDto> Contracts);
 
 public class CustomerRequest
@@ -18,18 +23,39 @@ public class CustomerRequest
     public required string Name { get; set; }
     [StringLength(100)]
     public string? ExternalReference { get; set; }
+    [StringLength(50)]
+    public string? VatNumber { get; set; }
+    [StringLength(200)]
+    public string? AddressLine { get; set; }
+    [StringLength(20)]
+    public string? PostalCode { get; set; }
+    [StringLength(100)]
+    public string? City { get; set; }
+    [StringLength(2)]
+    public string? Country { get; set; }
+    public List<ContactPersonDto> Contacts { get; set; } = [];
     public string? Notes { get; set; }
     public bool IsActive { get; set; } = true;
 }
 
 // ── End clients ─────────────────────────────────────────────────────────────
 
-public record EndClientDto(Guid Id, string Name, string? Notes);
+public record EndClientDto(
+    Guid Id, string Name, string? Country, string? AddressLine,
+    string? PostalCode, string? City, string? Notes);
 
 public class EndClientRequest
 {
     [Required, StringLength(200, MinimumLength = 1)]
     public required string Name { get; set; }
+    [StringLength(2)]
+    public string? Country { get; set; }
+    [StringLength(200)]
+    public string? AddressLine { get; set; }
+    [StringLength(20)]
+    public string? PostalCode { get; set; }
+    [StringLength(100)]
+    public string? City { get; set; }
     public string? Notes { get; set; }
 }
 

@@ -18,7 +18,8 @@ public class CustomersController(AppDbContext db) : ControllerBase
         var customers = await db.Customers
             .OrderBy(c => c.Name)
             .Select(c => new CustomerSummaryDto(
-                c.Id, c.Name, c.ExternalReference, c.IsActive, c.Contracts.Count))
+                c.Id, c.Name, c.ExternalReference, c.VatNumber, c.Country,
+                c.IsActive, c.Contracts.Count))
             .ToListAsync(ct);
         return Ok(customers);
     }
@@ -34,8 +35,12 @@ public class CustomersController(AppDbContext db) : ControllerBase
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return Ok(new CustomerDetailDto(
-            customer.Id, customer.Name, customer.ExternalReference, customer.Notes,
-            customer.IsActive,
+            customer.Id, customer.Name, customer.ExternalReference, customer.VatNumber,
+            customer.AddressLine, customer.PostalCode, customer.City, customer.Country,
+            customer.Contacts
+                .Select(c => new ContactPersonDto(c.Name, c.Role, c.Email, c.Phone))
+                .ToList(),
+            customer.Notes, customer.IsActive,
             customer.Contracts
                 .OrderBy(c => c.Name)
                 .Select(c => new ContractSummaryDto(
@@ -53,6 +58,12 @@ public class CustomersController(AppDbContext db) : ControllerBase
         {
             Name = req.Name.Trim(),
             ExternalReference = req.ExternalReference,
+            VatNumber = req.VatNumber,
+            AddressLine = req.AddressLine,
+            PostalCode = req.PostalCode,
+            City = req.City,
+            Country = req.Country?.ToUpperInvariant(),
+            Contacts = ToContacts(req),
             Notes = req.Notes,
             IsActive = req.IsActive,
         };
@@ -61,7 +72,7 @@ public class CustomersController(AppDbContext db) : ControllerBase
 
         return CreatedAtAction(nameof(Get), new { id = customer.Id },
             new CustomerSummaryDto(customer.Id, customer.Name, customer.ExternalReference,
-                customer.IsActive, 0));
+                customer.VatNumber, customer.Country, customer.IsActive, 0));
     }
 
     [HttpPut("{id:guid}")]
@@ -73,14 +84,30 @@ public class CustomersController(AppDbContext db) : ControllerBase
 
         customer.Name = req.Name.Trim();
         customer.ExternalReference = req.ExternalReference;
+        customer.VatNumber = req.VatNumber;
+        customer.AddressLine = req.AddressLine;
+        customer.PostalCode = req.PostalCode;
+        customer.City = req.City;
+        customer.Country = req.Country?.ToUpperInvariant();
+        customer.Contacts = ToContacts(req);
         customer.Notes = req.Notes;
         customer.IsActive = req.IsActive;
         await db.SaveChangesAsync(ct);
 
         return Ok(new CustomerSummaryDto(customer.Id, customer.Name,
-            customer.ExternalReference, customer.IsActive,
+            customer.ExternalReference, customer.VatNumber, customer.Country,
+            customer.IsActive,
             await db.Contracts.CountAsync(c => c.CustomerId == id, ct)));
     }
+
+    private static List<ContactPerson> ToContacts(CustomerRequest req) =>
+        req.Contacts
+            .Where(c => !string.IsNullOrWhiteSpace(c.Name))
+            .Select(c => new ContactPerson
+            {
+                Name = c.Name.Trim(), Role = c.Role, Email = c.Email, Phone = c.Phone,
+            })
+            .ToList();
 
     [HttpDelete("{id:guid}")]
     [RequireRole(AppRole.Administrator)]

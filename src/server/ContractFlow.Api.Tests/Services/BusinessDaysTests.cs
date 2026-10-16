@@ -53,6 +53,51 @@ public class BusinessDaysTests
     }
 
     [Fact]
+    public void HolidaysFor_CountryCalendars_Differ()
+    {
+        // Norwegian Constitution Day 2027-05-17 is a Monday: holiday in NO,
+        // ordinary Monday in SE.
+        var may17 = new DateOnly(2027, 5, 17);
+        Assert.False(BusinessDays.IsBusinessDay(may17, "NO"));
+        Assert.True(BusinessDays.IsBusinessDay(may17, "SE"));
+
+        // Maundy Thursday 2026-04-02: holiday in NO/DK, a workday in SE.
+        var maundy = new DateOnly(2026, 4, 2);
+        Assert.False(BusinessDays.IsBusinessDay(maundy, "NO"));
+        Assert.False(BusinessDays.IsBusinessDay(maundy, "DK"));
+        Assert.True(BusinessDays.IsBusinessDay(maundy, "SE"));
+
+        // Midsummer Eve is non-working in both SE and FI.
+        var midsummerEve = new DateOnly(2026, 6, 19);
+        Assert.False(BusinessDays.IsBusinessDay(midsummerEve, "SE"));
+        Assert.False(BusinessDays.IsBusinessDay(midsummerEve, "FI"));
+    }
+
+    [Fact]
+    public void HolidaysFor_NoneOrUnknown_WeekendsOnly()
+    {
+        // New Year's Day is a weekday holiday in SE but a business day under
+        // NONE — and unknown codes degrade the same way rather than failing.
+        var newYear = new DateOnly(2026, 1, 1); // Thursday
+        Assert.False(BusinessDays.IsBusinessDay(newYear, "SE"));
+        Assert.True(BusinessDays.IsBusinessDay(newYear, "NONE"));
+        Assert.True(BusinessDays.IsBusinessDay(newYear, "XX"));
+        Assert.False(BusinessDays.IsBusinessDay(new DateOnly(2026, 1, 3), "NONE")); // Sat
+    }
+
+    [Fact]
+    public void CountBusinessDays_UsesTheContractCalendar()
+    {
+        // Wed 2026-04-01 → Tue 2026-04-07. Business days in the window:
+        // SE counts Thu 4/2 and Tue 4/7 (Good Friday + Easter Monday off);
+        // DK additionally has Maundy Thursday off → only Tue 4/7 counts.
+        var on = new DateOnly(2026, 4, 1);      // Wed
+        var start = new DateOnly(2026, 4, 7);   // Tue after Easter
+        Assert.True(BusinessDays.CountBusinessDays(on, start, "DK")
+                  < BusinessDays.CountBusinessDays(on, start, "SE"));
+    }
+
+    [Fact]
     public void IsTimelyCancellation_RespectsBusinessDayDeadline()
     {
         // Today Thu 15 Oct 2026; deadline 4 business days → timely for bookings

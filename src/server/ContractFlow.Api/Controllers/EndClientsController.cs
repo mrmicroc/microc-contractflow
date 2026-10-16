@@ -11,25 +11,35 @@ namespace ContractFlow.Api.Controllers;
 [Route("api/endclients")]
 public class EndClientsController(AppDbContext db) : ControllerBase
 {
+    private static EndClientDto ToDto(EndClient e) =>
+        new(e.Id, e.Name, e.Country, e.AddressLine, e.PostalCode, e.City, e.Notes);
+
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var clients = await db.EndClients
             .OrderBy(e => e.Name)
-            .Select(e => new EndClientDto(e.Id, e.Name, e.Notes))
             .ToListAsync(ct);
-        return Ok(clients);
+        return Ok(clients.Select(ToDto));
     }
 
     [HttpPost]
     [RequireRole(AppRole.Administrator)]
     public async Task<IActionResult> Create(EndClientRequest req, CancellationToken ct)
     {
-        var client = new EndClient { Name = req.Name.Trim(), Notes = req.Notes };
+        var client = new EndClient
+        {
+            Name = req.Name.Trim(),
+            Country = req.Country?.ToUpperInvariant(),
+            AddressLine = req.AddressLine,
+            PostalCode = req.PostalCode,
+            City = req.City,
+            Notes = req.Notes,
+        };
         db.EndClients.Add(client);
         await db.SaveChangesAsync(ct);
-        return Ok(new EndClientDto(client.Id, client.Name, client.Notes));
+        return Ok(ToDto(client));
     }
 
     [HttpPut("{id:guid}")]
@@ -40,9 +50,13 @@ public class EndClientsController(AppDbContext db) : ControllerBase
         if (client is null) return NotFound();
 
         client.Name = req.Name.Trim();
+        client.Country = req.Country?.ToUpperInvariant();
+        client.AddressLine = req.AddressLine;
+        client.PostalCode = req.PostalCode;
+        client.City = req.City;
         client.Notes = req.Notes;
         await db.SaveChangesAsync(ct);
-        return Ok(new EndClientDto(client.Id, client.Name, client.Notes));
+        return Ok(ToDto(client));
     }
 
     /// <summary>Delete is safe — contracts referencing the end client keep working (FK SetNull).</summary>

@@ -42,11 +42,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(c => c.Name).HasMaxLength(200);
             e.Property(c => c.ExternalReference).HasMaxLength(100);
+            e.Property(c => c.VatNumber).HasMaxLength(50);
+            e.Property(c => c.AddressLine).HasMaxLength(200);
+            e.Property(c => c.PostalCode).HasMaxLength(20);
+            e.Property(c => c.City).HasMaxLength(100);
+            e.Property(c => c.Country).HasMaxLength(2);
+            // Contact list travels inside the customer row as JSON.
+            e.OwnsMany(c => c.Contacts, s =>
+            {
+                s.ToJson();
+                s.Property(x => x.Name).HasMaxLength(200);
+                s.Property(x => x.Role).HasMaxLength(100);
+                s.Property(x => x.Email).HasMaxLength(320);
+                s.Property(x => x.Phone).HasMaxLength(50);
+            });
         });
 
         builder.Entity<EndClient>(e =>
         {
             e.Property(c => c.Name).HasMaxLength(200);
+            e.Property(c => c.Country).HasMaxLength(2);
+            e.Property(c => c.AddressLine).HasMaxLength(200);
+            e.Property(c => c.PostalCode).HasMaxLength(20);
+            e.Property(c => c.City).HasMaxLength(100);
         });
 
         builder.Entity<Contract>(e =>

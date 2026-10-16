@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import { COUNTRY_CODES, countryName } from '@/lib/countries';
 
 export const inputCls =
   'w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800';
@@ -29,6 +31,23 @@ export function Field({ label, help, children }: {
       </span>
       {children}
     </label>
+  );
+}
+
+/** Country picker — localized names via Intl.DisplayNames; the native select
+ * is keyboard-searchable (typing "fin" jumps to Finland). Empty = unknown. */
+export function CountrySelect({ value, onChange }: {
+  value: string;
+  onChange: (code: string) => void;
+}) {
+  const { i18n, t } = useTranslation();
+  return (
+    <select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{t('common.none')}</option>
+      {COUNTRY_CODES.map((c) => (
+        <option key={c} value={c}>{countryName(c, i18n.language)} ({c})</option>
+      ))}
+    </select>
   );
 }
 

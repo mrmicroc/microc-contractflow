@@ -77,11 +77,11 @@ public static class TimeMath
 {
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    /// <summary>Day type for the SE calendar (Saturday/Sunday beat Weekday; a
-    /// listed holiday beats everything).</summary>
+    /// <summary>Day type for the contract's holiday calendar (Saturday/Sunday
+    /// beat Weekday; a listed holiday beats everything).</summary>
     public static DayKind KindOf(DateOnly date, string? holidayCalendar = "SE")
     {
-        if (BusinessDays.SwedishHolidays(date.Year).Contains(date))
+        if (BusinessDays.HolidaysFor(holidayCalendar, date.Year).Contains(date))
             return DayKind.Holiday;
         return date.DayOfWeek switch
         {

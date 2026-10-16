@@ -114,10 +114,10 @@ export function ContractSection({
               <input type="date" className={inputCls} value={f.endDate}
                 onChange={(e) => setF({ ...f, endDate: e.target.value })} />
             </Field>
-            <Field label={t('contracts.endClient')}>
+            <Field label={t('contracts.endClient')} help={t('contracts.hEndClient')}>
               <select className={inputCls} value={f.endClientId}
                 onChange={(e) => setF({ ...f, endClientId: e.target.value })}>
-                <option value="">{t('common.none')}</option>
+                <option value="">{t('contracts.endClientSameAsCustomer')}</option>
                 {endClients.map((e) => (
                   <option key={e.id} value={e.id}>{e.name}</option>
                 ))}

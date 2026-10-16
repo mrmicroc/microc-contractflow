@@ -16,7 +16,12 @@ Items are marked ✅ only when implemented **and** tested. See
       daily rate | none · PAD component · fixed price · mobilisation fee +
       expense markup), replacing the original binary contract model
 - [x] Daily-rate component (full/half-day pricing, proportional split across
-      projects; no OT/minimum stacking on a fixed day price)
+      projects; day-type rates for Saturday/Sunday/holiday with fallback chain;
+      OT billed on top as rate/8 × OT% per hour over the threshold)
+- [x] Customer & end-client master data (VAT, address, country, contact lists;
+      end client optional — "same as customer" when identical)
+- [x] Country-keyed holiday calendars (SE/NO/DK/FI/none) with `/api/meta/calendars`
+      dropdown — business-day math and holiday day-type per contract country
 - [x] Resource register + versioned compensation agreements
 - [x] Planning calendar (month grid + week/day views with resource & project lanes)
 - [x] Bookings + status flow (Forecast → … → Confirmed → … → Completed)

@@ -383,7 +383,8 @@ public class BookingsController(
 
         var terms = await pad.TermsForAsync(booking.ProjectId, booking.Date, ct);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var daysBefore = BusinessDays.CountBusinessDays(today, booking.Date);
+        var daysBefore = BusinessDays.CountBusinessDays(
+            today, booking.Date, terms?.HolidayCalendar ?? "SE");
         var charge = CancellationMath.Resolve(terms?.CancellationSteps, daysBefore,
             booking.PlannedHours, terms?.CancellationDeadlineBusinessDays ?? 4);
 
