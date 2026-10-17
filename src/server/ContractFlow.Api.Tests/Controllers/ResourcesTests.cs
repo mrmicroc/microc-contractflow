@@ -260,6 +260,91 @@ public class ResourcesTests(ContractFlowWebApplicationFactory factory)
             .GetProperty("unitPrice").GetDecimal());
     }
 
+    // ── Competencies ──────────────────────────────────────────────────────
+
+    public record CompetencyDto(Guid Id, string Label, string? ExpiryDate,
+        int? ReminderDays, string Status);
+    public record ResourceDetailWithComp(Guid Id, CompetencyDto[] Competencies);
+    public record ResourceSummaryWithComp(Guid Id, bool CompetencyWarning);
+
+    [Fact]
+    public async Task Competencies_Crud_And_Statuses_Flow()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var resource = await CreateResourceAsync(admin);
+        var url = $"/api/resources/{resource.Id}/competencies";
+
+        // Unbounded record — no expiry at all.
+        var unbounded = await (await admin.PostAsJsonAsync(url,
+            new { label = "General training" })).Content.ReadFromJsonAsync<CompetencyDto>();
+        Assert.Equal("unbounded", unbounded!.Status);
+
+        // Expiring inside the reminder window → "due".
+        var due = await (await admin.PostAsJsonAsync(url, new
+        {
+            label = "Course X",
+            expiryDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(10),
+            reminderDays = 30,
+        })).Content.ReadFromJsonAsync<CompetencyDto>();
+        Assert.Equal("due", due!.Status);
+
+        // Far future with a window → still "valid".
+        var valid = await (await admin.PostAsJsonAsync(url, new
+        {
+            label = "Course Y",
+            expiryDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(400),
+            reminderDays = 30,
+        })).Content.ReadFromJsonAsync<CompetencyDto>();
+        Assert.Equal("valid", valid!.Status);
+
+        // Past expiry → "expired"; update can lift it back.
+        var past = await (await admin.PostAsJsonAsync(url, new
+        {
+            label = "Old cert",
+            expiryDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1),
+        })).Content.ReadFromJsonAsync<CompetencyDto>();
+        Assert.Equal("expired", past!.Status);
+        var renewed = await admin.PutAsJsonAsync($"{url}/{past.Id}", new
+        {
+            label = "Old cert",
+            expiryDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(400),
+        });
+        Assert.Equal("valid",
+            (await renewed.Content.ReadFromJsonAsync<CompetencyDto>())!.Status);
+
+        // Detail carries the list; the summary flags the resource as needing
+        // attention (due/expired items exist).
+        var detail = await admin.GetFromJsonAsync<ResourceDetailWithComp>(
+            $"/api/resources/{resource.Id}");
+        Assert.Equal(4, detail!.Competencies.Length);
+        var list = await admin.GetFromJsonAsync<ResourceSummaryWithComp[]>("/api/resources");
+        Assert.True(list!.Single(r => r.Id == resource.Id).CompetencyWarning);
+
+        (await admin.DeleteAsync($"{url}/{due.Id}"))
+            .EnsureSuccessStatusCode();
+        var after = await admin.GetFromJsonAsync<ResourceDetailWithComp>(
+            $"/api/resources/{resource.Id}");
+        Assert.Equal(3, after!.Competencies.Length);
+    }
+
+    [Fact]
+    public async Task Competencies_ResourceAndManager_CannotWrite()
+    {
+        var admin = factory.CreateUserClient(DevSeed.AdminId);
+        var resource = await CreateResourceAsync(admin);
+        var url = $"/api/resources/{resource.Id}/competencies";
+
+        var manager = factory.CreateUserClient(DevSeed.ManagerId);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await manager.PostAsJsonAsync(url, new { label = "x" })).StatusCode);
+        var consultant = factory.CreateUserClient(DevSeed.ResourceId);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await consultant.PostAsJsonAsync(url, new { label = "x" })).StatusCode);
+        // But managers read them through the detail.
+        Assert.Equal(HttpStatusCode.OK,
+            (await manager.GetAsync($"/api/resources/{resource.Id}")).StatusCode);
+    }
+
     [Fact]
     public async Task Leave_CreateListDelete_FlowWorks()
     {

@@ -77,6 +77,13 @@ Items are marked ✅ only when implemented **and** tested. See
 - [x] Work-package-scoped compensation agreements — agreement scope cascades
       customer → contract → work package (payable side mirrors the billable
       matrix); resolution WP scope > contract scope > default
+- [x] Competency tracking — ResourceCompetency list (label + optional expiry
+      + optional reminder window) replacing free text; due/expired flags on
+      the resource list
+- [x] Work-package info fields — typed free-form fields (Address, Access,
+      Contact…) replacing the single Address column
+- [ ] Self-reporting access at work-package level (currently project-level —
+      review when the access model is revisited)
 - [ ] Multi-currency, rate indexation
 - [ ] Excel/PDF/CSV exports
 - [ ] Timesheet → Invoiced leg once an invoice covers the period

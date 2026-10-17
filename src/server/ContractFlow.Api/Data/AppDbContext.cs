@@ -12,12 +12,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ContractTerms> ContractTerms => Set<ContractTerms>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<WorkPackage> WorkPackages => Set<WorkPackage>();
+    public DbSet<WorkPackageInfo> WorkPackageInfos => Set<WorkPackageInfo>();
     public DbSet<WorkPackageRate> WorkPackageRates => Set<WorkPackageRate>();
     public DbSet<ProjectResource> ProjectResources => Set<ProjectResource>();
     public DbSet<ProjectAccess> ProjectAccesses => Set<ProjectAccess>();
     public DbSet<EstimatedQuantity> EstimatedQuantities => Set<EstimatedQuantity>();
     public DbSet<Resource> Resources => Set<Resource>();
     public DbSet<ResourceLeave> ResourceLeaves => Set<ResourceLeave>();
+    public DbSet<ResourceCompetency> ResourceCompetencies => Set<ResourceCompetency>();
     public DbSet<CompensationAgreement> CompensationAgreements => Set<CompensationAgreement>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<PadTransaction> PadTransactions => Set<PadTransaction>();
@@ -126,6 +128,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(p => p.ContractId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        builder.Entity<WorkPackageInfo>(e =>
+        {
+            e.Property(i => i.Type).HasMaxLength(60);
+            e.Property(i => i.Description).HasMaxLength(500);
+            e.HasOne(i => i.WorkPackage).WithMany(w => w.InfoItems)
+                .HasForeignKey(i => i.WorkPackageId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         builder.Entity<WorkPackage>(e =>
         {
             e.Property(l => l.Name).HasMaxLength(200);
@@ -198,6 +208,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(l => l.Type).HasConversion<string>().HasMaxLength(20);
             e.HasOne(l => l.Resource).WithMany(r => r.Leave)
                 .HasForeignKey(l => l.ResourceId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ResourceCompetency>(e =>
+        {
+            e.Property(c => c.Label).HasMaxLength(200);
+            e.HasOne(c => c.Resource).WithMany(r => r.CompetencyItems)
+                .HasForeignKey(c => c.ResourceId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<CompensationAgreement>(e =>

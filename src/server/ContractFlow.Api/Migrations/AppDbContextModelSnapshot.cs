@@ -1062,9 +1062,6 @@ namespace ContractFlow.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("Competencies")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<DateTime>("CreatedUtc")
                         .HasColumnType("datetime2");
 
@@ -1100,6 +1097,36 @@ namespace ContractFlow.Api.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Resources");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.ResourceCompetency", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateOnly?>("ExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int?>("ReminderDays")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ResourceId");
+
+                    b.ToTable("ResourceCompetencies");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.ResourceLeave", b =>
@@ -1515,9 +1542,6 @@ namespace ContractFlow.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<string>("Address")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -1534,6 +1558,32 @@ namespace ContractFlow.Api.Migrations
                     b.HasIndex("ProjectId");
 
                     b.ToTable("WorkPackages");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.WorkPackageInfo", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid>("WorkPackageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkPackageId");
+
+                    b.ToTable("WorkPackageInfos");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.WorkPackageRate", b =>
@@ -1982,6 +2032,17 @@ namespace ContractFlow.Api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.ResourceCompetency", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Resource", "Resource")
+                        .WithMany("CompetencyItems")
+                        .HasForeignKey("ResourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Resource");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.ResourceLeave", b =>
                 {
                     b.HasOne("ContractFlow.Api.Models.Domain.Resource", "Resource")
@@ -2145,6 +2206,17 @@ namespace ContractFlow.Api.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.WorkPackageInfo", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.WorkPackage", "WorkPackage")
+                        .WithMany("InfoItems")
+                        .HasForeignKey("WorkPackageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("WorkPackage");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.WorkPackageRate", b =>
                 {
                     b.HasOne("ContractFlow.Api.Models.Domain.Resource", "Resource")
@@ -2196,6 +2268,8 @@ namespace ContractFlow.Api.Migrations
                 {
                     b.Navigation("Agreements");
 
+                    b.Navigation("CompetencyItems");
+
                     b.Navigation("Leave");
                 });
 
@@ -2222,6 +2296,8 @@ namespace ContractFlow.Api.Migrations
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.WorkPackage", b =>
                 {
+                    b.Navigation("InfoItems");
+
                     b.Navigation("Rates");
                 });
 #pragma warning restore 612, 618

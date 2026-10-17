@@ -181,7 +181,11 @@ public class ProjectRequest
     public bool IsActive { get; set; } = true;
 }
 
-public record WorkPackageDto(Guid Id, Guid ProjectId, string Name, string? Address, string? Notes);
+public record WorkPackageDto(
+    Guid Id, Guid ProjectId, string Name, string? Notes,
+    List<WorkPackageInfoDto> InfoItems);
+
+public record WorkPackageInfoDto(Guid Id, string Type, string Description);
 
 /// <summary>Contract-scoped work-package row (GET /api/contracts/{id}/work-packages)
 /// — the scope picker's options, labelled with their owning project.</summary>
@@ -244,8 +248,17 @@ public class WorkPackageRequest
     public Guid ProjectId { get; set; }
     [Required, StringLength(200, MinimumLength = 1)]
     public required string Name { get; set; }
-    public string? Address { get; set; }
     public string? Notes { get; set; }
+    /// <summary>Typed info fields — replace-all semantics on update.</summary>
+    public List<WorkPackageInfoItem>? InfoItems { get; set; }
+}
+
+public class WorkPackageInfoItem
+{
+    [Required, StringLength(60, MinimumLength = 1)]
+    public required string Type { get; set; }
+    [Required, StringLength(500, MinimumLength = 1)]
+    public required string Description { get; set; }
 }
 
 public record EstimatedQuantityDto(

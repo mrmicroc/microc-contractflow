@@ -4,11 +4,18 @@ using ContractFlow.Api.Models.Domain;
 namespace ContractFlow.Api.Models.Dto;
 
 public record ResourceSummaryDto(
-    Guid Id, string DisplayName, ResourceType Type, bool IsActive, Guid? UserId);
+    Guid Id, string DisplayName, ResourceType Type, bool IsActive, Guid? UserId,
+    /// <summary>True when any competency record is due or expired.</summary>
+    bool CompetencyWarning);
+
+/// <summary>One competency record — Status computed server-side per today:
+/// "unbounded" | "valid" | "due" | "expired".</summary>
+public record CompetencyDto(
+    Guid Id, string Label, DateOnly? ExpiryDate, int? ReminderDays, string Status);
 
 public record ResourceDetailDto(
     Guid Id, string DisplayName, ResourceType Type, string? Email, string? Phone,
-    string? Competencies, bool IsActive, Guid? UserId,
+    List<CompetencyDto> Competencies, bool IsActive, Guid? UserId,
     List<ResourceLeaveDto> Leave);
 
 public class ResourceRequest
@@ -20,9 +27,19 @@ public class ResourceRequest
     public string? Email { get; set; }
     [StringLength(50)]
     public string? Phone { get; set; }
-    public string? Competencies { get; set; }
     public Guid? UserId { get; set; }
     public bool IsActive { get; set; } = true;
+}
+
+public class CompetencyRequest
+{
+    [Required, StringLength(200, MinimumLength = 1)]
+    public required string Label { get; set; }
+    /// <summary>Null = never expires.</summary>
+    public DateOnly? ExpiryDate { get; set; }
+    /// <summary>Days before expiry the record starts flagging for renewal.</summary>
+    [Range(0, 3650)]
+    public int? ReminderDays { get; set; }
 }
 
 public record ResourceLeaveDto(

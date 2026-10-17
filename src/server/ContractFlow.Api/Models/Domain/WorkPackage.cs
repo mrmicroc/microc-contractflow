@@ -10,9 +10,10 @@ public class WorkPackage
     public Project Project { get; set; } = null!;
 
     public required string Name { get; set; }
-    public string? Address { get; set; }
     public string? Notes { get; set; }
 
+    /// <summary>Free-form typed information fields (address, access, contact…).</summary>
+    public List<WorkPackageInfo> InfoItems { get; set; } = [];
     /// <summary>Versioned package-specific price overrides over the contract terms.</summary>
     public List<WorkPackageRate> Rates { get; set; } = [];
 }

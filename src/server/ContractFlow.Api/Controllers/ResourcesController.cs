@@ -15,12 +15,15 @@ public class ResourcesController(AppDbContext db) : ControllerBase
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
     public async Task<IActionResult> List(CancellationToken ct)
     {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var resources = await db.Resources
+            .Include(r => r.CompetencyItems)
             .OrderBy(r => r.DisplayName)
-            .Select(r => new ResourceSummaryDto(
-                r.Id, r.DisplayName, r.Type, r.IsActive, r.UserId))
             .ToListAsync(ct);
-        return Ok(resources);
+        return Ok(resources.Select(r => new ResourceSummaryDto(
+            r.Id, r.DisplayName, r.Type, r.IsActive, r.UserId,
+            r.CompetencyItems.Any(c => c.StatusOn(today)
+                is CompetencyStatus.Due or CompetencyStatus.Expired))));
     }
 
     [HttpGet("{id:guid}")]
@@ -29,6 +32,7 @@ public class ResourcesController(AppDbContext db) : ControllerBase
     {
         var resource = await db.Resources
             .Include(r => r.Leave)
+            .Include(r => r.CompetencyItems)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
         if (resource is null) return NotFound();
         return Ok(ToDto(resource));
@@ -48,7 +52,6 @@ public class ResourcesController(AppDbContext db) : ControllerBase
             Type = req.Type,
             Email = req.Email,
             Phone = req.Phone,
-            Competencies = req.Competencies,
             UserId = req.UserId,
             IsActive = req.IsActive,
         };
@@ -64,6 +67,7 @@ public class ResourcesController(AppDbContext db) : ControllerBase
     {
         var resource = await db.Resources
             .Include(r => r.Leave)
+            .Include(r => r.CompetencyItems)
             .FirstOrDefaultAsync(r => r.Id == id, ct);
         if (resource is null) return NotFound();
         if (req.UserId.HasValue &&
@@ -74,7 +78,6 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         resource.Type = req.Type;
         resource.Email = req.Email;
         resource.Phone = req.Phone;
-        resource.Competencies = req.Competencies;
         resource.UserId = req.UserId;
         resource.IsActive = req.IsActive;
         await db.SaveChangesAsync(ct);
@@ -208,6 +211,57 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         return NoContent();
     }
 
+    // ── Competencies — expiry-aware certification records; Admin-managed
+    // master data, PM/Finance read them via the resource detail. ─────────────
+
+    [HttpPost("{id:guid}/competencies")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> CreateCompetency(
+        Guid id, CompetencyRequest req, CancellationToken ct)
+    {
+        if (!await db.Resources.AnyAsync(r => r.Id == id, ct)) return NotFound();
+        var competency = new ResourceCompetency
+        {
+            ResourceId = id,
+            Label = req.Label.Trim(),
+            ExpiryDate = req.ExpiryDate,
+            ReminderDays = req.ReminderDays,
+        };
+        db.ResourceCompetencies.Add(competency);
+        await db.SaveChangesAsync(ct);
+        return Ok(CompetencyToDto(competency));
+    }
+
+    [HttpPut("{id:guid}/competencies/{competencyId:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> UpdateCompetency(
+        Guid id, Guid competencyId, CompetencyRequest req, CancellationToken ct)
+    {
+        var competency = await db.ResourceCompetencies
+            .FirstOrDefaultAsync(c => c.Id == competencyId && c.ResourceId == id, ct);
+        if (competency is null) return NotFound();
+
+        competency.Label = req.Label.Trim();
+        competency.ExpiryDate = req.ExpiryDate;
+        competency.ReminderDays = req.ReminderDays;
+        await db.SaveChangesAsync(ct);
+        return Ok(CompetencyToDto(competency));
+    }
+
+    [HttpDelete("{id:guid}/competencies/{competencyId:guid}")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> DeleteCompetency(
+        Guid id, Guid competencyId, CancellationToken ct)
+    {
+        var competency = await db.ResourceCompetencies
+            .FirstOrDefaultAsync(c => c.Id == competencyId && c.ResourceId == id, ct);
+        if (competency is null) return NotFound();
+
+        db.ResourceCompetencies.Remove(competency);
+        await db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     // ── Leave / availability ────────────────────────────────────────────────
 
     [HttpPost("{id:guid}/leave")]
@@ -247,8 +301,17 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         return NoContent();
     }
 
+    private static CompetencyDto CompetencyToDto(ResourceCompetency c)
+    {
+        var status = c.StatusOn(DateOnly.FromDateTime(DateTime.UtcNow));
+        return new CompetencyDto(
+            c.Id, c.Label, c.ExpiryDate, c.ReminderDays,
+            status.ToString().ToLowerInvariant());
+    }
+
     private static ResourceDetailDto ToDto(Resource r) => new(
-        r.Id, r.DisplayName, r.Type, r.Email, r.Phone, r.Competencies,
+        r.Id, r.DisplayName, r.Type, r.Email, r.Phone,
+        r.CompetencyItems.OrderBy(c => c.Label).Select(CompetencyToDto).ToList(),
         r.IsActive, r.UserId,
         r.Leave.OrderBy(l => l.From)
             .Select(l => new ResourceLeaveDto(l.Id, l.ResourceId, l.From, l.To, l.Type, l.Notes))

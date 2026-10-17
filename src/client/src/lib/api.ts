@@ -9,6 +9,8 @@ import type {
   DocumentAttachment,
   DocumentOwnerType,
   CompensationAgreement,
+  Competency,
+  CompetencyRequestBody,
   ContractDetail,
   ContractRequestBody,
   ContractWorkPackage,
@@ -215,6 +217,12 @@ export const createResource = (b: ResourceRequestBody) => apiPost<ResourceDetail
 export const updateResource = (id: string, b: ResourceRequestBody) =>
   apiPut<ResourceDetail>(`/api/resources/${id}`, b);
 export const deleteResource = (id: string) => apiDelete(`/api/resources/${id}`);
+export const createCompetency = (resourceId: string, b: CompetencyRequestBody) =>
+  apiPost<Competency>(`/api/resources/${resourceId}/competencies`, b);
+export const updateCompetency = (resourceId: string, competencyId: string, b: CompetencyRequestBody) =>
+  apiPut<Competency>(`/api/resources/${resourceId}/competencies/${competencyId}`, b);
+export const deleteCompetency = (resourceId: string, competencyId: string) =>
+  apiDelete(`/api/resources/${resourceId}/competencies/${competencyId}`);
 export const getAgreements = (resourceId: string) =>
   apiGet<CompensationAgreement[]>(`/api/resources/${resourceId}/agreements`);
 export const createAgreement = (resourceId: string, b: AgreementRequestBody) =>

@@ -22,8 +22,8 @@ public class Resource
     public ResourceType Type { get; set; }
     public string? Email { get; set; }
     public string? Phone { get; set; }
-    /// <summary>Competencies/classifications as free text for now (e.g. "Elsäk-EMT, auktorisation A").</summary>
-    public string? Competencies { get; set; }
+    /// <summary>Competency/certification records — expiry-aware list.</summary>
+    public List<ResourceCompetency> CompetencyItems { get; set; } = [];
     /// <summary>Optional link to the AppUser this person signs in as.</summary>
     public Guid? UserId { get; set; }
     public AppUser? User { get; set; }

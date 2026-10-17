@@ -85,8 +85,10 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             if (!allowed) return Forbid();
         }
         return Ok(await db.WorkPackages.Where(w => w.ProjectId == id)
+            .Include(w => w.InfoItems)
             .OrderBy(w => w.Name)
-            .Select(w => new WorkPackageDto(w.Id, w.ProjectId, w.Name, w.Address, w.Notes))
+            .Select(w => new WorkPackageDto(w.Id, w.ProjectId, w.Name, w.Notes,
+                w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList()))
             .ToListAsync(ct));
     }
 
@@ -96,7 +98,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
     {
         var project = await db.Projects
             .Include(p => p.Contract).ThenInclude(c => c.Customer)
-            .Include(p => p.WorkPackages)
+            .Include(p => p.WorkPackages).ThenInclude(w => w.InfoItems)
             .Include(p => p.EstimatedQuantities)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (project is null) return NotFound();
@@ -333,7 +335,8 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
         p.Id, p.ContractId, p.Contract.Name, p.Contract.Customer.Name,
         p.Name, p.Code, p.Description, p.IsActive,
         p.WorkPackages.OrderBy(l => l.Name)
-            .Select(l => new WorkPackageDto(l.Id, l.ProjectId, l.Name, l.Address, l.Notes))
+            .Select(l => new WorkPackageDto(l.Id, l.ProjectId, l.Name, l.Notes,
+                l.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList()))
             .ToList(),
         p.EstimatedQuantities
             .Select(q => new EstimatedQuantityDto(

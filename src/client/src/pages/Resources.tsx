@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   createAgreement,
+  createCompetency,
   createLeave,
   createResource,
   deleteAgreement,
+  deleteCompetency,
   deleteLeave,
   deleteResource,
   errorMessage,
@@ -17,12 +19,14 @@ import {
   getResources,
   getUsers,
   rotateFeedUrl,
+  updateCompetency,
   updateResource,
   type UserDto,
 } from '@/lib/api';
 import { numOrNull } from '@/lib/versioned';
 import type {
   CompensationAgreement,
+  Competency,
   ContractSummary,
   ContractWorkPackage,
   CustomerSummary,
@@ -51,10 +55,13 @@ export function Resources() {
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState({
     displayName: '', type: 'subcontractor' as ResourceType, email: '', phone: '',
-    competencies: '', userId: '', isActive: true,
+    userId: '', isActive: true,
   });
   const [lf, setLf] = useState({ from: '', to: '', type: 'vacation' as LeaveType, notes: '' });
   const [leaveFormOpen, setLeaveFormOpen] = useState(false);
+  const [cf, setCf] = useState({ label: '', expiryDate: '', reminderDays: '' });
+  const [compFormOpen, setCompFormOpen] = useState(false);
+  const [compEditId, setCompEditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(
@@ -94,7 +101,7 @@ export function Resources() {
     setEditId(null);
     setF({
       displayName: '', type: 'subcontractor', email: '', phone: '',
-      competencies: '', userId: '', isActive: true,
+      userId: '', isActive: true,
     });
     setFormOpen(true);
   };
@@ -103,7 +110,7 @@ export function Resources() {
     setEditId(r.id);
     setF({
       displayName: r.displayName, type: r.type, email: r.email ?? '', phone: r.phone ?? '',
-      competencies: r.competencies ?? '', userId: r.userId ?? '', isActive: r.isActive,
+      userId: r.userId ?? '', isActive: r.isActive,
     });
     setFormOpen(true);
   };
@@ -114,7 +121,6 @@ export function Resources() {
       type: f.type,
       email: f.email.trim() || null,
       phone: f.phone.trim() || null,
-      competencies: f.competencies.trim() || null,
       userId: f.userId || null,
       isActive: f.isActive,
     };
@@ -145,6 +151,49 @@ export function Resources() {
     setLf({ from: '', to: '', type: 'vacation', notes: '' });
     setLeaveFormOpen(false);
     reloadDetail();
+  };
+
+  const saveCompetency = async () => {
+    if (!selectedId) return;
+    const bad = cf.reminderDays.trim() && Number.isNaN(Number(cf.reminderDays))
+      ? [t('resources.competencyReminder')] : [];
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
+    const body = {
+      label: cf.label.trim(),
+      expiryDate: cf.expiryDate || null,
+      reminderDays: cf.reminderDays.trim() ? Number(cf.reminderDays) : null,
+    };
+    if (compEditId) await updateCompetency(selectedId, compEditId, body);
+    else await createCompetency(selectedId, body);
+    setCf({ label: '', expiryDate: '', reminderDays: '' });
+    setCompEditId(null);
+    setCompFormOpen(false);
+    reloadDetail();
+    void reload();
+  };
+
+  const openCompEdit = (c: Competency) => {
+    setCompEditId(c.id);
+    setCf({
+      label: c.label,
+      expiryDate: c.expiryDate ?? '',
+      reminderDays: c.reminderDays?.toString() ?? '',
+    });
+    setCompFormOpen(true);
+  };
+
+  const statusChip = (status: Competency['status']) => {
+    const cls = {
+      expired: 'bg-red-100 text-red-700',
+      due: 'bg-amber-100 text-amber-700',
+      valid: 'bg-green-100 text-green-700',
+      unbounded: 'bg-slate-100 text-slate-500',
+    }[status];
+    return (
+      <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', cls)}>
+        {t(`resources.compStatus.${status}`)}
+      </span>
+    );
   };
 
   const typeLabel = (type: ResourceType) =>
@@ -188,10 +237,6 @@ export function Resources() {
         <Field label={t('resources.phone')}>
           <input className={inputCls} value={f.phone}
             onChange={(e) => setF({ ...f, phone: e.target.value })} />
-        </Field>
-        <Field label={t('resources.competencies')}>
-          <input className={inputCls} value={f.competencies}
-            onChange={(e) => setF({ ...f, competencies: e.target.value })} />
         </Field>
       </div>
       <div className="mt-3 flex gap-2">
@@ -238,7 +283,15 @@ export function Resources() {
                 <td className={cn(tdCls, 'w-6 text-slate-400')}>
                   {selectedId === r.id ? '▾' : '▸'}
                 </td>
-                <td className={cn(tdCls, 'font-medium')}>{r.displayName}</td>
+                <td className={cn(tdCls, 'font-medium')}>
+                  {r.displayName}
+                  {r.competencyWarning && (
+                    <span className="ml-1.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-amber-700"
+                      title={t('resources.competencyWarningHint')}>
+                      {t('resources.competencyWarning')}
+                    </span>
+                  )}
+                </td>
                 <td className={tdCls}>{typeLabel(r.type)}</td>
                 <td className={tdCls}>{r.isActive ? t('common.active') : t('common.inactive')}</td>
               </tr>
@@ -266,21 +319,84 @@ export function Resources() {
               </span>
             )}
           >
-            {resourceForm}
-            {!formOpen && (
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                <dt className="text-slate-500">{t('resources.type')}</dt>
-                <dd>{typeLabel(detail.type)}</dd>
-                <dt className="text-slate-500">{t('resources.email')}</dt>
-                <dd>{detail.email ?? '—'}</dd>
-                <dt className="text-slate-500">{t('resources.phone')}</dt>
-                <dd>{detail.phone ?? '—'}</dd>
-                <dt className="text-slate-500">{t('resources.competencies')}</dt>
-                <dd>{detail.competencies ?? '—'}</dd>
-                <dt className="text-slate-500">{t('resources.calendarFeed')}</dt>
-                <dd><FeedUrl resourceId={detail.id} /></dd>
-              </dl>
-            )}
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <dt className="text-slate-500">{t('resources.type')}</dt>
+              <dd>{typeLabel(detail.type)}</dd>
+              <dt className="text-slate-500">{t('resources.email')}</dt>
+              <dd>{detail.email ?? '—'}</dd>
+              <dt className="text-slate-500">{t('resources.phone')}</dt>
+              <dd>{detail.phone ?? '—'}</dd>
+              <dt className="text-slate-500">{t('resources.calendarFeed')}</dt>
+              <dd><FeedUrl resourceId={detail.id} /></dd>
+            </dl>
+
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-600">{t('resources.competencies')}</h3>
+                {isAdmin(me) && !compFormOpen && (
+                  <button className={btnSecondaryCls}
+                    onClick={() => { setCompEditId(null); setCf({ label: '', expiryDate: '', reminderDays: '' }); setCompFormOpen(true); }}>
+                    {t('resources.addCompetency')}
+                  </button>
+                )}
+              </div>
+              {compFormOpen && (
+                <div className="mb-3 flex flex-wrap items-end gap-2">
+                  <Field label={t('resources.competencyLabel')}>
+                    <input className={inputCls} value={cf.label}
+                      onChange={(e) => setCf({ ...cf, label: e.target.value })} />
+                  </Field>
+                  <Field label={t('resources.competencyExpiry')}>
+                    <input type="date" className={inputCls} value={cf.expiryDate}
+                      onChange={(e) => setCf({ ...cf, expiryDate: e.target.value })} />
+                  </Field>
+                  <Field label={t('resources.competencyReminder')}>
+                    <NumInput className={inputCls} value={cf.reminderDays}
+                      onChange={(v) => setCf({ ...cf, reminderDays: v })} />
+                  </Field>
+                  <button className={btnCls} disabled={!cf.label.trim()}
+                    onClick={() => void saveCompetency()}>
+                    {t('common.save')}
+                  </button>
+                  <button className={btnSecondaryCls}
+                    onClick={() => { setCompFormOpen(false); setCompEditId(null); }}>
+                    {t('common.cancel')}
+                  </button>
+                </div>
+              )}
+              <table className="w-full border-collapse">
+                <tbody>
+                  {detail.competencies.map((c) => (
+                    <tr key={c.id} className="border-b border-slate-100">
+                      <td className={tdCls}>{c.label}</td>
+                      <td className={tdCls}>{c.expiryDate ?? '—'}</td>
+                      <td className={tdCls}>
+                        {c.reminderDays !== null
+                          ? t('resources.competencyReminderShort', { days: c.reminderDays })
+                          : '—'}
+                      </td>
+                      <td className={tdCls}>{statusChip(c.status)}</td>
+                      {isAdmin(me) && (
+                        <td className={tdCls}>
+                          <button className={btnSecondaryCls}
+                            onClick={() => openCompEdit(c)}>
+                            {t('common.edit')}
+                          </button>
+                          <button className={btnDangerCls}
+                            onClick={() => void deleteCompetency(detail.id, c.id)
+                              .then(() => { reloadDetail(); void reload(); })}>
+                            {t('common.delete')}
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {detail.competencies.length === 0 && (
+                    <tr><td className={tdCls} colSpan={5}>{t('common.none')}</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
 
             <div className="mt-4 border-t border-slate-100 pt-3">
               <div className="mb-2 flex items-center justify-between">

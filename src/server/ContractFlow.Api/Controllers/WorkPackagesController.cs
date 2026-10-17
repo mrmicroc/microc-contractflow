@@ -20,10 +20,10 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
             query = query.Where(l => l.ProjectId == projectId.Value);
 
         var workPackages = await query
+            .Include(l => l.InfoItems)
             .OrderBy(l => l.Name)
-            .Select(l => new WorkPackageDto(l.Id, l.ProjectId, l.Name, l.Address, l.Notes))
             .ToListAsync(ct);
-        return Ok(workPackages);
+        return Ok(workPackages.Select(ToDto));
     }
 
     [HttpPost]
@@ -37,32 +37,46 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
         {
             ProjectId = req.ProjectId,
             Name = req.Name.Trim(),
-            Address = req.Address,
             Notes = req.Notes,
+            InfoItems = (req.InfoItems ?? []).Select(i => new WorkPackageInfo
+            {
+                Type = i.Type.Trim(), Description = i.Description.Trim(),
+            }).ToList(),
         };
         db.WorkPackages.Add(workPackage);
         await db.SaveChangesAsync(ct);
-        return Ok(new WorkPackageDto(workPackage.Id, workPackage.ProjectId, workPackage.Name,
-            workPackage.Address, workPackage.Notes));
+        return Ok(ToDto(workPackage));
     }
 
     [HttpPut("{id:guid}")]
     [RequireRole(AppRole.Administrator)]
     public async Task<IActionResult> Update(Guid id, WorkPackageRequest req, CancellationToken ct)
     {
-        var workPackage = await db.WorkPackages.FindAsync([id], ct);
+        var workPackage = await db.WorkPackages
+            .Include(w => w.InfoItems)
+            .FirstOrDefaultAsync(w => w.Id == id, ct);
         if (workPackage is null) return NotFound();
         if (!await db.Projects.AnyAsync(p => p.Id == req.ProjectId, ct))
             return BadRequest(new { error = "Unknown project." });
 
         workPackage.ProjectId = req.ProjectId;
         workPackage.Name = req.Name.Trim();
-        workPackage.Address = req.Address;
         workPackage.Notes = req.Notes;
+        if (req.InfoItems is not null)
+        {
+            db.WorkPackageInfos.RemoveRange(workPackage.InfoItems);
+            workPackage.InfoItems = req.InfoItems.Select(i => new WorkPackageInfo
+            {
+                Type = i.Type.Trim(), Description = i.Description.Trim(),
+            }).ToList();
+        }
         await db.SaveChangesAsync(ct);
-        return Ok(new WorkPackageDto(workPackage.Id, workPackage.ProjectId, workPackage.Name,
-            workPackage.Address, workPackage.Notes));
+        return Ok(ToDto(workPackage));
     }
+
+    private static WorkPackageDto ToDto(WorkPackage w) => new(
+        w.Id, w.ProjectId, w.Name, w.Notes,
+        w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList());
 
     [HttpDelete("{id:guid}")]
     [RequireRole(AppRole.Administrator)]

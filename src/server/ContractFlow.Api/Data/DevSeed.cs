@@ -79,7 +79,10 @@ public static class DevSeed
         project.WorkPackages.Add(new WorkPackage
         {
             Name = "Substation A",
-            Address = "1 Example Road",
+            InfoItems =
+            [
+                new WorkPackageInfo { Type = "Address", Description = "1 Example Road" },
+            ],
         });
         project.EstimatedQuantities.Add(new EstimatedQuantity
         {
@@ -93,8 +96,11 @@ public static class DevSeed
             DisplayName = "Dev Consultant",
             Type = ResourceType.Subcontractor,
             Email = "consultant@example.invalid",
-            Competencies = "Example certification A",
             UserId = ResourceId,
+            CompetencyItems =
+            [
+                new ResourceCompetency { Label = "Example certification A" },
+            ],
         };
         consultant.Agreements.Add(new CompensationAgreement
         {
@@ -112,7 +118,10 @@ public static class DevSeed
         {
             DisplayName = "Casey Example",
             Type = ResourceType.Employee,
-            Competencies = "Example certification B",
+            CompetencyItems =
+            [
+                new ResourceCompetency { Label = "Example certification B" },
+            ],
         };
         employee.Leave.Add(new ResourceLeave
         {

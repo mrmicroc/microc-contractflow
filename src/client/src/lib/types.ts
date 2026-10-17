@@ -241,15 +241,22 @@ export interface WorkPackage {
   id: string;
   projectId: string;
   name: string;
-  address: string | null;
   notes: string | null;
+  infoItems: WorkPackageInfoItem[];
+}
+
+/** One typed information field on a work package ("Address", "Access"…). */
+export interface WorkPackageInfoItem {
+  id: string;
+  type: string;
+  description: string;
 }
 
 export interface WorkPackageRequestBody {
   projectId: string;
   name: string;
-  address: string | null;
   notes: string | null;
+  infoItems?: { type: string; description: string }[];
 }
 
 // One versioned package-rate override row — set fields win over contract terms,
@@ -334,6 +341,8 @@ export interface ResourceSummary {
   type: ResourceType;
   isActive: boolean;
   userId: string | null;
+  /** Any competency record due or expired — flag for renewal. */
+  competencyWarning: boolean;
 }
 
 export interface ResourceDetail {
@@ -342,10 +351,25 @@ export interface ResourceDetail {
   type: ResourceType;
   email: string | null;
   phone: string | null;
-  competencies: string | null;
+  competencies: Competency[];
   isActive: boolean;
   userId: string | null;
   leave: ResourceLeave[];
+}
+
+/** One competency/certification record — status computed server-side. */
+export interface Competency {
+  id: string;
+  label: string;
+  expiryDate: string | null;
+  reminderDays: number | null;
+  status: 'unbounded' | 'valid' | 'due' | 'expired';
+}
+
+export interface CompetencyRequestBody {
+  label: string;
+  expiryDate: string | null;
+  reminderDays: number | null;
 }
 
 export interface ResourceRequestBody {
@@ -353,7 +377,6 @@ export interface ResourceRequestBody {
   type: ResourceType;
   email: string | null;
   phone: string | null;
-  competencies: string | null;
   userId: string | null;
   isActive: boolean;
 }

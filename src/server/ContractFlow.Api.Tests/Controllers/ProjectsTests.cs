@@ -10,7 +10,8 @@ public class ProjectsTests(ContractFlowWebApplicationFactory factory)
 {
     public record IdRef(Guid Id);
     public record ProjectDto(Guid Id, Guid ContractId, string Name, string? Code, bool IsActive);
-    public record WorkPackageDto(Guid Id, string Name, string? Address);
+    public record InfoDto(Guid Id, string Type, string Description);
+    public record WorkPackageDto(Guid Id, string Name, string? Notes, InfoDto[] InfoItems);
     public record QuantityDto(Guid Id, string Label, decimal Quantity, string Unit);
     public record ProjectDetail(Guid Id, string Name, string ContractName, string CustomerName,
         WorkPackageDto[] WorkPackages, QuantityDto[] EstimatedQuantities);
@@ -54,16 +55,34 @@ public class ProjectsTests(ContractFlowWebApplicationFactory factory)
         var project = await CreateProjectAsync(client);
 
         var created = await client.PostAsJsonAsync("/api/work-packages",
-            new { projectId = project.Id, name = "Site Alpha", address = "1 Road" });
+            new
+            {
+                projectId = project.Id, name = "Site Alpha",
+                infoItems = new[]
+                {
+                    new { type = "Address", description = "1 Road" },
+                    new { type = "Access", description = "Gate code 4521" },
+                },
+            });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         var workPackage = await created.Content.ReadFromJsonAsync<WorkPackageDto>();
         Assert.NotNull(workPackage);
+        Assert.Equal(2, workPackage.InfoItems.Length);
+        Assert.Equal("Access", workPackage.InfoItems[1].Type);
 
+        // Update replaces the info list wholesale.
         await client.PutAsJsonAsync($"/api/work-packages/{workPackage.Id}",
-            new { projectId = project.Id, name = "Site Alpha West" });
+            new
+            {
+                projectId = project.Id, name = "Site Alpha West",
+                infoItems = new[] { new { type = "Contact", description = "Site office" } },
+            });
 
         var detail = await client.GetFromJsonAsync<ProjectDetail>($"/api/projects/{project.Id}");
-        Assert.Equal("Site Alpha West", detail!.WorkPackages.Single().Name);
+        var wp = detail!.WorkPackages.Single();
+        Assert.Equal("Site Alpha West", wp.Name);
+        var info = Assert.Single(wp.InfoItems);
+        Assert.Equal("Contact", info.Type);
 
         var del = await client.DeleteAsync($"/api/work-packages/{workPackage.Id}");
         Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);

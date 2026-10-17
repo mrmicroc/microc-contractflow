@@ -44,7 +44,8 @@ export function ProjectDetail({
   const me = useMe();
   const [project, setProject] = useState<ProjectDetailDto | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lf, setLf] = useState({ name: '', address: '', notes: '' });
+  const [lf, setLf] = useState({ name: '', notes: '' });
+  const [lfInfo, setLfInfo] = useState<{ type: string; description: string }[]>([]);
   const [qf, setQf] = useState({ label: '', quantity: '', unit: '', notes: '' });
   const [ratesFor, setRatesFor] = useState<string | null>(null);
   const [access, setAccess] = useState<ProjectAccess[]>([]);
@@ -77,13 +78,15 @@ export function ProjectDetail({
   if (!project) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
 
   const saveWorkPackage = async () => {
+    const rows = lfInfo.filter((i) => i.type.trim() && i.description.trim());
     await createWorkPackage({
       projectId: project.id,
       name: lf.name.trim(),
-      address: lf.address.trim() || null,
       notes: lf.notes.trim() || null,
+      infoItems: rows.map((i) => ({ type: i.type.trim(), description: i.description.trim() })),
     });
-    setLf({ name: '', address: '', notes: '' });
+    setLf({ name: '', notes: '' });
+    setLfInfo([]);
     await reload();
   };
 
@@ -134,7 +137,7 @@ export function ProjectDetail({
           <thead>
             <tr className="border-b border-slate-200">
               <th className={thCls}>{t('common.name')}</th>
-              <th className={thCls}>{t('workPackages.address')}</th>
+              <th className={thCls}>{t('workPackages.info')}</th>
               {canSeeCommercial(me) && <th className={thCls}>{t('common.actions')}</th>}
             </tr>
           </thead>
@@ -143,7 +146,10 @@ export function ProjectDetail({
               <Fragment key={l.id}>
                 <tr className="border-b border-slate-100">
                   <td className={tdCls}>{l.name}</td>
-                  <td className={tdCls}>{l.address ?? '—'}</td>
+                  <td className={tdCls}>
+                    {l.infoItems.length === 0 ? '—' : l.infoItems
+                      .map((i) => `${i.type}: ${i.description}`).join(' · ')}
+                  </td>
                   {canSeeCommercial(me) && (
                     <td className={tdCls}>
                       <span className="flex gap-1">
@@ -177,19 +183,53 @@ export function ProjectDetail({
           </tbody>
         </table>
         {canWrite && (
-          <div className="flex flex-wrap items-end gap-2">
-            <Field label={t('common.name')}>
-              <input className={inputCls} value={lf.name}
-                onChange={(e) => setLf({ ...lf, name: e.target.value })} />
-            </Field>
-            <Field label={t('workPackages.address')}>
-              <input className={inputCls} value={lf.address}
-                onChange={(e) => setLf({ ...lf, address: e.target.value })} />
-            </Field>
-            <button className={btnCls} disabled={!lf.name.trim()}
-              onClick={() => void saveWorkPackage()}>
-              {t('workPackages.add')}
-            </button>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label={t('common.name')}>
+                <input className={inputCls} value={lf.name}
+                  onChange={(e) => setLf({ ...lf, name: e.target.value })} />
+              </Field>
+              <Field label={t('workPackages.notes')}>
+                <input className={inputCls} value={lf.notes}
+                  onChange={(e) => setLf({ ...lf, notes: e.target.value })} />
+              </Field>
+              <button className={btnCls} disabled={!lf.name.trim()}
+                onClick={() => void saveWorkPackage()}>
+                {t('workPackages.add')}
+              </button>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">
+                  {t('workPackages.infoFields')}
+                </span>
+                <button className={btnSecondaryCls}
+                  onClick={() => setLfInfo([...lfInfo, { type: '', description: '' }])}>
+                  {t('workPackages.addInfo')}
+                </button>
+              </div>
+              {lfInfo.map((row, i) => (
+                <div key={i} className="mb-1 flex items-center gap-1">
+                  <input className={cn(inputCls, 'w-36')} list="wp-info-types"
+                    placeholder={t('workPackages.infoType')} value={row.type}
+                    onChange={(e) => setLfInfo(lfInfo.map((r, j) =>
+                      j === i ? { ...r, type: e.target.value } : r))} />
+                  <input className={cn(inputCls, 'flex-1')}
+                    placeholder={t('workPackages.infoDescription')} value={row.description}
+                    onChange={(e) => setLfInfo(lfInfo.map((r, j) =>
+                      j === i ? { ...r, description: e.target.value } : r))} />
+                  <button className={btnDangerCls}
+                    onClick={() => setLfInfo(lfInfo.filter((_, j) => j !== i))}>
+                    {t('common.delete')}
+                  </button>
+                </div>
+              ))}
+              <datalist id="wp-info-types">
+                {['Address', 'Access', 'Contact', 'Coordinates', 'Other'].map((x) => (
+                  <option key={x} value={x} />
+                ))}
+              </datalist>
+            </div>
           </div>
         )}
       </Panel>
