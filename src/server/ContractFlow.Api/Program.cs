@@ -21,6 +21,7 @@ if (devIdentity)
     builder.Services.AddScoped<ICurrentUser, DevCurrentUser>();
 else
     builder.Services.AddScoped<ICurrentUser, NoSignInCurrentUser>();
+builder.Services.AddScoped<IAuditActor, HttpAuditActor>();
 builder.Services.AddScoped<PadService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddSingleton<IFileStorage>(sp => new LocalDiskFileStorage(
