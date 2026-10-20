@@ -191,6 +191,36 @@ export function rescheduleOutcomeKey(r: {
   return 'booking.rescheduleNotConfirmed';
 }
 
+/** Continuation-overrun split returned by POST /complete (§4.3 ①–④). */
+export interface OverrunSplit {
+  fromCurrentFree: number;
+  fromAdditional: number;
+  fromNextMonthBaseline: number;
+  autoAdditional: number;
+  nextMonthConflict: boolean;
+}
+
+export const OVERRUN_SOURCES = [
+  'fromCurrentFree', 'fromAdditional', 'fromNextMonthBaseline', 'autoAdditional',
+] as const;
+
+/** The non-zero overrun sources in allocation order — what the planner is
+ * told after completing a booking that ran over its commitment. */
+export function overrunParts(s: OverrunSplit | null | undefined):
+  { source: (typeof OVERRUN_SOURCES)[number]; amount: number }[] {
+  if (!s) return [];
+  return OVERRUN_SOURCES
+    .map((source) => ({ source, amount: s[source] }))
+    .filter((p) => p.amount > 0);
+}
+
+/** Additional PAD a refused confirm still needs: needed − free (free never
+ * counts below zero), rounded up to 2 decimals so the request covers it. */
+export function additionalPadShortfall(neededPad: number, freePad: number): number {
+  const short = neededPad - Math.max(0, freePad);
+  return short <= 0 ? 0 : Math.ceil(short * 100 - 1e-9) / 100;
+}
+
 /** Conflict-warning tooltip text for a booking chip. */
 export function bookingTooltip(
   b: Booking, warningLabel: (code: string) => string,

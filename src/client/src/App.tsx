@@ -10,9 +10,11 @@ import { MonthEnd } from '@/pages/MonthEnd';
 import { MyWork } from '@/pages/MyWork';
 import { Plan } from '@/pages/Plan';
 import { Projects } from '@/pages/Projects';
+import { Reports } from '@/pages/Reports';
 import { Resources } from '@/pages/Resources';
+import { Settings } from '@/pages/Settings';
 import { cn } from '@/lib/utils';
-import { NAV_ITEMS, visibleNav } from '@/lib/roles';
+import { visibleNav } from '@/lib/roles';
 import { useMe } from '@/lib/useMe';
 
 export default function App() {
@@ -61,9 +63,8 @@ export default function App() {
             <Route path="/approvals" element={<Approvals />} />
             <Route path="/month-end" element={<MonthEnd />} />
             <Route path="/economy" element={<Economy />} />
-            {NAV_ITEMS.filter((i) => !['/', '/plan', '/projects', '/resources', '/my', '/approvals', '/month-end', '/economy'].includes(i.to)).map((item) => (
-              <Route key={item.to} path={item.to} element={<Placeholder titleKey={item.key} />} />
-            ))}
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Placeholder titleKey="nav.dashboard" />} />
           </Routes>
         </main>

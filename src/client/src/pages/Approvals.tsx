@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  confirmMobilisation, deleteMobilisation, describeError, getMobilisations,
+  confirmMobilisation, deleteMobilisation, describeError, getBooking, getMobilisations,
   getPadRequests, getProjects, getProjectWorkPackages, getResources, getTimesheet,
   getTimesheets, mergeMobilisation, padRequestAction, setMobilisationWorkPackage,
   splitMobilisation, suggestMobilisations, timesheetAction,
@@ -303,6 +303,7 @@ function PadRequestQueue({ canDecide }: { canDecide: boolean }) {
             <th className={thCls}>{t('monthEnd.quantity')}</th>
             <th className={thCls}>{t('monthEnd.reason')}</th>
             <th className={thCls}>{t('monthEnd.reference')}</th>
+            <th className={thCls}>{t('monthEnd.linkedBooking')}</th>
             <th className={thCls}></th>
           </tr>
         </thead>
@@ -314,6 +315,9 @@ function PadRequestQueue({ canDecide }: { canDecide: boolean }) {
               <td className={tdCls}>{r.quantity}</td>
               <td className={cn(tdCls, 'text-slate-500')}>{r.reason ?? '—'}</td>
               <td className={cn(tdCls, 'text-slate-500')}>{r.reference ?? '—'}</td>
+              <td className={cn(tdCls, 'text-slate-500')}>
+                {r.bookingId ? <LinkedBooking id={r.bookingId} /> : '—'}
+              </td>
               <td className={tdCls}>
                 {canDecide && (
                   <span className="flex gap-1">
@@ -328,12 +332,26 @@ function PadRequestQueue({ canDecide }: { canDecide: boolean }) {
               </td>
             </tr>
           ))}
-          {rows === null && <tr><td className={tdCls} colSpan={6}>{t('common.loading')}</td></tr>}
-          {rows?.length === 0 && <tr><td className={tdCls} colSpan={6}>{t('approvals.noPadRequests')}</td></tr>}
+          {rows === null && <tr><td className={tdCls} colSpan={7}>{t('common.loading')}</td></tr>}
+          {rows?.length === 0 && <tr><td className={tdCls} colSpan={7}>{t('approvals.noPadRequests')}</td></tr>}
         </tbody>
       </table>
     </Panel>
   );
+}
+
+/** The prepared booking a PAD request waits on — approval confirms it. */
+function LinkedBooking({ id }: { id: string }) {
+  const { t } = useTranslation();
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    getBooking(id)
+      .then((b) => { if (live) setLabel(`${b.date} · ${b.resourceName}`); })
+      .catch(() => { if (live) setLabel(t('monthEnd.linkedBooking')); });
+    return () => { live = false; };
+  }, [id, t]);
+  return <span title={t('approvals.linkedBookingHint')}>{label ?? '…'}</span>;
 }
 
 /** Suggested vs confirmed mobilisation periods for one resource in a month —

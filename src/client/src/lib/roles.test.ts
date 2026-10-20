@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canHandleMoney, canManage, canSeeAgreements, canSeeCommercial, isAdmin, visibleNav,
+  canHandleMoney, canManage, canReadAudit, canSeeAgreements, canSeeCommercial, isAdmin, visibleNav,
 } from './roles';
 
 const as = (role: string) => ({ role });
@@ -25,13 +25,13 @@ describe('visibleNav', () => {
     expect(paths('Resource')).toEqual(['/', '/my', '/economy']);
   });
 
-  it('finance: commercial read + economy, no approvals or own work', () => {
+  it('finance: commercial read + economy + settings (audit), no approvals or own work', () => {
     const p = paths('Finance');
     expect(p).toContain('/economy');
     expect(p).toContain('/month-end');
+    expect(p).toContain('/settings');
     expect(p).not.toContain('/approvals');
     expect(p).not.toContain('/my');
-    expect(p).not.toContain('/settings');
   });
 
   it('unknown or unresolved users only get the dashboard', () => {
@@ -56,6 +56,14 @@ describe('role predicates (allowed + forbidden)', () => {
       expect(f(as('ProjectManager'))).toBe(false);
       expect(f(as('Resource'))).toBe(false);
     }
+  });
+
+  it('canReadAudit: admin + finance; PM and resource forbidden', () => {
+    expect(canReadAudit(as('Administrator'))).toBe(true);
+    expect(canReadAudit(as('Finance'))).toBe(true);
+    expect(canReadAudit(as('ProjectManager'))).toBe(false);
+    expect(canReadAudit(as('Resource'))).toBe(false);
+    expect(canReadAudit(null)).toBe(false);
   });
 
   it('canSeeCommercial excludes resources; isAdmin only admins', () => {

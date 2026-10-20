@@ -1,4 +1,7 @@
 import { DEV_USER_HEADER, getDevUserId } from './currentUser';
+import { auditQuery, type AuditEntry, type AuditFilters } from './audit';
+import type { OverrunSplit } from './bookings';
+import type { ClosePreview } from './monthClose';
 import type {
   AdditionalPadRequest,
   AllowanceClaim,
@@ -251,6 +254,16 @@ export interface BookingActionResult {
 }
 export const bookingAction = (id: string, action: 'confirm' | 'acknowledge' | 'start' | 'complete' | 'cancel') =>
   apiPost<BookingActionResult | Booking>(`/api/bookings/${id}/${action}`, {});
+export interface CompleteResult {
+  booking: Booking;
+  padUtilised: number;
+  overrun: OverrunSplit | null;
+}
+/** Admin/PM completion; actual hours beyond the commitment run the §4.3
+ * continuation allocation and come back as the overrun split. */
+export const completeBooking = (id: string, actualHours?: number | null) =>
+  apiPost<CompleteResult>(`/api/bookings/${id}/complete`,
+    actualHours ? { actualHours } : {});
 export interface RescheduleResult {
   original: Booking;
   replacement: Booking;
@@ -269,8 +282,16 @@ export const getPadDashboard = (projectId: string, year: number, month: number) 
   apiGet<PadDashboard>(`/api/projects/${projectId}/pad/${year}/${month}`);
 export const setBaseline = (projectId: string, year: number, month: number, amount: number, note?: string) =>
   apiPost<PadTransaction>(`/api/projects/${projectId}/pad/${year}/${month}/baseline`, { amount, note });
-export const closeMonth = (projectId: string, year: number, month: number) =>
-  apiPost<CloseMonthResult>(`/api/projects/${projectId}/pad/${year}/${month}/close`, {});
+/** Close the month; `force` + `reason` override blocking checklist items
+ * (never ordering errors). 409 closeBlocked carries the preview. */
+export const closeMonth = (
+  projectId: string, year: number, month: number, force?: { reason: string },
+) =>
+  apiPost<CloseMonthResult>(`/api/projects/${projectId}/pad/${year}/${month}/close`,
+    force ? { force: true, reason: force.reason } : {});
+/** Dry run of the close (§6.4) — ordering, checklist, carry/expiry steps. */
+export const getClosePreview = (projectId: string, year: number, month: number) =>
+  apiGet<ClosePreview>(`/api/projects/${projectId}/pad/${year}/${month}/close/preview`);
 export const getPadRequests = (projectId: string, year?: number, month?: number) => {
   const p = new URLSearchParams({ projectId });
   if (year) p.set('year', String(year));
@@ -280,10 +301,16 @@ export const getPadRequests = (projectId: string, year?: number, month?: number)
 export const createPadRequest = (b: {
   projectId: string; year: number; month: number; quantity: number;
   rate?: number | null; reason?: string | null; reference?: string | null;
+  /** A prepared booking waiting on this request — approval confirms it. */
+  bookingId?: string | null;
 }) => apiPost<AdditionalPadRequest>('/api/pad-requests', b);
 export const padRequestAction = (id: string, action: 'approve' | 'reject' | 'withdraw') =>
   apiPost<AdditionalPadRequest>(`/api/pad-requests/${id}/${action}`, {});
 export const deletePadRequest = (id: string) => apiDelete(`/api/pad-requests/${id}`);
+
+// ── Audit log ───────────────────────────────────────────────────────────────
+
+export const getAudit = (f: AuditFilters) => apiGet<AuditEntry[]>(`/api/audit?${auditQuery(f)}`);
 
 // ── Calendar feed (.ics) ────────────────────────────────────────────────────
 

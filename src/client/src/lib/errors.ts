@@ -47,6 +47,7 @@ export function errorMessage(e: unknown): string {
 export const KNOWN_ERROR_CODES = [
   'insufficientPad', 'monthClosed', 'timesheetLocked', 'weekLocked', 'dayOverflow',
   'duplicate', 'possibleDuplicate', 'invoiced', 'overlap', 'alreadySubmitted', 'futureBooking',
+  'closeBlocked', 'concurrentUpdate',
 ] as const;
 
 /** i18n key for a known code, or null. */
