@@ -9,7 +9,7 @@ namespace ContractFlow.Api.Controllers;
 
 [ApiController]
 [Route("api/contracts")]
-public class ContractsController(AppDbContext db) : ControllerBase
+public class ContractsController(AppDbContext db, BillingService billing) : ControllerBase
 {
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
@@ -208,6 +208,10 @@ public class ContractsController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "Unsupported holiday calendar." });
         if (req.Currency.Length != 3 || !req.Currency.All(char.IsAsciiLetter))
             return BadRequest(new { error = "Currency must be a three-letter code." });
+        // Effective-dated, never rewritten (§3): a version may not reach back
+        // into a month a non-draft specification already billed.
+        if (await billing.TermsChangeBlockedAsync(id, req.EffectiveFrom, null, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
 
         var nextVersion = await db.ContractTerms
             .Where(t => t.ContractId == id)
@@ -275,6 +279,8 @@ public class ContractsController(AppDbContext db) : ControllerBase
         var terms = await db.ContractTerms
             .FirstOrDefaultAsync(t => t.Id == termId && t.ContractId == id, ct);
         if (terms is null) return NotFound();
+        if (await billing.TermsChangeBlockedAsync(id, terms.EffectiveFrom, terms.Id, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
 
         db.ContractTerms.Remove(terms);
         await db.SaveChangesAsync(ct);

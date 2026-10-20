@@ -9,7 +9,7 @@ namespace ContractFlow.Api.Controllers;
 
 [ApiController]
 [Route("api/work-packages")]
-public class WorkPackagesController(AppDbContext db) : ControllerBase
+public class WorkPackagesController(AppDbContext db, BillingService billing) : ControllerBase
 {
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
@@ -56,10 +56,11 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
             .Include(w => w.InfoItems)
             .FirstOrDefaultAsync(w => w.Id == id, ct);
         if (workPackage is null) return NotFound();
-        if (!await db.Projects.AnyAsync(p => p.Id == req.ProjectId, ct))
-            return BadRequest(new { error = "Unknown project." });
+        // A package's rates, scoped agreements and history belong to its
+        // project's contract — it never moves to another project.
+        if (req.ProjectId != workPackage.ProjectId)
+            return BadRequest(new { error = "A work package cannot move to another project." });
 
-        workPackage.ProjectId = req.ProjectId;
         workPackage.Name = req.Name.Trim();
         workPackage.Notes = req.Notes;
         if (req.InfoItems is not null)
@@ -84,6 +85,18 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
     {
         var workPackage = await db.WorkPackages.FindAsync([id], ct);
         if (workPackage is null) return NotFound();
+        // Deleting would cascade its rate history away and turn package-scoped
+        // agreements into contract-scoped ones — refuse while referenced.
+        if (await db.WorkPackageRates.AnyAsync(r => r.WorkPackageId == id, ct)
+            || await db.CompensationAgreements.AnyAsync(a => a.WorkPackageId == id, ct)
+            || await db.Bookings.AnyAsync(b => b.WorkPackageId == id, ct)
+            || await db.TimeEntries.AnyAsync(e => e.WorkPackageId == id, ct)
+            || await db.MobilisationPeriods.AnyAsync(m => m.WorkPackageId == id, ct))
+            return Conflict(new
+            {
+                error = "workPackageInUse",
+                message = "The work package has rates, agreements, bookings, time or mobilisations — it cannot be deleted.",
+            });
 
         db.WorkPackages.Remove(workPackage);
         await db.SaveChangesAsync(ct);
@@ -122,6 +135,8 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
         if (await db.WorkPackageRates.AnyAsync(r => r.WorkPackageId == id
                 && r.ResourceId == req.ResourceId && r.EffectiveFrom == req.EffectiveFrom, ct))
             return Conflict(new { error = "A version already exists for this scope and date." });
+        if (await billing.PackageRateChangeBlockedAsync(id, req.ResourceId, req.EffectiveFrom, null, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
 
         var rate = new WorkPackageRate
         {
@@ -165,6 +180,8 @@ public class WorkPackagesController(AppDbContext db) : ControllerBase
         var rate = await db.WorkPackageRates
             .FirstOrDefaultAsync(r => r.Id == rateId && r.WorkPackageId == id, ct);
         if (rate is null) return NotFound();
+        if (await billing.PackageRateChangeBlockedAsync(id, rate.ResourceId, rate.EffectiveFrom, rate.Id, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
         db.WorkPackageRates.Remove(rate);
         await db.SaveChangesAsync(ct);
         return NoContent();

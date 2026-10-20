@@ -35,6 +35,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<AllowanceClaim> AllowanceClaims => Set<AllowanceClaim>();
     public DbSet<Timesheet> Timesheets => Set<Timesheet>();
+    public DbSet<TimesheetReview> TimesheetReviews => Set<TimesheetReview>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<InvoiceSpecification> InvoiceSpecifications => Set<InvoiceSpecification>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
@@ -364,7 +365,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.PayableHours).HasPrecision(9, 2);
             e.Property(x => x.BillableHours).HasPrecision(9, 2);
             e.Property(x => x.MinimumAdjustmentHours).HasPrecision(9, 2);
+            e.Property(x => x.BillableMinimumAdjustmentHours).HasPrecision(9, 2);
             e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => x.InvoiceSpecificationId);
+            e.HasOne<InvoiceSpecification>().WithMany()
+                .HasForeignKey(x => x.InvoiceSpecificationId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => new { x.ResourceId, x.Date });
             e.HasIndex(x => new { x.ProjectId, x.Date });
             e.HasOne(x => x.Resource).WithMany()
@@ -450,6 +455,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.HasIndex(x => new { x.ResourceId, x.Year, x.IsoWeek }).IsUnique();
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.Reviews).WithOne(r => r.Timesheet)
+                .HasForeignKey(r => r.TimesheetId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<TimesheetReview>(e =>
+        {
+            e.Property(x => x.Action).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.HasIndex(x => new { x.TimesheetId, x.AtUtc });
         });
 
         builder.Entity<Document>(e =>
@@ -468,7 +482,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.TotalAmount).HasPrecision(18, 2);
             e.Property(x => x.Notes).HasMaxLength(500);
-            e.HasIndex(x => new { x.ProjectId, x.Year, x.Month }).IsUnique();
+            e.Property(x => x.WarningsJson).HasMaxLength(4000);
+            e.HasIndex(x => new { x.ProjectId, x.Year, x.Month, x.Revision }).IsUnique();
             e.HasOne(x => x.Project).WithMany()
                 .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -478,7 +493,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
             e.Property(x => x.Description).HasMaxLength(300);
             e.Property(x => x.Explanation).HasMaxLength(500);
-            e.Property(x => x.Quantity).HasPrecision(18, 2);
+            // 4 decimals: day-rate lines bill fractions like ⅓ day (0.3333).
+            e.Property(x => x.Quantity).HasPrecision(18, 4);
             e.Property(x => x.UnitPrice).HasPrecision(18, 2);
             e.Property(x => x.Amount).HasPrecision(18, 2);
             e.HasOne(x => x.Invoice).WithMany(x => x.Lines)
@@ -491,6 +507,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.TotalAmount).HasPrecision(18, 2);
             e.Property(x => x.Notes).HasMaxLength(500);
+            e.Property(x => x.WarningsJson).HasMaxLength(4000);
             e.HasIndex(x => new { x.ResourceId, x.Year, x.Month }).IsUnique();
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
@@ -515,6 +532,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.TotalAmount).HasPrecision(18, 2);
             e.Property(x => x.MatchDiffJson).HasMaxLength(4000);
+            e.Property(x => x.ApprovalNote).HasMaxLength(500);
             e.HasIndex(x => new { x.ResourceId, x.Number }).IsUnique();
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);

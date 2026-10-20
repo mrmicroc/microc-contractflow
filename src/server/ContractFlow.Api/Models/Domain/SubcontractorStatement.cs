@@ -31,6 +31,10 @@ public class SubcontractorStatement
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
     public DateTime? PaidUtc { get; set; }
+    public Guid? PaidByUserId { get; set; }
+    /// <summary>JSON string array of generation warnings (rows in another
+    /// currency than the statement are left out, never silently summed).</summary>
+    public string? WarningsJson { get; set; }
 }
 
 public enum StatementLineKind
