@@ -6,9 +6,17 @@ using ContractFlow.Api.Tests.Infrastructure;
 
 namespace ContractFlow.Api.Tests.Controllers;
 
-public class PadTests(ContractFlowWebApplicationFactory factory)
-    : IClassFixture<ContractFlowWebApplicationFactory>
+public class PadTests : IClassFixture<ContractFlowWebApplicationFactory>
 {
+    private readonly ContractFlowWebApplicationFactory factory;
+
+    public PadTests(ContractFlowWebApplicationFactory factory)
+    {
+        this.factory = factory;
+        // Closing and completing need the months to lie in the past.
+        factory.Clock.Set(new DateOnly(2031, 1, 15));
+    }
+
     public record TxDto(string Type, decimal Amount, Guid? BookingId, string? Note);
     public record DashboardDto(decimal Baseline, decimal CarryOverIn,
         decimal AdditionalApproved, decimal CommittedOpen, decimal Utilised,

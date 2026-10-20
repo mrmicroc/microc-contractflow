@@ -30,20 +30,23 @@ public static class CancellationMath
                 .OrderBy(s => s.MinBusinessDaysBefore)   // tightest matching rung
                 .LastOrDefault();
             if (hit is null) // less notice than the lowest rung → full charge
-                return new CancellationCharge(plannedHours, null);
+                return new CancellationCharge(plannedHours, null, Full: true);
             return new CancellationCharge(hit.ChargeHours, hit.ChargeAmount);
         }
 
         var timely = businessDaysBefore >= fallbackDeadlineDays;
         return timely
             ? new CancellationCharge(null, null)
-            : new CancellationCharge(plannedHours, null);
+            : new CancellationCharge(plannedHours, null, Full: true);
     }
 
     /// <param name="Hours">Billed hours (PAD contracts convert to PAD
     /// utilisation; null = no hour charge).</param>
     /// <param name="Amount">Fixed cancellation fee (null = none).</param>
-    public record CancellationCharge(decimal? Hours, decimal? Amount)
+    /// <param name="Full">The whole booking is charged (missed deadline / below
+    /// the lowest rung) — on PAD contracts the full commitment is consumed,
+    /// never less than the 1.00 PAD minimum (§4.3, §6.3).</param>
+    public record CancellationCharge(decimal? Hours, decimal? Amount, bool Full = false)
     {
         public bool IsFree => Hours is not > 0m && Amount is not > 0m;
     }

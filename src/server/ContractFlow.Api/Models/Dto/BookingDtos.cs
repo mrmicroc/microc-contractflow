@@ -39,8 +39,9 @@ public class BookingRequest
 public class BookingUpdateRequest
 {
     public Guid? WorkPackageId { get; set; }
+    /// <summary>Null keeps the current planned hours.</summary>
     [Range(0.25, 24)]
-    public decimal PlannedHours { get; set; } = 8m;
+    public decimal? PlannedHours { get; set; }
     [StringLength(100)]
     public string? ActivityRef { get; set; }
     public string? WorkDescription { get; set; }
@@ -60,6 +61,14 @@ public class RescheduleRequest
     [Range(0.25, 24)]
     public decimal? PlannedHours { get; set; }
     public string? Note { get; set; }
+}
+
+/// <summary>Completion body (optional). <see cref="ActualHours"/> beyond the
+/// planned commitment triggers the continuation allocation of §4.3.</summary>
+public class CompleteRequest
+{
+    [Range(0.25, 24)]
+    public decimal? ActualHours { get; set; }
 }
 
 public record PadTransactionDto(
@@ -88,10 +97,36 @@ public record CloseMonthResultDto(
     decimal CarryOverOut, decimal Expired, decimal CarryOverInNextMonth,
     int NextYear, int NextMonth);
 
+/// <summary>Month-close request — <see cref="Force"/> overrides blocking
+/// checklist items and requires a documented <see cref="Reason"/>.</summary>
+public class CloseMonthRequest
+{
+    public bool Force { get; set; }
+    [StringLength(500)]
+    public string? Reason { get; set; }
+}
+
+/// <summary>One pre-close checklist line (design §6.4). Codes:
+/// unresolvedBookings, planningLeftovers, unsubmittedTime,
+/// unapprovedTimesheets, unapprovedExpenses, travelNeedingReview,
+/// pendingAdditionalPad, negativeFree.</summary>
+public record CloseCheckItemDto(string Code, int Count, bool Blocking);
+
+/// <summary>One step of the carry-over / expiry calculation, in order.</summary>
+public record CloseStepDto(string Code, decimal Amount, string Explanation);
+
+/// <summary>Dry run of a month close — nothing is written. Ordering errors
+/// (previousMonthOpen / nextMonthClosed / monthNotEnded / alreadyClosed)
+/// can't be forced; blocking checklist items can (admin + reason).</summary>
+public record ClosePreviewDto(
+    int Year, int Month, bool CanClose, string[] OrderingErrors,
+    List<CloseCheckItemDto> Checklist, List<CloseStepDto> Steps,
+    CloseMonthResultDto Result);
+
 public record AdditionalPadRequestDto(
     Guid Id, Guid ProjectId, int Year, int Month, decimal Quantity, decimal? Rate,
     string? Reason, string? Reference, AdditionalPadStatus Status,
-    DateTime CreatedUtc, DateTime? DecidedUtc);
+    DateTime CreatedUtc, DateTime? DecidedUtc, Guid? BookingId);
 
 public class AdditionalPadRequestCreate
 {
@@ -107,4 +142,6 @@ public class AdditionalPadRequestCreate
     public string? Reason { get; set; }
     [StringLength(200)]
     public string? Reference { get; set; }
+    /// <summary>Optional prepared booking that waits on this request.</summary>
+    public Guid? BookingId { get; set; }
 }
