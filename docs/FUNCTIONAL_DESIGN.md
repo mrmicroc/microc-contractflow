@@ -193,13 +193,14 @@ utilised 2.50, committed 4.00 → free 2.50. All eight categories (baseline,
 carry-over, committed, utilised, free, additional, expired, next-month-borrowed)
 are shown individually and reconcilable.
 
-### 4.3 Contract rules (configurable per contract; first config = the SSE model)
+### 4.3 Contract rules (configurable per contract; first config = the initial PAD contract)
 
 - 1 PAD = 8 h; a confirmed Booked Day commits **min 1.00 PAD** per inspector;
   longer days proportionally more; standalone hourly activities consume
   actual/8 with no minimum.
-- **Carry-over**: only unused *baseline* generates it; max 20 % of unused
-  baseline rounded up to whole PAD, capped at actual unused; moves only to the
+- **Carry-over**: only unused *baseline* generates it; max 20 % of the month's
+  baseline rounded up to whole PAD, capped at actual unused (§5 example:
+  baseline 10, 7 used → 2 carried, 1 expires); moves only to the
   immediately following month; **carry-over is consumed before baseline**;
   cannot be carried again; expires at end of receiving month; project-specific;
   may enter a month with zero baseline.
@@ -296,7 +297,9 @@ Approval: Draft → Submitted → Under review → Approved / Returned / Rejecte
    → included in SubcontractorStatement
 Duplicate detection warns; an expense can never be reimbursed or recharged twice.
 Three flags per expense line: reimbursable-to-resource / rechargeable-to-customer /
-   included-in-rate — independent booleans.
+   included-in-rate — reimbursable and rechargeable are independent; included-in-rate
+   excludes both (the cost is already covered by the rate). A rechargeable line
+   needs a project.
 Later: supplier invoice registered → matched against statement → diffs shown.
 ```
 
@@ -442,8 +445,8 @@ and receipt files via SMB.
 
 From the Devin doc's list plus what the spec leaves open:
 
-1. **Which contract model first?** The spec names LT360/LT14 (PAD model) as
-   initial projects but also details a TenneT hourly reference. Both engines
+1. **Which contract model first?** The spec names two PAD-model projects as
+   initial projects but also details an hourly reference contract. Both engines
    are designed anyway — confirm PAD-first matches reality. *Also: actual
    contract values (rates, baselines) are entered as configuration — nothing
    real goes into seeds or tests.*
