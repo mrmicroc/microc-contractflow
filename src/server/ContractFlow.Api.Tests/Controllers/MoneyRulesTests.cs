@@ -819,8 +819,13 @@ public class MoneyRulesTests(ContractFlowWebApplicationFactory factory)
         await EntryAsync(closed.ResourceId, closed.ProjectId, "2029-12-03", 8m);
         var s1 = await ApproveWeekAsync(closed.ResourceId, "2029-12-03");
         await Scaffold.SetBaselineAsync(Admin, closed, 2029, 12, 1m);
-        (await Admin.PostAsync($"/api/projects/{closed.ProjectId}/pad/2029/12/close", null))
-            .EnsureSuccessStatusCode();
+        factory.Clock.Set(new DateOnly(2030, 1, 2)); // a month closes only once it has ended
+        try
+        {
+            (await Admin.PostAsync($"/api/projects/{closed.ProjectId}/pad/2029/12/close", null))
+                .EnsureSuccessStatusCode();
+        }
+        finally { factory.Clock.Reset(); }
         var r1 = await Admin.PostAsJsonAsync($"/api/timesheets/{s1}/reopen", new { note = "fix" });
         Assert.Equal(HttpStatusCode.Conflict, r1.StatusCode);
 

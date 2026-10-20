@@ -28,6 +28,9 @@ namespace ContractFlow.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("BookingId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
 
@@ -67,6 +70,8 @@ namespace ContractFlow.Api.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BookingId");
 
                     b.HasIndex("ProjectId");
 
@@ -146,6 +151,52 @@ namespace ContractFlow.Api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.AuditEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Changes")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("OccurredUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("UserDisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OccurredUtc");
+
+                    b.HasIndex("EntityType", "EntityId");
+
+                    b.ToTable("AuditEntries");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Booking", b =>
@@ -781,8 +832,8 @@ namespace ContractFlow.Api.Migrations
                         .HasColumnType("nvarchar(20)");
 
                     b.Property<decimal>("Quantity")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid?>("SourceId")
                         .HasColumnType("uniqueidentifier");
@@ -815,6 +866,9 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
+                    b.Property<Guid?>("IssuedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("IssuedUtc")
                         .HasColumnType("datetime2");
 
@@ -825,11 +879,17 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("PaidByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("PaidUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Revision")
+                        .HasColumnType("int");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -840,12 +900,16 @@ namespace ContractFlow.Api.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("WarningsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
                     b.Property<int>("Year")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "Year", "Month")
+                    b.HasIndex("ProjectId", "Year", "Month", "Revision")
                         .IsUnique();
 
                     b.ToTable("InvoiceSpecifications");
@@ -936,7 +1000,15 @@ namespace ContractFlow.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("BookingId");
+                    b.HasIndex("AdditionalPadRequestId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PadTransactions_AdditionalPadRequestId_Approved")
+                        .HasFilter("[Type] = 'AdditionalApproved' AND [AdditionalPadRequestId] IS NOT NULL");
+
+                    b.HasIndex("BookingId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PadTransactions_BookingId_Commit")
+                        .HasFilter("[Type] = 'Commit' AND [BookingId] IS NOT NULL");
 
                     b.HasIndex("ProjectId", "Year", "Month");
 
@@ -1013,6 +1085,10 @@ namespace ContractFlow.Api.Migrations
 
                     b.Property<DateTime>("ClosedUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("ForcedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<int>("Month")
                         .HasColumnType("int");
@@ -1231,6 +1307,9 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("PaidByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("PaidUtc")
                         .HasColumnType("datetime2");
 
@@ -1245,6 +1324,10 @@ namespace ContractFlow.Api.Migrations
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("WarningsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
 
                     b.Property<int>("Year")
                         .HasColumnType("int");
@@ -1262,6 +1345,10 @@ namespace ContractFlow.Api.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApprovalNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
@@ -1361,6 +1448,10 @@ namespace ContractFlow.Api.Migrations
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
 
+                    b.Property<decimal?>("BillableMinimumAdjustmentHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
                     b.Property<string>("Billing")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -1387,6 +1478,9 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<Guid?>("InvoiceSpecificationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal?>("MinimumAdjustmentHours")
                         .HasPrecision(9, 2)
                         .HasColumnType("decimal(9,2)");
@@ -1410,6 +1504,8 @@ namespace ContractFlow.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BookingId");
+
+                    b.HasIndex("InvoiceSpecificationId");
 
                     b.HasIndex("TimesheetId");
 
@@ -1464,6 +1560,37 @@ namespace ContractFlow.Api.Migrations
                         .IsUnique();
 
                     b.ToTable("Timesheets");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.TimesheetReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("AtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TimesheetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TimesheetId", "AtUtc");
+
+                    b.ToTable("TimesheetReviews");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.TravelRecord", b =>
@@ -1666,11 +1793,18 @@ namespace ContractFlow.Api.Migrations
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.AdditionalPadRequest", b =>
                 {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Booking", "Booking")
+                        .WithMany()
+                        .HasForeignKey("BookingId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("ContractFlow.Api.Models.Domain.Project", "Project")
                         .WithMany()
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Booking");
 
                     b.Navigation("Project");
                 });
@@ -2112,6 +2246,11 @@ namespace ContractFlow.Api.Migrations
                         .HasForeignKey("BookingId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("ContractFlow.Api.Models.Domain.InvoiceSpecification", null)
+                        .WithMany()
+                        .HasForeignKey("InvoiceSpecificationId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("ContractFlow.Api.Models.Domain.Project", "Project")
                         .WithMany()
                         .HasForeignKey("ProjectId")
@@ -2154,6 +2293,17 @@ namespace ContractFlow.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Resource");
+                });
+
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.TimesheetReview", b =>
+                {
+                    b.HasOne("ContractFlow.Api.Models.Domain.Timesheet", "Timesheet")
+                        .WithMany("Reviews")
+                        .HasForeignKey("TimesheetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Timesheet");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.TravelRecord", b =>
@@ -2290,6 +2440,8 @@ namespace ContractFlow.Api.Migrations
                     b.Navigation("Entries");
 
                     b.Navigation("Expenses");
+
+                    b.Navigation("Reviews");
 
                     b.Navigation("TravelRecords");
                 });

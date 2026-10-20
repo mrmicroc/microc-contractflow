@@ -141,6 +141,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         entry.Description = req.Description;
         // Moving a draft row invalidates previously computed quantities.
         entry.PayableHours = entry.BillableHours = entry.MinimumAdjustmentHours = null;
+        entry.BillableMinimumAdjustmentHours = null;
         await Db.SaveChangesAsync(ct);
         return Ok(await DtoAsync(id, ct));
     }
@@ -208,12 +209,13 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
     /// <summary>Billable quantities are customer-side (§1.1) — a Resource
     /// caller sees actual and payable hours only.</summary>
     private static TimeEntryDto ForCaller(TimeEntryDto dto, bool isResource) =>
-        isResource ? dto with { BillableHours = null } : dto;
+        isResource ? dto with { BillableHours = null, BillableMinimumAdjustmentHours = null } : dto;
 
     private static TimeEntryDto ToDto(TimeEntry x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
         x.BookingId, x.WorkPackageId, x.WorkPackage?.Name, x.Date, x.Category,
         x.ActualHours,
         x.Billing, x.Description, x.PayableHours, x.BillableHours,
-        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status);
+        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status,
+        x.BillableMinimumAdjustmentHours);
 }

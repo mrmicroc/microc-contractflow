@@ -85,7 +85,7 @@ public abstract class ReportingControllerBase(AppDbContext db, ICurrentUser curr
             .Where(t => t.Id == timesheetId)
             .Select(t => (TimesheetStatus?)t.Status)
             .FirstOrDefaultAsync(ct);
-        return status is TimesheetStatus.Submitted or TimesheetStatus.Approved;
+        return status is TimesheetStatus.Submitted or TimesheetStatus.Approved or TimesheetStatus.Invoiced;
     }
 
     protected IActionResult LockedError() => Conflict(new
@@ -104,7 +104,8 @@ public abstract class ReportingControllerBase(AppDbContext db, ICurrentUser curr
         var week = ISOWeek.GetWeekOfYear(dt);
         return await Db.Timesheets.AnyAsync(t =>
             t.ResourceId == resourceId && t.Year == year && t.IsoWeek == week
-            && (t.Status == TimesheetStatus.Submitted || t.Status == TimesheetStatus.Approved), ct);
+            && (t.Status == TimesheetStatus.Submitted || t.Status == TimesheetStatus.Approved
+                || t.Status == TimesheetStatus.Invoiced), ct);
     }
 
     protected IActionResult WeekLockedError() => Conflict(new
