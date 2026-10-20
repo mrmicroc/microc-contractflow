@@ -9,7 +9,8 @@ public record TimeEntryDto(
     DateOnly Date, TimeEntryCategory Category,
     decimal ActualHours, EntryBilling Billing, string? Description,
     decimal? PayableHours, decimal? BillableHours,
-    decimal? MinimumAdjustmentHours, Guid? TimesheetId, TimesheetStatus? TimesheetStatus);
+    decimal? MinimumAdjustmentHours, Guid? TimesheetId, TimesheetStatus? TimesheetStatus,
+    decimal? BillableMinimumAdjustmentHours = null);
 
 public class TimeEntryRequest
 {
@@ -159,7 +160,12 @@ public record TimesheetDetailDto(
     IReadOnlyList<TimeEntryDto> Entries,
     IReadOnlyList<TravelRecordDto> Travel,
     IReadOnlyList<ExpenseDto> Expenses,
-    IReadOnlyList<AllowanceClaimDto> Allowances);
+    IReadOnlyList<AllowanceClaimDto> Allowances,
+    IReadOnlyList<TimesheetReviewDto> Reviews);
+
+/// <summary>One step of the review history, oldest first.</summary>
+public record TimesheetReviewDto(
+    TimesheetReviewAction Action, string? Note, Guid? ByUserId, string? ByName, DateTime AtUtc);
 
 public class TimesheetSubmitRequest
 {

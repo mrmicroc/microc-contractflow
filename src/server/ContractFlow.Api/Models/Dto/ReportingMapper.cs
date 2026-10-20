@@ -6,11 +6,16 @@ namespace ContractFlow.Api.Models.Dto;
 /// the entry controllers and the timesheet detail view.</summary>
 public static class ReportingMapper
 {
-    public static TimeEntryDto Entry(TimeEntry x) => new(
+    /// <param name="hideBillable">True for Resource-role callers — billable
+    /// quantities are customer-side (§1.1/§10) and never shown to them.</param>
+    public static TimeEntryDto Entry(TimeEntry x, bool hideBillable) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
         x.BookingId, x.WorkPackageId, x.WorkPackage?.Name, x.Date, x.Category, x.ActualHours,
-        x.Billing, x.Description, x.PayableHours, x.BillableHours,
-        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status);
+        x.Billing, x.Description, x.PayableHours, hideBillable ? null : x.BillableHours,
+        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status,
+        hideBillable ? null : x.BillableMinimumAdjustmentHours);
+
+    public static TimeEntryDto Entry(TimeEntry x) => Entry(x, hideBillable: false);
 
     public static TravelRecordDto Travel(TravelRecord x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project?.Name,

@@ -63,8 +63,18 @@ public class TimeEntry
     // Frozen at timesheet approval (null while draft):
     public decimal? PayableHours { get; set; }
     public decimal? BillableHours { get; set; }
-    /// <summary>Share of the day's minimum-hours adjustment on this entry (§5 step 4).</summary>
+    /// <summary>Share of the day's PAYABLE minimum-hours adjustment on this
+    /// entry (§5 step 4) — the agreement's minimum.</summary>
     public decimal? MinimumAdjustmentHours { get; set; }
+    /// <summary>Share of the day's BILLABLE minimum-hours adjustment — the
+    /// contract's minimum, kept apart from the payable one (§1.1).</summary>
+    public decimal? BillableMinimumAdjustmentHours { get; set; }
+
+    /// <summary>The invoice specification that billed (or covered, for
+    /// PAD-covered / non-billed rows) this entry — set at generation, cleared
+    /// when a draft is rebuilt or deleted. Prevents billing a row twice and
+    /// drives the Timesheet → Invoiced leg.</summary>
+    public Guid? InvoiceSpecificationId { get; set; }
 
     /// <summary>Set while the entry sits inside a submitted/approved timesheet;
     /// null = draft. Returned timesheets release their rows back to null.</summary>

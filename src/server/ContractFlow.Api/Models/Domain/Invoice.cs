@@ -23,6 +23,9 @@ public class InvoiceSpecification
     public Project Project { get; set; } = null!;
     public int Year { get; set; }
     public int Month { get; set; }
+    /// <summary>0 = the month's original spec; 1.. = supplements billing rows
+    /// approved after an earlier revision left draft.</summary>
+    public int Revision { get; set; }
 
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
     public required string Currency { get; set; }
@@ -34,7 +37,13 @@ public class InvoiceSpecification
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
     public DateTime? IssuedUtc { get; set; }
+    public Guid? IssuedByUserId { get; set; }
     public DateTime? PaidUtc { get; set; }
+    public Guid? PaidByUserId { get; set; }
+    /// <summary>JSON string array of generation warnings (currency mismatch,
+    /// unreviewed rate cells, PAD without rate…) — rows behind a warning are
+    /// left out of the total, never silently summed.</summary>
+    public string? WarningsJson { get; set; }
 }
 
 public enum InvoiceLineKind
@@ -73,6 +82,8 @@ public class InvoiceLine
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
-    /// <summary>Source row, for drill-down (TimeEntry day-group → null; Expense → its id).</summary>
+    /// <summary>Source row, for drill-down and double-billing guards: Expense,
+    /// MobilisationPeriod or cancelled Booking id (hours lines → null; their
+    /// entries point back via TimeEntry.InvoiceSpecificationId).</summary>
     public Guid? SourceId { get; set; }
 }

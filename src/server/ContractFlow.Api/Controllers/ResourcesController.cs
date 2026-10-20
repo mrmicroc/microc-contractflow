@@ -9,7 +9,7 @@ namespace ContractFlow.Api.Controllers;
 
 [ApiController]
 [Route("api/resources")]
-public class ResourcesController(AppDbContext db) : ControllerBase
+public class ResourcesController(AppDbContext db, BillingService billing) : ControllerBase
 {
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
@@ -155,6 +155,8 @@ public class ResourcesController(AppDbContext db) : ControllerBase
             if (owning.Value != req.ContractId.Value)
                 return BadRequest(new { error = "The work package does not belong to that contract." });
         }
+        if (await billing.AgreementChangeBlockedAsync(id, req.EffectiveFrom, null, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
 
         var nextVersion = await db.CompensationAgreements
             .Where(a => a.ResourceId == id && a.ContractId == req.ContractId
@@ -205,6 +207,8 @@ public class ResourcesController(AppDbContext db) : ControllerBase
         var agreement = await db.CompensationAgreements
             .FirstOrDefaultAsync(a => a.Id == agreementId && a.ResourceId == id, ct);
         if (agreement is null) return NotFound();
+        if (await billing.AgreementChangeBlockedAsync(id, agreement.EffectiveFrom, agreement.Id, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
 
         db.CompensationAgreements.Remove(agreement);
         await db.SaveChangesAsync(ct);
