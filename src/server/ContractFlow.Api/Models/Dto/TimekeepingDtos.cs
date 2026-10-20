@@ -86,6 +86,9 @@ public class ExpenseRequest
     public bool ReimbursableToResource { get; set; }
     public bool RechargeableToCustomer { get; set; }
     public bool IncludedInRate { get; set; }
+    /// <summary>Saves despite a same-day/amount/currency look-alike — the
+    /// duplicate check warns (409 possibleDuplicate) rather than blocks.</summary>
+    public bool ConfirmDuplicate { get; set; }
 }
 
 public record AllowanceClaimDto(

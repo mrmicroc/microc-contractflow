@@ -73,7 +73,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             var resourceId = await db.Resources
                 .Where(r => r.UserId == me.Id).Select(r => (Guid?)r.Id)
                 .FirstOrDefaultAsync(ct);
-            if (resourceId is null) return Forbid();
+            if (resourceId is null) return Forbidden();
             var gated = await db.ProjectAccesses.AnyAsync(a => a.ProjectId == id, ct);
             var allowed = !gated
                 || await db.ProjectAccesses.AnyAsync(
@@ -82,7 +82,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
                     && b.ResourceId == resourceId
                     && b.Status != BookingStatus.Cancelled
                     && b.Status != BookingStatus.Rescheduled, ct);
-            if (!allowed) return Forbid();
+            if (!allowed) return Forbidden();
         }
         return Ok(await db.WorkPackages.Where(w => w.ProjectId == id)
             .Include(w => w.InfoItems)
@@ -330,6 +330,11 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    /// <summary>403 body — <c>Forbid()</c> needs an authentication scheme,
+    /// which the dev identity doesn't register (it would throw → 500).</summary>
+    private ObjectResult Forbidden() =>
+        new(new { error = "Forbidden." }) { StatusCode = StatusCodes.Status403Forbidden };
 
     private static ProjectDetailDto ToDto(Project p) => new(
         p.Id, p.ContractId, p.Contract.Name, p.Contract.Customer.Name,

@@ -14,7 +14,13 @@ if (!string.IsNullOrWhiteSpace(connectionString) && !builder.Environment.IsEnvir
 }
 
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICurrentUser, DevCurrentUser>();
+// The dev header identity exists only locally and in tests; any other
+// environment has no sign-in until Entra arrives (§9.1) → 401 everywhere.
+var devIdentity = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing");
+if (devIdentity)
+    builder.Services.AddScoped<ICurrentUser, DevCurrentUser>();
+else
+    builder.Services.AddScoped<ICurrentUser, NoSignInCurrentUser>();
 builder.Services.AddScoped<PadService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddSingleton<IFileStorage>(sp => new LocalDiskFileStorage(
@@ -41,14 +47,26 @@ if (localCors)
 
 var app = builder.Build();
 
-// Return the exception message so the client can display it during development.
+// Return the exception message so the client can display it during
+// development; elsewhere only a generic text (details go to the log).
 app.UseExceptionHandler(c => c.Run(async ctx =>
 {
     var ex = ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    if (ex is not null)
+        ctx.RequestServices.GetRequiredService<ILogger<Program>>()
+            .LogError(ex, "Unhandled exception on {Path}", ctx.Request.Path);
     ctx.Response.StatusCode = 500;
     ctx.Response.ContentType = "text/plain";
-    await ctx.Response.WriteAsync(ex?.Message ?? "Internal server error");
+    await ctx.Response.WriteAsync(devIdentity
+        ? ex?.Message ?? "Internal server error"
+        : "Internal server error");
 }));
+
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.Headers.XContentTypeOptions = "nosniff";
+    await next();
+});
 
 // ── Auto-migrate + seed on startup ────────────────────────────────────────────
 string? startupError = null;
@@ -68,9 +86,12 @@ if (!string.IsNullOrWhiteSpace(connectionString) && !app.Environment.IsEnvironme
         Console.Error.WriteLine($"[STARTUP ERROR] {startupError}");
     }
 }
-app.MapGet("/api/startup-error", () => startupError is null
-    ? Results.Ok("No startup error.")
-    : Results.Problem(startupError, title: "Startup error", statusCode: 500));
+// Full startup diagnostics (server names, SQL details) only where the dev
+// identity is on — never anonymously in a deployed environment.
+if (devIdentity)
+    app.MapGet("/api/startup-error", () => startupError is null
+        ? Results.Ok("No startup error.")
+        : Results.Problem(startupError, title: "Startup error", statusCode: 500));
 
 if (app.Environment.IsDevelopment())
 {
