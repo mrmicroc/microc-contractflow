@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import {
   closeMonth,
   createPadRequest,
   deletePadRequest,
   describeError,
+  errorCode,
+  getBookings,
+  getClosePreview,
   getPadDashboard,
   getPadRequests,
   getProjects,
@@ -14,8 +18,10 @@ import {
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
 import type {
-  AdditionalPadRequest, CloseMonthResult, PadDashboard, ProjectSummary,
+  AdditionalPadRequest, Booking, CloseMonthResult, PadDashboard, ProjectSummary,
 } from '@/lib/types';
+import { viewRange } from '@/lib/bookings';
+import { blockedPreview, canSubmitForce, closeView, type ClosePreview } from '@/lib/monthClose';
 import { cn } from '@/lib/utils';
 import { confirmAction } from '@/lib/confirm';
 import { localMonth, monthKey, shiftMonth as shiftYm } from '@/lib/dates';
@@ -25,6 +31,16 @@ import {
 } from '@/components/forms';
 
 const fmt = (n: number) => n.toFixed(2).replace(/\.?0+$/, '');
+
+/** Where a checklist item gets resolved. */
+const CHECK_LINKS: Record<string, string> = {
+  unresolvedBookings: '/plan',
+  planningLeftovers: '/plan',
+  unsubmittedTime: '/approvals',
+  unapprovedTimesheets: '/approvals',
+  unapprovedExpenses: '/approvals',
+  travelNeedingReview: '/approvals',
+};
 
 /** Selector for project + month; the data body remounts on change. */
 export function MonthEnd() {
@@ -87,12 +103,25 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
   const [reqForm, setReqForm] = useState({ quantity: '', reason: '', reference: '' });
   const [reqOpen, setReqOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ClosePreview | null>(null);
+  const [forceReason, setForceReason] = useState('');
+  const [bookings, setBookings] = useState<Booking[]>([]);
 
   const reload = useCallback(() => {
     getPadDashboard(projectId, year, month).then(setDash)
       .catch((e) => { setDash(null); setError(describeError(e, t)); });
     getPadRequests(projectId, year, month).then(setRequests).catch(() => setRequests([]));
+    getClosePreview(projectId, year, month).then(setPreview).catch(() => setPreview(null));
+    const range = viewRange('month', { year, month }, `${monthKey(year, month)}-01`);
+    getBookings({ projectId, from: range.from, to: range.to }).then(setBookings)
+      .catch(() => setBookings([]));
   }, [projectId, year, month, t]);
+  const view = preview ? closeView(preview, isAdmin(me)) : null;
+  const bookingLabel = (id: string | null) => {
+    if (!id) return null;
+    const b = bookings.find((x) => x.id === id);
+    return b ? `${b.date} · ${b.resourceName}` : t('monthEnd.linkedBooking');
+  };
   useEffect(() => { void reload(); }, [reload]);
 
   const saveBaseline = async () => {
@@ -109,15 +138,23 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
     } catch (e) { setError(describeError(e, t)); }
   };
 
-  const doClose = async () => {
+  const doClose = async (force = false) => {
     // Closing releases open commitments, writes carry-over/expiry and locks
     // the month — never one click away from an accident.
-    if (!confirmAction(t('monthEnd.confirmClose', { month: monthKey(year, month) }))) return;
+    if (!confirmAction(t(force ? 'monthEnd.preview.confirmForce' : 'monthEnd.confirmClose',
+      { month: monthKey(year, month) }))) return;
     setError(null);
     try {
-      setCloseResult(await closeMonth(projectId, year, month));
+      setCloseResult(await closeMonth(projectId, year, month,
+        force ? { reason: forceReason.trim() } : undefined));
+      setForceReason('');
       reload();
-    } catch (e) { setError(describeError(e, t)); }
+    } catch (e) {
+      // 409 closeBlocked carries a fresh preview — show it instead of a bare error.
+      const fresh = blockedPreview(e);
+      if (fresh) setPreview(fresh);
+      setError(errorCode(e) === 'closeBlocked' ? t('monthEnd.preview.blockedError') : describeError(e, t));
+    }
   };
 
   const saveRequest = async () => {
@@ -231,14 +268,88 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
         </Panel>
       )}
 
-      {dash && isAdmin(me) && !dash.closed && (
+      {dash && canSeeCommercial(me) && !dash.closed && (
         <Panel title={t('monthEnd.closeMonth')} help={t('monthEnd.closeHelp')}>
-          <div className="flex flex-wrap items-center gap-3">
-            <button className={btnDangerCls} onClick={() => void doClose()}>
-              {t('monthEnd.closeMonth')}
-            </button>
-            <span className="text-xs text-slate-500">{t('monthEnd.closeWarning')}</span>
-          </div>
+          {!preview && <p className="text-sm text-slate-500">{t('common.loading')}</p>}
+          {view && (
+            <div className="space-y-3">
+              {view.orderingErrors.length > 0 && (
+                <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  <p className="font-medium">{t('monthEnd.preview.orderingTitle')}</p>
+                  <ul className="list-disc pl-5">
+                    {view.orderingErrors.map((c) => (
+                      <li key={c}>{t(`monthEnd.preview.ordering.${c}`, { defaultValue: c })}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('monthEnd.preview.checklistTitle')}
+                </p>
+                {view.blocking.length + view.warnings.length === 0 ? (
+                  <p className="text-sm text-green-700">{t('monthEnd.preview.allClear')}</p>
+                ) : (
+                  <ul className="space-y-1 text-sm">
+                    {[...view.blocking, ...view.warnings].map((c) => (
+                      <li key={c.code} className="flex items-center gap-2">
+                        <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                          c.blocking ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800')}>
+                          {t(c.blocking ? 'monthEnd.preview.blocking' : 'monthEnd.preview.warning')}
+                        </span>
+                        <span>{t(`monthEnd.preview.check.${c.code}`, { count: c.count, defaultValue: c.code })}</span>
+                        {CHECK_LINKS[c.code] && (
+                          <Link className="text-xs text-blue-700 underline" to={CHECK_LINKS[c.code]}>
+                            {t('monthEnd.preview.open')}
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('monthEnd.preview.stepsTitle')}
+                </p>
+                <table className="w-full border-collapse text-sm">
+                  <tbody>
+                    {view.steps.map((s, i) => (
+                      <tr key={`${s.code}-${i}`} className="border-b border-slate-100">
+                        <td className={tdCls}>{t(`monthEnd.preview.step.${s.code}`, { defaultValue: s.code })}</td>
+                        <td className={cn(tdCls, 'text-right font-medium')}>{fmt(s.amount)}</td>
+                        <td className={cn(tdCls, 'text-xs text-slate-500')}>{s.explanation}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {view.mode === 'close' && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <button className={btnDangerCls} onClick={() => void doClose()}>
+                    {t('monthEnd.closeMonth')}
+                  </button>
+                  <span className="text-xs text-slate-500">{t('monthEnd.closeWarning')}</span>
+                </div>
+              )}
+              {view.mode === 'force' && (
+                <div className="flex flex-wrap items-end gap-2 rounded border border-amber-200 bg-amber-50 p-2">
+                  <Field label={t('monthEnd.preview.forceReason')}>
+                    <input className={cn(inputCls, 'min-w-72')} value={forceReason}
+                      onChange={(e) => setForceReason(e.target.value)} />
+                  </Field>
+                  <button className={btnDangerCls} disabled={!canSubmitForce(forceReason)}
+                    onClick={() => void doClose(true)}>
+                    {t('monthEnd.preview.forceClose')}
+                  </button>
+                  <span className="text-xs text-amber-800">{t('monthEnd.preview.forceHint')}</span>
+                </div>
+              )}
+              {view.mode === 'none' && !isAdmin(me) && (
+                <p className="text-xs text-slate-500">{t('monthEnd.preview.adminOnly')}</p>
+              )}
+            </div>
+          )}
         </Panel>
       )}
 
@@ -280,6 +391,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                 <th className={thCls}>{t('monthEnd.quantity')}</th>
                 <th className={thCls}>{t('monthEnd.reason')}</th>
                 <th className={thCls}>{t('monthEnd.reference')}</th>
+                <th className={thCls}>{t('monthEnd.linkedBooking')}</th>
                 <th className={thCls}>{t('booking.statusLabel')}</th>
                 <th className={thCls}>{t('common.actions')}</th>
               </tr>
@@ -290,6 +402,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                   <td className={tdCls}>{fmt(r.quantity)}</td>
                   <td className={tdCls}>{r.reason ?? '—'}</td>
                   <td className={tdCls}>{r.reference ?? '—'}</td>
+                  <td className={tdCls}>{bookingLabel(r.bookingId) ?? '—'}</td>
                   <td className={tdCls}>{t(`monthEnd.requestStatus.${r.status}`)}</td>
                   <td className={tdCls}>
                     {r.status === 'submitted' && (
@@ -320,7 +433,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                 </tr>
               ))}
               {requests.length === 0 && (
-                <tr><td className={tdCls} colSpan={5}>{t('common.none')}</td></tr>
+                <tr><td className={tdCls} colSpan={6}>{t('common.none')}</td></tr>
               )}
             </tbody>
           </table>

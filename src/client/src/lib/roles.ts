@@ -21,6 +21,10 @@ export const canSeeAgreements = (me: HasRole | null | undefined) =>
 export const canHandleMoney = (me: HasRole | null | undefined) =>
   roleIn(me, ['Administrator', 'Finance']);
 
+/** Admin/Finance — the audit log carries rates and commercial terms. */
+export const canReadAudit = (me: HasRole | null | undefined) =>
+  roleIn(me, ['Administrator', 'Finance']);
+
 export interface NavItem { to: string; key: string; roles: AppRole[] | 'all' }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -33,7 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/month-end', key: 'nav.monthEnd', roles: ['Administrator', 'ProjectManager', 'Finance'] },
   { to: '/economy', key: 'nav.economy', roles: ['Administrator', 'ProjectManager', 'Finance', 'Resource'] },
   { to: '/reports', key: 'nav.reports', roles: ['Administrator', 'ProjectManager', 'Finance'] },
-  { to: '/settings', key: 'nav.settings', roles: ['Administrator'] },
+  { to: '/settings', key: 'nav.settings', roles: ['Administrator', 'Finance'] },
 ];
 
 /** Menu items for a role. Unknown/unresolved user → dashboard only (no

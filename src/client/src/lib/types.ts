@@ -526,6 +526,8 @@ export interface AdditionalPadRequest {
   status: AdditionalPadStatus;
   createdUtc: string;
   decidedUtc: string | null;
+  /** The prepared booking waiting on this request, if any. */
+  bookingId: string | null;
 }
 
 // ── Time reporting (execution ledger) ───────────────────────────────────────

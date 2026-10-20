@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   bookingAction,
+  completeBooking,
   createBooking,
+  createPadRequest,
   deleteBooking,
   describeError,
+  errorCode,
   getBookings,
   getProjects,
   getProjectWorkPackages,
@@ -13,7 +16,9 @@ import {
   updateBooking,
   type BookingActionResult,
 } from '@/lib/api';
+import { errorBody } from '@/lib/errors';
 import {
+  additionalPadShortfall, overrunParts,
   addDays, availableActions, bookingTooltip, bookingUpdateBody, monthGrid, padEffectKey,
   rescheduleOutcomeKey, statusClasses, viewRange, weekDates,
   type BookingAction, type CalendarView,
@@ -57,6 +62,9 @@ export function Plan() {
   const [formOpen, setFormOpen] = useState(false);
   const [reschedId, setReschedId] = useState<string | null>(null);
   const [reschedDate, setReschedDate] = useState('');
+  const [completeId, setCompleteId] = useState<string | null>(null);
+  const [actualHours, setActualHours] = useState('');
+  const [padNeed, setPadNeed] = useState<{ bookingId: string; quantity: string; reason: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState({
     date: '', plannedHours: '', workDescription: '', activityRef: '',
@@ -159,13 +167,66 @@ export function Plan() {
           effect: t(padEffectKey(res.padEffect)), amount: res.padAmount ?? 0,
         }));
       } else if (action === 'complete') {
-        if (!confirmAction(t('booking.confirmComplete'))) return;
-        await bookingAction(b.id, 'complete');
+        // Optional actual hours first — the panel below confirms and submits.
+        setCompleteId(b.id);
+        setActualHours('');
+        return;
       } else {
         await bookingAction(b.id, action);
       }
       setSelected(null);
       reload();
+    } catch (e) {
+      // A refused confirm can wait on Additional PAD (§4.3) — offer to
+      // prepare the request for exactly this booking.
+      const body = errorBody(e);
+      if (action === 'confirm' && errorCode(e) === 'insufficientPad') {
+        const short = additionalPadShortfall(Number(body?.neededPad ?? 1), Number(body?.freePad ?? 0));
+        setPadNeed({ bookingId: b.id, quantity: String(short || 1), reason: '' });
+      }
+      setError(describeError(e, t));
+    }
+  };
+
+  const doComplete = async () => {
+    if (!completeId) return;
+    const bad = invalidNumericFields({ [t('booking.actualHours')]: actualHours });
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
+    if (!confirmAction(t('booking.confirmComplete'))) return;
+    setError(null);
+    try {
+      const res = await completeBooking(completeId, numOrNull(actualHours));
+      const parts = overrunParts(res.overrun);
+      setNotice(parts.length
+        ? t('booking.completedWithOverrun', {
+            parts: parts.map((p) => `${t(`booking.overrun.${p.source}`)} ${p.amount}`).join(', '),
+          }) + (res.overrun?.nextMonthConflict ? ` ${t('booking.overrun.nextMonthConflict')}` : '')
+        : t('booking.completed', { pad: res.padUtilised }));
+      setCompleteId(null);
+      setSelected(null);
+      reload();
+    } catch (e) {
+      setError(describeError(e, t));
+    }
+  };
+
+  const requestAdditionalPad = async () => {
+    if (!padNeed) return;
+    const b = bookingById(padNeed.bookingId);
+    const quantity = numOrNull(padNeed.quantity);
+    if (!b || quantity === null || quantity <= 0) {
+      setError(t('common.invalidNumbers', { fields: t('monthEnd.quantity') }));
+      return;
+    }
+    setError(null);
+    try {
+      const [year, month] = b.date.split('-').map(Number);
+      await createPadRequest({
+        projectId: b.projectId, year, month, quantity,
+        reason: padNeed.reason.trim() || null, bookingId: b.id,
+      });
+      setNotice(t('booking.padRequestCreated'));
+      setPadNeed(null);
     } catch (e) {
       setError(describeError(e, t));
     }
@@ -547,6 +608,40 @@ export function Plan() {
                 {t('common.cancel')}
               </button>
               <span className="text-xs text-slate-500">{t('booking.rescheduleHint')}</span>
+            </div>
+          )}
+          {completeId === selected.id && (
+            <div className="mt-3 flex flex-wrap items-end gap-2 rounded border border-slate-200 bg-slate-50 p-2">
+              <Field label={t('booking.actualHours')}>
+                <NumInput className={inputCls} value={actualHours}
+                  onChange={(v) => setActualHours(v)} />
+              </Field>
+              <button className={btnCls} onClick={() => void doComplete()}>
+                {t('booking.action.complete')}
+              </button>
+              <button className={btnSecondaryCls} onClick={() => setCompleteId(null)}>
+                {t('common.cancel')}
+              </button>
+              <span className="text-xs text-slate-500">{t('booking.actualHoursHint')}</span>
+            </div>
+          )}
+          {padNeed?.bookingId === selected.id && (
+            <div className="mt-3 flex flex-wrap items-end gap-2 rounded border border-amber-200 bg-amber-50 p-2">
+              <span className="w-full text-sm text-amber-900">{t('booking.padNeedIntro')}</span>
+              <Field label={t('monthEnd.quantity')}>
+                <NumInput className={inputCls} value={padNeed.quantity}
+                  onChange={(v) => setPadNeed({ ...padNeed, quantity: v })} />
+              </Field>
+              <Field label={t('monthEnd.reason')}>
+                <input className={inputCls} value={padNeed.reason}
+                  onChange={(e) => setPadNeed({ ...padNeed, reason: e.target.value })} />
+              </Field>
+              <button className={btnCls} onClick={() => void requestAdditionalPad()}>
+                {t('booking.requestAdditionalPad')}
+              </button>
+              <button className={btnSecondaryCls} onClick={() => setPadNeed(null)}>
+                {t('common.cancel')}
+              </button>
             </div>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
