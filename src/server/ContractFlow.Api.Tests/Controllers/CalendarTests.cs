@@ -28,7 +28,7 @@ public class CalendarTests(ContractFlowWebApplicationFactory factory)
         var url = body.GetProperty("url").GetString()!;
         Assert.StartsWith($"/api/calendar/{ids.ResourceId}/", url);
         Assert.EndsWith(".ics", url);
-        Assert.Equal(32, FeedTokenOf(url).Length); // Guid "N" format
+        Assert.Equal(64, FeedTokenOf(url).Length); // 256 random bits, hex
     }
 
     [Fact]
@@ -36,7 +36,9 @@ public class CalendarTests(ContractFlowWebApplicationFactory factory)
     {
         var admin = Admin;
         var ids = await GraphAsync("cal-feed");
+        await Scaffold.SetBaselineAsync(admin, ids, 2027, 6, 5m);
         var booking = await Scaffold.CreateBookingAsync(admin, ids, "2027-06-15");
+        (await admin.PostAsync($"/api/bookings/{booking.Id}/confirm", null)).EnsureSuccessStatusCode();
         var url = (await (await admin.GetAsync(
             $"/api/calendar/feed-url?resourceId={ids.ResourceId}"))
             .Content.ReadFromJsonAsync<JsonElement>())!.GetProperty("url").GetString()!;
@@ -63,6 +65,44 @@ public class CalendarTests(ContractFlowWebApplicationFactory factory)
 
         var ics = await factory.CreateClient().GetStringAsync(url);
         Assert.DoesNotContain("BEGIN:VEVENT", ics);
+    }
+
+    [Fact]
+    public async Task Feed_ExcludesPreCommitmentBookings()
+    {
+        var admin = Admin;
+        var ids = await GraphAsync("cal-plan");
+        await Scaffold.CreateBookingAsync(admin, ids, "2027-06-17", "forecast");
+        await Scaffold.CreateBookingAsync(admin, ids, "2027-06-18", "tentative");
+        await Scaffold.CreateBookingAsync(admin, ids, "2027-06-21", "requested");
+        var url = (await (await admin.GetAsync(
+            $"/api/calendar/feed-url?resourceId={ids.ResourceId}"))
+            .Content.ReadFromJsonAsync<JsonElement>())!.GetProperty("url").GetString()!;
+
+        var ics = await factory.CreateClient().GetStringAsync(url);
+        Assert.DoesNotContain("BEGIN:VEVENT", ics); // planning never reaches a calendar (§7.2)
+    }
+
+    [Fact]
+    public async Task Rotate_ForAnotherResource_AsResource_IsForbidden()
+    {
+        var ids = await GraphAsync("cal-rot-other");
+        var resourceClient = factory.CreateUserClient(DevSeed.ResourceId);
+        var res = await resourceClient.PostAsync(
+            $"/api/calendar/feed-url/rotate?resourceId={ids.ResourceId}", null);
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+        // Allowed path: admin rotates the same resource.
+        Assert.Equal(HttpStatusCode.OK, (await Admin.PostAsync(
+            $"/api/calendar/feed-url/rotate?resourceId={ids.ResourceId}", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task FeedUrl_AsFinance_IsForbidden()
+    {
+        var ids = await GraphAsync("cal-fin");
+        var finance = factory.CreateUserClient(DevSeed.FinanceId);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await finance.GetAsync($"/api/calendar/feed-url?resourceId={ids.ResourceId}")).StatusCode);
     }
 
     [Fact]

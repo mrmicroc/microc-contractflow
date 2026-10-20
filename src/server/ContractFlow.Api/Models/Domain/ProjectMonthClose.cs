@@ -15,4 +15,7 @@ public class ProjectMonthClose
     public int Month { get; set; }
     public DateTime ClosedUtc { get; set; } = DateTime.UtcNow;
     public Guid? ClosedByUserId { get; set; }
+    /// <summary>Set when an admin closed past blocking checklist items — the
+    /// documented reason (design §6.4: overrides are audited).</summary>
+    public string? ForcedReason { get; set; }
 }

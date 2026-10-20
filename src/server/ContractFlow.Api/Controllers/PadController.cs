@@ -20,7 +20,7 @@ public class PadController(AppDbContext db, PadService pad, ICurrentUser current
     {
         var project = await db.Projects.FindAsync([projectId], ct);
         if (project is null) return NotFound();
-        if (month is < 1 or > 12) return BadRequest(new { error = "Invalid month." });
+        if (InvalidPeriod(year, month) is { } bad) return bad;
 
         var txs = await pad.MonthAsync(projectId, year, month, ct);
         var sums = PadMath.Sum(txs);
@@ -48,7 +48,7 @@ public class PadController(AppDbContext db, PadService pad, ICurrentUser current
         Guid projectId, int year, int month, BaselineRequest req, CancellationToken ct)
     {
         if (!await db.Projects.AnyAsync(p => p.Id == projectId, ct)) return NotFound();
-        if (month is < 1 or > 12) return BadRequest(new { error = "Invalid month." });
+        if (InvalidPeriod(year, month) is { } bad) return bad;
         if (await pad.MonthIsClosedAsync(projectId, year, month, ct))
             return Conflict(new { error = "monthClosed" });
 
@@ -65,25 +65,59 @@ public class PadController(AppDbContext db, PadService pad, ICurrentUser current
     }
 
     /// <summary>
+    /// Pre-close preview (design §6.4): ordering checks, the blocking
+    /// checklist and the carry-over / expiry calculation step by step.
+    /// Writes nothing.
+    /// </summary>
+    [HttpGet("{year:int}/{month:int}/close/preview")]
+    [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
+    public async Task<IActionResult> ClosePreview(
+        Guid projectId, int year, int month, CancellationToken ct)
+    {
+        if (!await db.Projects.AnyAsync(p => p.Id == projectId, ct)) return NotFound();
+        if (InvalidPeriod(year, month) is { } bad) return bad;
+        return Ok(await pad.PreviewCloseAsync(projectId, year, month, ct));
+    }
+
+    /// <summary>
     /// Month-end close: releases open commitments, writes carry-over / expiry
     /// for this month and CarryOverIn for the next, then locks the month.
+    /// 409 <c>closeBlocked</c> with the preview when ordering fails or
+    /// blocking checklist items remain — the latter can be forced with a
+    /// documented reason.
     /// </summary>
     [HttpPost("{year:int}/{month:int}/close")]
     [RequireRole(AppRole.Administrator)]
-    public async Task<IActionResult> Close(Guid projectId, int year, int month, CancellationToken ct)
+    public async Task<IActionResult> Close(
+        Guid projectId, int year, int month, [FromBody] CloseMonthRequest? req, CancellationToken ct)
     {
         if (!await db.Projects.AnyAsync(p => p.Id == projectId, ct)) return NotFound();
-        if (month is < 1 or > 12) return BadRequest(new { error = "Invalid month." });
+        if (InvalidPeriod(year, month) is { } bad) return bad;
+        var force = req?.Force == true;
+        if (force && string.IsNullOrWhiteSpace(req!.Reason))
+            return BadRequest(new { error = "A reason is required to force a close past blocking items." });
 
         var me = await currentUser.GetAsync(ct);
         try
         {
-            var result = await pad.CloseMonthAsync(projectId, year, month, me?.Id, ct);
+            var result = await pad.CloseMonthAsync(
+                projectId, year, month, me?.Id, ct, force, req?.Reason?.Trim());
             return Ok(result);
         }
-        catch (InvalidOperationException ex)
+        catch (CloseBlockedException ex)
         {
-            return Conflict(new { error = "monthClosed", message = ex.Message });
+            var already = ex.Preview.OrderingErrors.Contains("alreadyClosed");
+            return Conflict(new
+            {
+                error = already ? "monthClosed" : "closeBlocked",
+                message = already ? "Month is already closed." : "The month cannot be closed yet.",
+                preview = ex.Preview,
+            });
         }
     }
+
+    private BadRequestObjectResult? InvalidPeriod(int year, int month) =>
+        month is < 1 or > 12 ? BadRequest(new { error = "Invalid month." })
+        : year is < 2000 or > 2100 ? BadRequest(new { error = "Invalid year." })
+        : null;
 }

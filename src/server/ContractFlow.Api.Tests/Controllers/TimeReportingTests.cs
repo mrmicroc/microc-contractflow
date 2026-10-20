@@ -146,6 +146,7 @@ public class TimeReportingTests(ContractFlowWebApplicationFactory factory)
     {
         var ids = await LinkedGraphAsync("closed");
         await Scaffold.SetBaselineAsync(Admin, ids, 2027, 9, 2m);
+        factory.Clock.Set(new DateOnly(2027, 10, 1)); // a month closes only once it has ended
         var close = await Admin.PostAsync(
             $"/api/projects/{ids.ProjectId}/pad/2027/9/close", null);
         close.EnsureSuccessStatusCode();

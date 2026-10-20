@@ -315,6 +315,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
                 .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(t => t.Booking).WithMany()
                 .HasForeignKey(t => t.BookingId).OnDelete(DeleteBehavior.SetNull);
+            // One commitment per booking and one approval row per request —
+            // a concurrent double confirm/approve fails here instead of
+            // reserving PAD twice.
+            e.HasIndex(t => t.BookingId).IsUnique()
+                .HasFilter("[Type] = 'Commit' AND [BookingId] IS NOT NULL")
+                .HasDatabaseName("IX_PadTransactions_BookingId_Commit");
+            e.HasIndex(t => t.AdditionalPadRequestId).IsUnique()
+                .HasFilter("[Type] = 'AdditionalApproved' AND [AdditionalPadRequestId] IS NOT NULL")
+                .HasDatabaseName("IX_PadTransactions_AdditionalPadRequestId_Approved");
         });
 
         builder.Entity<AdditionalPadRequest>(e =>
@@ -325,6 +334,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(r => r.Reference).HasMaxLength(200);
             e.HasOne(r => r.Project).WithMany()
                 .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(r => r.Booking).WithMany()
+                .HasForeignKey(r => r.BookingId).OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<AuditEntry>(e =>
@@ -339,6 +350,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
 
         builder.Entity<ProjectMonthClose>(e =>
         {
+            e.Property(c => c.ForcedReason).HasMaxLength(500);
             e.HasIndex(c => new { c.ProjectId, c.Year, c.Month }).IsUnique();
             e.HasOne(c => c.Project).WithMany()
                 .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Cascade);

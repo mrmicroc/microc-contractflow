@@ -18,6 +18,9 @@ public sealed class ContractFlowWebApplicationFactory : WebApplicationFactory<Pr
 {
     private readonly SqliteConnection _connection;
 
+    /// <summary>The API's clock — real time unless a test pins it.</summary>
+    public TestClock Clock { get; } = new();
+
     public ContractFlowWebApplicationFactory()
     {
         _connection = new SqliteConnection("Data Source=:memory:");
@@ -42,6 +45,10 @@ public sealed class ContractFlowWebApplicationFactory : WebApplicationFactory<Pr
             var storage = services.Where(d => d.ServiceType == typeof(IFileStorage)).ToList();
             foreach (var d in storage) services.Remove(d);
             services.AddSingleton<IFileStorage, InMemoryFileStorage>();
+
+            var clocks = services.Where(d => d.ServiceType == typeof(TimeProvider)).ToList();
+            foreach (var d in clocks) services.Remove(d);
+            services.AddSingleton<TimeProvider>(Clock);
         });
     }
 

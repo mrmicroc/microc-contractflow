@@ -62,6 +62,17 @@ public class CancellationMathTests
     }
 
     [Fact]
+    public void FullCharge_IsFlagged_RungChargeIsNot()
+    {
+        // Full = the whole booking is charged (late) → PAD contracts consume
+        // the whole commitment, never less than the 1.00 PAD minimum.
+        Assert.True(CancellationMath.Resolve(Ladder, 0, 4m, 4).Full);
+        Assert.True(CancellationMath.Resolve(null, 1, 4m, 4).Full);
+        Assert.False(CancellationMath.Resolve(Ladder, 1, 4m, 4).Full); // 8 h rung, explicit
+        Assert.False(CancellationMath.Resolve(null, 6, 4m, 4).Full);
+    }
+
+    [Fact]
     public void EmptyLadder_FallsBackToBinaryDeadline()
     {
         // Legacy behaviour: inside deadline → timely/free, else full charge.

@@ -34,6 +34,102 @@ public class PadMathTests
         Assert.Equal(expire, PadMath.Expiry(baseline, used, 20m));
     }
 
+    [Fact]
+    public void CarryOver_CarryInConsumedBeforeBaseline()
+    {
+        // §4.3: carry-over is consumed before baseline. Baseline 10 + carry-in 2,
+        // utilised 11 → carry covers 2, baseline 9 → 1 unused → carries 1
+        // (under the cap of 2), nothing expires.
+        Assert.Equal(9m, PadMath.BaselineUsed(10m, 11m, carryIn: 2m));
+        Assert.Equal(1m, PadMath.CarryOver(10m, 11m, 20m, carryIn: 2m));
+        Assert.Equal(0m, PadMath.Expiry(10m, 11m, 20m, carryIn: 2m));
+    }
+
+    [Fact]
+    public void CarryOver_BorrowedByPreviousMonth_ConsumesBaseline()
+    {
+        // 2 PAD lent to last month's overrun eat this month's baseline directly.
+        Assert.Equal(7m, PadMath.BaselineUsed(10m, 5m, borrowed: 2m));
+        Assert.Equal(2m, PadMath.CarryOver(10m, 5m, 20m, borrowed: 2m));
+        Assert.Equal(1m, PadMath.Expiry(10m, 5m, 20m, borrowed: 2m));
+    }
+
+    [Fact]
+    public void CommitAmount_RoundsToLedgerPrecision()
+        => Assert.Equal(1.1313m, PadMath.CommitAmount(9.05m, 8m, 1m)); // 1.13125 → 4 dp
+
+    [Fact]
+    public void CarryResiduals_UtilisationEatsCarryFirst()
+    {
+        // Month with baseline 10 + carry-in 2 (from the month before), 3 used:
+        // the carry is fully consumed, no residual survives to re-carry.
+        var txs = new[]
+        {
+            new PadTransaction { Year = 2027, Month = 2, Type = PadTransactionType.BaselineSet, Amount = 10m },
+            new PadTransaction { Year = 2027, Month = 2, Type = PadTransactionType.CarryOverIn, Amount = 2m,
+                OriginYear = 2027, OriginMonth = 1 },
+            new PadTransaction { Year = 2027, Month = 2, Type = PadTransactionType.Utilise, Amount = 3m },
+        };
+        Assert.Empty(PadMath.CarryResiduals(txs, 2027, 2));
+    }
+
+    // ── Continuation beyond commitment (§4.3 ①–④) ───────────────────────────
+
+    private static PadMonthSums Sums(decimal baseline = 0m, decimal additional = 0m,
+        decimal utilised = 0m, decimal borrowed = 0m) =>
+        new(baseline, 0m, additional, 0m, utilised, 0m, 0m, 0m, borrowed, 0m);
+
+    [Fact]
+    public void Overrun_Step1_UsesCurrentFreeFirst()
+    {
+        var split = PadMath.AllocateOverrun(0.5m, Sums(baseline: 5m, utilised: 2m), Sums(baseline: 5m), 0m);
+        Assert.Equal(0.5m, split.FromCurrentFree);
+        Assert.Equal(0m, split.FromAdditional + split.FromNextMonthBaseline + split.AutoAdditional);
+    }
+
+    [Fact]
+    public void Overrun_Step2_ThenApprovedAdditional()
+    {
+        // Own pool exhausted (baseline 2 fully used); 1 approved additional free.
+        var current = Sums(baseline: 2m, additional: 1m, utilised: 2m);
+        var split = PadMath.AllocateOverrun(0.75m, current, Sums(baseline: 5m), additionalAvailable: 1m);
+        Assert.Equal(0m, split.FromCurrentFree);
+        Assert.Equal(0.75m, split.FromAdditional);
+    }
+
+    [Fact]
+    public void Overrun_Step3_ThenNextMonthBaseline_FlagsConflict()
+    {
+        var current = Sums(baseline: 2m, utilised: 2m);
+        // Next month: baseline 1, already fully committed elsewhere → free 0.
+        var next = new PadMonthSums(1m, 0m, 0m, 1m, 0m, 0m, 0m, 0m, 0m, 0m);
+        var split = PadMath.AllocateOverrun(0.5m, current, next, 0m);
+        Assert.Equal(0.5m, split.FromNextMonthBaseline);
+        Assert.True(split.NextMonthConflict);
+    }
+
+    [Fact]
+    public void Overrun_Step4_RestBecomesAutoAdditional()
+    {
+        var current = Sums(baseline: 1m, utilised: 0.75m);
+        var split = PadMath.AllocateOverrun(1.5m, current, next: null, 0m); // next month closed
+        Assert.Equal(0.25m, split.FromCurrentFree);
+        Assert.Equal(0m, split.FromNextMonthBaseline);
+        Assert.Equal(1.25m, split.AutoAdditional);
+        Assert.Equal(1.5m, split.Total);
+    }
+
+    [Fact]
+    public void Free_BorrowNextMonth_ReducesLendingMonth()
+    {
+        var sums = PadMath.Sum([
+            Tx(PadTransactionType.BaselineSet, 5m),
+            Tx(PadTransactionType.BorrowNextMonth, 0.5m),
+        ]);
+        Assert.Equal(4.5m, sums.Free);
+        Assert.Equal(5m, sums.TotalAvailable);
+    }
+
     private static PadTransaction Tx(PadTransactionType type, decimal amount) =>
         new() { Type = type, Amount = amount };
 

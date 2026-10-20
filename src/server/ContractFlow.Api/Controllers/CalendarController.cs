@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using ContractFlow.Api.Data;
 using ContractFlow.Api.Models.Domain;
 using ContractFlow.Api.Services;
@@ -8,7 +10,7 @@ namespace ContractFlow.Api.Controllers;
 
 /// <summary>
 /// Personal .ics calendar feeds (design §3). The feed URL itself is the
-/// credential — an unguessable 128-bit token, standard for calendar
+/// credential — an unguessable 256-bit token, standard for calendar
 /// subscriptions — so the .ics endpoint intentionally allows anonymous access.
 /// The token management endpoints are role-guarded.
 /// </summary>
@@ -48,21 +50,20 @@ public class CalendarController(AppDbContext db, ICurrentUser currentUser) : Con
     }
 
     /// <summary>
-    /// The anonymous feed — token-gated. Terminal/cancelled bookings are
-    /// excluded; everything else appears as an all-day event.
+    /// The anonymous feed — token-gated. Only committed Booked Days appear
+    /// (confirmed → completed, §7.2); planning items and cancellations don't.
     /// </summary>
     [HttpGet("{resourceId:guid}/{token}.ics")]
     public async Task<IActionResult> Feed(Guid resourceId, string token, CancellationToken ct)
     {
         var resource = await db.Resources.FirstOrDefaultAsync(r => r.Id == resourceId, ct);
-        if (resource?.FeedToken is null || resource.FeedToken != token)
+        if (resource?.FeedToken is null || !TokenMatches(resource.FeedToken, token))
             return NotFound();
 
         var bookings = await db.Bookings
             .Include(b => b.Project)
-            .Where(b => b.ResourceId == resourceId
-                && b.Status != BookingStatus.Cancelled
-                && b.Status != BookingStatus.Rescheduled)
+            .Include(b => b.WorkPackage)
+            .Where(b => b.ResourceId == resourceId && IcsBuilder.FeedStatuses.Contains(b.Status))
             .OrderBy(b => b.Date)
             .ToListAsync(ct);
 
@@ -93,5 +94,14 @@ public class CalendarController(AppDbContext db, ICurrentUser currentUser) : Con
     private IActionResult ForbidResult() =>
         new ObjectResult(new { error = "Forbidden." }) { StatusCode = 403 };
 
-    private static string NewToken() => Guid.NewGuid().ToString("N");
+    /// <summary>256 random bits, hex — URL-safe and unguessable (a GUID
+    /// carries only 122 random bits).</summary>
+    private static string NewToken() =>
+        Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+
+    /// <summary>Constant-time comparison — response timing must not leak how
+    /// much of a guessed token was right.</summary>
+    private static bool TokenMatches(string expected, string actual) =>
+        CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(actual));
 }
