@@ -44,6 +44,19 @@ export function NumInput({ value, onChange, integerOnly, className, placeholder 
   );
 }
 
+/** Error / success banners shared by all pages. */
+export function ErrorBox({ message }: { message: string | null }) {
+  return message
+    ? <p className="mb-2 whitespace-pre-line rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{message}</p>
+    : null;
+}
+
+export function OkBox({ message }: { message: string | null }) {
+  return message
+    ? <p className="mb-2 rounded bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700">{message}</p>
+    : null;
+}
+
 export function Field({ label, help, children }: {
   label: string;
   help?: string;
@@ -189,6 +202,7 @@ export function Panel({ title, help, children, actions }: {
   children: ReactNode;
   actions?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const [helpOpen, setHelpOpen] = useState(false);
   return (
     <section className="rounded-lg border border-slate-200 bg-white">
@@ -199,7 +213,7 @@ export function Panel({ title, help, children, actions }: {
             <button
               type="button"
               title={help}
-              aria-label="Info"
+              aria-label={t('common.info')}
               onClick={() => setHelpOpen((v) => !v)}
               className="ml-2 inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-300 align-middle text-[10px] font-semibold text-slate-400 hover:border-blue-400 hover:text-blue-600"
             >?</button>

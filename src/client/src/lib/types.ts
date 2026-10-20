@@ -634,6 +634,8 @@ export interface ExpenseRequestBody {
   reimbursableToResource: boolean;
   rechargeableToCustomer: boolean;
   includedInRate: boolean;
+  /** Save despite a same-day/amount/currency look-alike (409 possibleDuplicate). */
+  confirmDuplicate?: boolean;
 }
 
 export interface AllowanceClaim {

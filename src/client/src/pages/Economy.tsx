@@ -1,25 +1,36 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  deleteInvoice, deleteStatement, deleteSupplierInvoice, errorMessage,
+  deleteInvoice, deleteStatement, deleteSupplierInvoice, describeError,
   generateInvoice, generateStatement,
   getInvoice, getInvoices, getMargins, getProjects, getResources, getStatement,
   getStatements, getSupplierInvoice, getSupplierInvoices,
   invoiceAction, matchSupplierInvoice, registerSupplierInvoice,
   statementAction, supplierInvoiceAction,
 } from '@/lib/api';
-import { useMe } from '@/lib/useMe';
+import { confirmAction } from '@/lib/confirm';
+import { localMonth, monthKey } from '@/lib/dates';
+import {
+  IRREVERSIBLE_STEPS, nextInvoiceStep, nextStatementStep, parseSupplierLines,
+  type InvoiceStep, type StatementStep,
+} from '@/lib/economy';
+import { canHandleMoney, useDevUserReload, useMe } from '@/lib/useMe';
+import { numOrNull } from '@/lib/versioned';
 import type {
   BillingLine, InvoiceDetail, InvoiceSpecification, InvoiceStatus, MarginRow,
   ProjectSummary, ResourceSummary, StatementDetail, StatementStatus,
   SubcontractorStatement, SupplierInvoice, SupplierInvoiceDetail, SupplierInvoiceStatus,
 } from '@/lib/types';
-import { btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls } from '@/components/forms';
+import {
+  btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, Panel, tdCls, thCls,
+} from '@/components/forms';
 import { cn } from '@/lib/utils';
 
-const currentMonth = () => new Date().toISOString().slice(0, 7);
+const currentMonth = () => { const m = localMonth(); return monthKey(m.year, m.month); };
 const money = (n: number, ccy: string) =>
   `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${ccy}`;
+const ymOf = (month: string) => ({ year: Number(month.slice(0, 4)), month: Number(month.slice(5)) });
+const validMonth = (month: string) => /^\d{4}-\d{2}$/.test(month);
 
 const invoiceStatusCls: Record<InvoiceStatus, string> = {
   draft: 'bg-slate-100 text-slate-600',
@@ -36,20 +47,31 @@ const statementStatusCls: Record<StatementStatus, string> = {
 
 /** Billing surface (design §2.2.7): customer invoice specifications on the
  * contract-rate side, subcontractor statements on the agreement-rate side —
- * generated from the same approved timesheets but never sharing a rate. */
+ * generated from the same approved timesheets but never sharing a rate.
+ * Subcontractor pay (statements, supplier invoices, margins) is Admin/Finance
+ * only; a resource sees just their own statements and invoices. */
 export function Economy() {
+  const { t } = useTranslation();
   const me = useMe();
-  const isResource = me?.role === 'Resource';
-  const canGenerate = me?.role === 'Administrator' || me?.role === 'Finance';
+  if (!me) return <div className="mx-auto max-w-5xl px-4 py-6 text-sm text-slate-400">{t('common.loading')}</div>;
+  const isResource = me.role === 'Resource';
+  const handlesMoney = canHandleMoney(me);
+  if (!isResource && !handlesMoney && me.role !== 'ProjectManager')
+    return <div className="mx-auto max-w-5xl px-4 py-6 text-sm text-slate-500">{t('common.noAccess')}</div>;
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
-      {!isResource && <InvoicePanel canGenerate={canGenerate} />}
-      <StatementPanel canGenerate={canGenerate} isResource={isResource ?? false} />
-      <SupplierInvoicePanel canGenerate={canGenerate} isResource={isResource ?? false} />
-      {!isResource && <MarginsPanel />}
+      {!isResource && <InvoicePanel canGenerate={handlesMoney} />}
+      {(handlesMoney || isResource) && <StatementPanel canGenerate={handlesMoney} isResource={isResource} />}
+      {(handlesMoney || isResource) && <SupplierInvoicePanel canGenerate={handlesMoney} isResource={isResource} />}
+      {handlesMoney && <MarginsPanel />}
     </div>
   );
+}
+
+/** Confirms irreversible workflow steps before running them. */
+function confirmStep(step: string, t: (k: string) => string): boolean {
+  return !IRREVERSIBLE_STEPS.has(step) || confirmAction(t(`economy.confirmStep.${step}`));
 }
 
 // ── Customer invoice specifications ─────────────────────────────────────────
@@ -59,38 +81,49 @@ function InvoicePanel({ canGenerate }: { canGenerate: boolean }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState('');
   const [month, setMonth] = useState(currentMonth());
-  const [rows, setRows] = useState<InvoiceSpecification[]>([]);
+  const [rows, setRows] = useState<InvoiceSpecification[] | null>(null);
   const [open, setOpen] = useState<InvoiceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { getProjects().then(setProjects).catch(() => {}); }, []);
-  const reload = useCallback(() => { getInvoices().then(setRows).catch(() => {}); }, []);
+  const reload = useCallback(() => {
+    getInvoices().then(setRows).catch((e) => { setRows([]); setError(describeError(e, t)); });
+  }, [t]);
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
+  useDevUserReload(reload);
+
+  // Re-fetch the open detail after an action so lines/status stay current.
+  const refreshOpen = async (id: string) => {
+    if (open?.invoice.id === id) setOpen(await getInvoice(id).catch(() => null));
+  };
 
   const generate = async () => {
     setError(null);
-    try {
-      await generateInvoice(projectId, Number(month.slice(0, 4)), Number(month.slice(5)));
-      reload();
-    } catch (e) { setError(errorMessage(e)); }
+    const { year, month: m } = ymOf(month);
+    try { await generateInvoice(projectId, year, m); reload(); }
+    catch (e) { setError(describeError(e, t)); }
   };
-  const act = async (id: string, action: 'review' | 'finalize' | 'issue' | 'pay') => {
+  const act = async (id: string, action: InvoiceStep) => {
+    if (!confirmStep(action, t)) return;
     setError(null);
-    try { await invoiceAction(id, action); reload(); }
-    catch (e) { setError(errorMessage(e)); }
+    try { await invoiceAction(id, action); reload(); await refreshOpen(id); }
+    catch (e) { setError(describeError(e, t)); }
+  };
+  const remove = async (id: string) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    setError(null);
+    try { await deleteInvoice(id); if (open?.invoice.id === id) setOpen(null); reload(); }
+    catch (e) { setError(describeError(e, t)); }
   };
   const toggle = async (s: InvoiceSpecification) => {
     if (open?.invoice.id === s.id) { setOpen(null); return; }
-    setOpen(await getInvoice(s.id).catch(() => null));
-  };
-
-  const next: Record<InvoiceStatus, 'review' | 'finalize' | 'issue' | 'pay' | null> = {
-    draft: 'review', customerReview: 'finalize', final: 'issue', issued: 'pay', paid: null,
+    try { setOpen(await getInvoice(s.id)); }
+    catch (e) { setError(describeError(e, t)); }
   };
 
   return (
     <Panel title={t('economy.invoices')} help={t('economy.invoicesHelp')}>
-      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+      <ErrorBox message={error} />
       {canGenerate && (
         <div className="mb-3 flex flex-wrap items-end gap-2">
           <Field label={t('economy.project')}>
@@ -102,7 +135,7 @@ function InvoicePanel({ canGenerate }: { canGenerate: boolean }) {
           <Field label={t('economy.month')}>
             <input className={inputCls} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </Field>
-          <button className={btnCls} disabled={!projectId} onClick={() => void generate()}>
+          <button className={btnCls} disabled={!projectId || !validMonth(month)} onClick={() => void generate()}>
             {t('economy.generate')}
           </button>
         </div>
@@ -119,17 +152,13 @@ function InvoicePanel({ canGenerate }: { canGenerate: boolean }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((s) => {
-            const expanded = open?.invoice.id === s.id;
-            const step = next[s.status];
-            return (
-              <InvoiceRow key={s.id} s={s} expanded={expanded} open={open}
-                step={step} canGenerate={canGenerate}
-                onToggle={toggle} onAct={act}
-                onDelete={(id) => void deleteInvoice(id).then(reload).catch((e) => setError(errorMessage(e)))} />
-            );
-          })}
-          {rows.length === 0 && <tr><td className={tdCls} colSpan={6}>{t('economy.none')}</td></tr>}
+          {(rows ?? []).map((s) => (
+            <InvoiceRow key={s.id} s={s} expanded={open?.invoice.id === s.id} open={open}
+              step={nextInvoiceStep(s.status)} canGenerate={canGenerate}
+              onToggle={toggle} onAct={act} onDelete={(id) => void remove(id)} />
+          ))}
+          {rows === null && <tr><td className={tdCls} colSpan={6}>{t('common.loading')}</td></tr>}
+          {rows?.length === 0 && <tr><td className={tdCls} colSpan={6}>{t('economy.none')}</td></tr>}
         </tbody>
       </table>
     </Panel>
@@ -138,10 +167,10 @@ function InvoicePanel({ canGenerate }: { canGenerate: boolean }) {
 
 function InvoiceRow({ s, expanded, open, step, canGenerate, onToggle, onAct, onDelete }: {
   s: InvoiceSpecification; expanded: boolean; open: InvoiceDetail | null;
-  step: 'review' | 'finalize' | 'issue' | 'pay' | null;
+  step: InvoiceStep | null;
   canGenerate: boolean;
   onToggle: (s: InvoiceSpecification) => void;
-  onAct: (id: string, a: 'review' | 'finalize' | 'issue' | 'pay') => void;
+  onAct: (id: string, a: InvoiceStep) => void;
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -149,7 +178,7 @@ function InvoiceRow({ s, expanded, open, step, canGenerate, onToggle, onAct, onD
     <>
       <tr className="border-b border-slate-100">
         <td className={tdCls}>{s.projectName}</td>
-        <td className={tdCls}>{s.year}-{String(s.month).padStart(2, '0')}</td>
+        <td className={tdCls}>{monthKey(s.year, s.month)}</td>
         <td className={tdCls}>
           <span className={cn('rounded px-2 py-0.5 text-xs', invoiceStatusCls[s.status])}>
             {t(`economy.invoiceStatus.${s.status}`)}
@@ -187,34 +216,48 @@ function StatementPanel({ canGenerate, isResource }: { canGenerate: boolean; isR
   const [resources, setResources] = useState<ResourceSummary[]>([]);
   const [resourceId, setResourceId] = useState('');
   const [month, setMonth] = useState(currentMonth());
-  const [rows, setRows] = useState<SubcontractorStatement[]>([]);
+  const [rows, setRows] = useState<SubcontractorStatement[] | null>(null);
   const [open, setOpen] = useState<StatementDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { if (!isResource) getResources().then(setResources).catch(() => {}); }, [isResource]);
-  const reload = useCallback(() => { getStatements().then(setRows).catch(() => {}); }, []);
+  const reload = useCallback(() => {
+    getStatements().then(setRows).catch((e) => { setRows([]); setError(describeError(e, t)); });
+  }, [t]);
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
+  useDevUserReload(reload);
 
+  const refreshOpen = async (id: string) => {
+    if (open?.statement.id === id) setOpen(await getStatement(id).catch(() => null));
+  };
   const generate = async () => {
     setError(null);
-    try {
-      await generateStatement(resourceId, Number(month.slice(0, 4)), Number(month.slice(5)));
-      reload();
-    } catch (e) { setError(errorMessage(e)); }
+    const { year, month: m } = ymOf(month);
+    try { await generateStatement(resourceId, year, m); reload(); }
+    catch (e) { setError(describeError(e, t)); }
   };
-  const act = async (id: string, action: 'finalize' | 'pay') => {
+  const act = async (id: string, action: StatementStep) => {
+    if (!confirmStep(action, t)) return;
     setError(null);
-    try { await statementAction(id, action); reload(); }
-    catch (e) { setError(errorMessage(e)); }
+    try { await statementAction(id, action); reload(); await refreshOpen(id); }
+    catch (e) { setError(describeError(e, t)); }
+  };
+  const remove = async (id: string) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    setError(null);
+    try { await deleteStatement(id); if (open?.statement.id === id) setOpen(null); reload(); }
+    catch (e) { setError(describeError(e, t)); }
   };
   const toggle = async (s: SubcontractorStatement) => {
     if (open?.statement.id === s.id) { setOpen(null); return; }
-    setOpen(await getStatement(s.id).catch(() => null));
+    try { setOpen(await getStatement(s.id)); }
+    catch (e) { setError(describeError(e, t)); }
   };
+  const cols = isResource ? 5 : 6;
 
   return (
     <Panel title={t('economy.statements')} help={t('economy.statementsHelp')}>
-      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+      <ErrorBox message={error} />
       {canGenerate && (
         <div className="mb-3 flex flex-wrap items-end gap-2">
           <Field label={t('economy.resource')}>
@@ -226,7 +269,7 @@ function StatementPanel({ canGenerate, isResource }: { canGenerate: boolean; isR
           <Field label={t('economy.month')}>
             <input className={inputCls} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </Field>
-          <button className={btnCls} disabled={!resourceId} onClick={() => void generate()}>
+          <button className={btnCls} disabled={!resourceId || !validMonth(month)} onClick={() => void generate()}>
             {t('economy.generate')}
           </button>
         </div>
@@ -243,19 +286,14 @@ function StatementPanel({ canGenerate, isResource }: { canGenerate: boolean; isR
           </tr>
         </thead>
         <tbody>
-          {rows.map((s) => {
-            const expanded = open?.statement.id === s.id;
-            const step: 'finalize' | 'pay' | null =
-              s.status === 'draft' ? 'finalize' : s.status === 'final' ? 'pay' : null;
-            return (
-              <StatementRow key={s.id} s={s} expanded={expanded} open={open}
-                step={step} canGenerate={canGenerate} isResource={isResource}
-                onToggle={toggle} onAct={act}
-                onDelete={(id) => void deleteStatement(id).then(reload).catch((e) => setError(errorMessage(e)))} />
-            );
-          })}
-          {rows.length === 0 && (
-            <tr><td className={tdCls} colSpan={isResource ? 5 : 6}>{t('economy.noneStatements')}</td></tr>
+          {(rows ?? []).map((s) => (
+            <StatementRow key={s.id} s={s} expanded={open?.statement.id === s.id} open={open}
+              step={nextStatementStep(s.status)} canGenerate={canGenerate} isResource={isResource}
+              onToggle={toggle} onAct={act} onDelete={(id) => void remove(id)} />
+          ))}
+          {rows === null && <tr><td className={tdCls} colSpan={cols}>{t('common.loading')}</td></tr>}
+          {rows?.length === 0 && (
+            <tr><td className={tdCls} colSpan={cols}>{t('economy.noneStatements')}</td></tr>
           )}
         </tbody>
       </table>
@@ -265,9 +303,9 @@ function StatementPanel({ canGenerate, isResource }: { canGenerate: boolean; isR
 
 function StatementRow({ s, expanded, open, step, canGenerate, isResource, onToggle, onAct, onDelete }: {
   s: SubcontractorStatement; expanded: boolean; open: StatementDetail | null;
-  step: 'finalize' | 'pay' | null; canGenerate: boolean; isResource: boolean;
+  step: StatementStep | null; canGenerate: boolean; isResource: boolean;
   onToggle: (s: SubcontractorStatement) => void;
-  onAct: (id: string, a: 'finalize' | 'pay') => void;
+  onAct: (id: string, a: StatementStep) => void;
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -275,7 +313,7 @@ function StatementRow({ s, expanded, open, step, canGenerate, isResource, onTogg
     <>
       <tr className="border-b border-slate-100">
         {!isResource && <td className={tdCls}>{s.resourceName}</td>}
-        <td className={tdCls}>{s.year}-{String(s.month).padStart(2, '0')}</td>
+        <td className={tdCls}>{monthKey(s.year, s.month)}</td>
         <td className={tdCls}>
           <span className={cn('rounded px-2 py-0.5 text-xs', statementStatusCls[s.status])}>
             {t(`economy.statementStatus.${s.status}`)}
@@ -322,10 +360,10 @@ function SupplierInvoicePanel({ canGenerate, isResource }: { canGenerate: boolea
   const { t } = useTranslation();
   const [resources, setResources] = useState<ResourceSummary[]>([]);
   const [statements, setStatements] = useState<SubcontractorStatement[]>([]);
-  const [rows, setRows] = useState<SupplierInvoice[]>([]);
+  const [rows, setRows] = useState<SupplierInvoice[] | null>(null);
   const [open, setOpen] = useState<SupplierInvoiceDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const empty = { resourceId: '', number: '', invoiceDate: '', totalAmount: '', linesText: '' };
+  const empty = { resourceId: '', number: '', invoiceDate: '', currency: 'SEK', totalAmount: '', linesText: '' };
   const [form, setForm] = useState(empty);
   const [formOpen, setFormOpen] = useState(false);
   const [matchFor, setMatchFor] = useState<string | null>(null);
@@ -334,39 +372,52 @@ function SupplierInvoicePanel({ canGenerate, isResource }: { canGenerate: boolea
     if (!isResource) getResources().then(setResources).catch(() => {});
   }, [isResource]);
   const reload = useCallback(() => {
-    getSupplierInvoices().then(setRows).catch(() => {});
-    getStatements({ status: 'final' }).then(setStatements).catch(() => {});
-  }, []);
+    getSupplierInvoices().then(setRows).catch((e) => { setRows([]); setError(describeError(e, t)); });
+    if (canGenerate) getStatements({ status: 'final' }).then(setStatements).catch(() => {});
+  }, [t, canGenerate]);
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
+  useDevUserReload(reload);
 
-  /** Parses "kind amount per line" — e.g. "hours 4800" — into register lines. */
-  const parseLines = (text: string) => text.split('\n')
-    .map((l) => l.trim()).filter(Boolean)
-    .map((l) => {
-      const [kind, amount, ...rest] = l.split(/\s+/);
-      return { kind, amount: Number(amount), description: rest.join(' ') || kind };
-    });
+  const total = numOrNull(form.totalAmount);
+  const parsed = parseSupplierLines(form.linesText);
 
   const register = async () => {
     setError(null);
+    if (!parsed.ok) {
+      setError(parsed.errors.map((er) => t(`economy.lineError.${er.reason}`, { line: er.line })).join('\n'));
+      return;
+    }
+    if (total === null) { setError(t('common.invalidNumbers', { fields: t('economy.total') })); return; }
     try {
       await registerSupplierInvoice({
-        resourceId: form.resourceId, number: form.number, invoiceDate: form.invoiceDate,
-        currency: 'SEK', totalAmount: Number(form.totalAmount),
-        lines: form.linesText.trim() ? parseLines(form.linesText) : undefined,
+        resourceId: form.resourceId, number: form.number.trim(), invoiceDate: form.invoiceDate,
+        currency: form.currency, totalAmount: total,
+        lines: parsed.lines.length ? parsed.lines : undefined,
       });
       setForm(empty); setFormOpen(false); reload();
-    } catch (e) { setError(errorMessage(e)); }
+    } catch (e) { setError(describeError(e, t)); }
   };
   const toggle = async (x: SupplierInvoice) => {
     if (open?.invoice.id === x.id) { setOpen(null); return; }
-    setOpen(await getSupplierInvoice(x.id).catch(() => null));
+    try { setOpen(await getSupplierInvoice(x.id)); }
+    catch (e) { setError(describeError(e, t)); }
   };
   const act = async (id: string, action: 'approve' | 'pay') => {
+    if (!confirmAction(t(`economy.confirmStep.${action === 'pay' ? 'pay' : 'approveSupplier'}`))) return;
     setError(null);
-    try { await supplierInvoiceAction(id, action); reload(); }
-    catch (e) { setError(errorMessage(e)); }
+    try {
+      await supplierInvoiceAction(id, action);
+      reload();
+      if (open?.invoice.id === id) setOpen(await getSupplierInvoice(id).catch(() => null));
+    } catch (e) { setError(describeError(e, t)); }
   };
+  const remove = async (id: string) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    setError(null);
+    try { await deleteSupplierInvoice(id); if (open?.invoice.id === id) setOpen(null); reload(); }
+    catch (e) { setError(describeError(e, t)); }
+  };
+  const cols = isResource ? 5 : 6;
 
   return (
     <Panel title={t('economy.supplierInvoices')}
@@ -376,11 +427,11 @@ function SupplierInvoicePanel({ canGenerate, isResource }: { canGenerate: boolea
           {t('economy.registerInvoice')}
         </button>
       )}>
-      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+      <ErrorBox message={error} />
 
       {formOpen && (
         <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Field label={t('economy.resource')}>
               <select className={inputCls} value={form.resourceId}
                 onChange={(e) => setForm({ ...form, resourceId: e.target.value })}>
@@ -396,19 +447,24 @@ function SupplierInvoicePanel({ canGenerate, isResource }: { canGenerate: boolea
               <input className={inputCls} type="date" value={form.invoiceDate}
                 onChange={(e) => setForm({ ...form, invoiceDate: e.target.value })} />
             </Field>
+            <Field label={t('common.currency')}>
+              <input className={inputCls} value={form.currency} maxLength={3}
+                onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />
+            </Field>
             <Field label={t('economy.total')}>
-              <input className={inputCls} type="number" min="0" step="0.01" value={form.totalAmount}
-                onChange={(e) => setForm({ ...form, totalAmount: e.target.value })} />
+              <NumInput className={inputCls} value={form.totalAmount}
+                onChange={(v) => setForm({ ...form, totalAmount: v })} />
             </Field>
           </div>
           <Field label={`${t('economy.lines')} (${t('economy.linesHint')})`}>
-            <textarea className={cn(inputCls, 'mt-1 h-20 font-mono text-xs')}
+            <textarea className={cn(inputCls, 'mt-1 h-20 font-mono text-xs', !parsed.ok && 'border-red-400')}
               placeholder={'hours 4800\nexpense 1200 Cable\nmileage 2500\ntravelTime 600\nallowance 350'}
               value={form.linesText} onChange={(e) => setForm({ ...form, linesText: e.target.value })} />
           </Field>
           <div className="mt-2 flex gap-2">
             <button className={btnCls}
-              disabled={!form.resourceId || !form.number || !form.invoiceDate || !form.totalAmount}
+              disabled={!form.resourceId || !form.number.trim() || !form.invoiceDate
+                || total === null || form.currency.length !== 3}
               onClick={() => void register()}>
               {t('common.save')}
             </button>
@@ -429,20 +485,21 @@ function SupplierInvoicePanel({ canGenerate, isResource }: { canGenerate: boolea
           </tr>
         </thead>
         <tbody>
-          {rows.map((x) => (
+          {(rows ?? []).map((x) => (
             <SupplierRow key={x.id} x={x} isResource={isResource} canGenerate={canGenerate}
               open={open} matchFor={matchFor} statements={statements}
               onToggle={toggle} onAct={act}
               onMatch={async (statementId) => {
                 setError(null);
                 try { setOpen(await matchSupplierInvoice(x.id, statementId)); setMatchFor(null); reload(); }
-                catch (e) { setError(errorMessage(e)); }
+                catch (e) { setError(describeError(e, t)); }
               }}
               onMatchToggle={() => setMatchFor(matchFor === x.id ? null : x.id)}
-              onDelete={(id) => void deleteSupplierInvoice(id).then(reload).catch((e) => setError(errorMessage(e)))} />
+              onDelete={(id) => void remove(id)} />
           ))}
-          {rows.length === 0 && (
-            <tr><td className={tdCls} colSpan={isResource ? 5 : 6}>{t('economy.noneSupplier')}</td></tr>
+          {rows === null && <tr><td className={tdCls} colSpan={cols}>{t('common.loading')}</td></tr>}
+          {rows?.length === 0 && (
+            <tr><td className={tdCls} colSpan={cols}>{t('economy.noneSupplier')}</td></tr>
           )}
         </tbody>
       </table>
@@ -462,8 +519,11 @@ function SupplierRow({ x, isResource, canGenerate, open, matchFor, statements,
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const [pick, setPick] = useState('');
   const expanded = open?.invoice.id === x.id;
   const matchable = x.status === 'registered' || x.status === 'discrepancy';
+  // Only same-resource, same-currency statements are valid match targets.
+  const candidates = statements.filter((s) => s.resourceId === x.resourceId && s.currency === x.currency);
   return (
     <>
       <tr className="border-b border-slate-100">
@@ -503,15 +563,20 @@ function SupplierRow({ x, isResource, canGenerate, open, matchFor, statements,
           <td colSpan={isResource ? 5 : 6} className="px-3 py-2">
             <div className="flex items-center gap-2 text-sm">
               <span>{t('economy.matchAgainst')}</span>
-              <select className={inputCls} defaultValue=""
-                onChange={(e) => e.target.value && onMatch(e.target.value)}>
+              <select className={cn(inputCls, 'w-64')} value={pick} onChange={(e) => setPick(e.target.value)}>
                 <option value="">—</option>
-                {statements.filter((s) => s.resourceId === x.resourceId).map((s) => (
+                {candidates.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.year}-{String(s.month).padStart(2, '0')} · {money(s.totalAmount, s.currency)}
+                    {monthKey(s.year, s.month)} · {money(s.totalAmount, s.currency)}
                   </option>
                 ))}
               </select>
+              <button className={btnCls} disabled={!pick} onClick={() => onMatch(pick)}>
+                {t('economy.match')}
+              </button>
+              {candidates.length === 0 && (
+                <span className="text-xs text-slate-500">{t('economy.noMatchCandidates')}</span>
+              )}
             </div>
           </td>
         </tr>
@@ -571,9 +636,11 @@ function MarginsPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
-    const [y, m] = month.split('-').map(Number);
-    getMargins(y, m).then(setRows).catch((e) => setError(errorMessage(e)));
-  }, [month]);
+    if (!validMonth(month)) return;
+    const { year, month: m } = ymOf(month);
+    setError(null);
+    getMargins(year, m).then(setRows).catch((e) => { setRows([]); setError(describeError(e, t)); });
+  }, [month, t]);
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
 
   return (
@@ -581,7 +648,7 @@ function MarginsPanel() {
       help={t('economy.marginsHelp')}
       actions={<input className={inputCls} type="month" value={month}
         onChange={(e) => setMonth(e.target.value)} />}>
-      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+      <ErrorBox message={error} />
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-slate-200">
@@ -598,10 +665,10 @@ function MarginsPanel() {
             <tr key={r.projectId} className="border-b border-slate-100">
               <td className={tdCls}>{r.projectName}</td>
               <td className={tdCls}>{r.customerName}</td>
-              <td className={cn(tdCls, 'text-right')}>{r.billed}</td>
-              <td className={cn(tdCls, 'text-right')}>{r.cost}</td>
+              <td className={cn(tdCls, 'text-right')}>{r.billed.toLocaleString()}</td>
+              <td className={cn(tdCls, 'text-right')}>{r.cost.toLocaleString()}</td>
               <td className={cn(tdCls, 'text-right font-medium',
-                r.margin < 0 ? 'text-red-600' : 'text-emerald-700')}>{r.margin}</td>
+                r.margin < 0 ? 'text-red-600' : 'text-emerald-700')}>{r.margin.toLocaleString()}</td>
               <td className={cn(tdCls, 'text-right')}>{r.marginPercent != null ? `${r.marginPercent}%` : '—'}</td>
             </tr>
           ))}
@@ -642,6 +709,7 @@ function LineTable({ lines, currency }: { lines: BillingLine[]; currency: string
             <td className={cn(tdCls, 'text-right')}>{money(l.amount, currency)}</td>
           </tr>
         ))}
+        {lines.length === 0 && <tr><td className={tdCls} colSpan={6}>—</td></tr>}
       </tbody>
     </table>
   );

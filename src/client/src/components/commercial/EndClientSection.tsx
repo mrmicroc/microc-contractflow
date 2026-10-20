@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   createEndClient, deleteEndClient, errorMessage, getEndClients, updateEndClient,
 } from '@/lib/api';
+import { confirmAction } from '@/lib/confirm';
 import { countryName } from '@/lib/countries';
 import type { EndClient } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -71,7 +72,7 @@ export function EndClientSection({ onChanged }: { onChanged?: () => void }) {
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try { await deleteEndClient(id); await reload(); onChanged?.(); }
     catch (e) { setError(errorMessage(e)); }

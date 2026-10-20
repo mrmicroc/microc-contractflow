@@ -4,6 +4,7 @@ import {
   closeMonth,
   createPadRequest,
   deletePadRequest,
+  describeError,
   getPadDashboard,
   getPadRequests,
   getProjects,
@@ -16,12 +17,13 @@ import type {
   AdditionalPadRequest, CloseMonthResult, PadDashboard, ProjectSummary,
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
+import { confirmAction } from '@/lib/confirm';
+import { localMonth, monthKey, shiftMonth as shiftYm } from '@/lib/dates';
+import { canManage as canManageRole, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, Panel, tdCls, thCls,
 } from '@/components/forms';
 
-const pad2 = (n: number) => String(n).padStart(2, '0');
 const fmt = (n: number) => n.toFixed(2).replace(/\.?0+$/, '');
 
 /** Selector for project + month; the data body remounts on change. */
@@ -30,20 +32,13 @@ export function MonthEnd() {
   const me = useMe();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState('');
-  const [ym, setYm] = useState(() => {
-    const d = new Date();
-    return { year: d.getFullYear(), month: d.getMonth() + 1 };
-  });
+  const [ym, setYm] = useState(() => localMonth());
 
   useEffect(() => {
     void getProjects().then(setProjects).catch(() => setProjects([]));
   }, []);
 
-  const shiftMonth = (d: number) =>
-    setYm(({ year, month }) => {
-      const next = new Date(year, month - 1 + d, 1);
-      return { year: next.getFullYear(), month: next.getMonth() + 1 };
-    });
+  const shiftMonth = (d: number) => setYm(({ year, month }) => shiftYm(year, month, d));
 
   if (me && !canSeeCommercial(me)) {
     return <div className="mx-auto max-w-6xl px-4 py-8"><p className="text-sm text-slate-500">{t('common.noAccess')}</p></div>;
@@ -61,7 +56,7 @@ export function MonthEnd() {
               {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <button className={btnSecondaryCls} onClick={() => shiftMonth(-1)}>←</button>
-            <span className="min-w-24 text-center text-sm font-medium">{ym.year}-{pad2(ym.month)}</span>
+            <span className="min-w-24 text-center text-sm font-medium">{monthKey(ym.year, ym.month)}</span>
             <button className={btnSecondaryCls} onClick={() => shiftMonth(1)}>→</button>
           </div>
         }
@@ -94,9 +89,10 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
-    getPadDashboard(projectId, year, month).then(setDash).catch(() => setDash(null));
+    getPadDashboard(projectId, year, month).then(setDash)
+      .catch((e) => { setDash(null); setError(describeError(e, t)); });
     getPadRequests(projectId, year, month).then(setRequests).catch(() => setRequests([]));
-  }, [projectId, year, month]);
+  }, [projectId, year, month, t]);
   useEffect(() => { void reload(); }, [reload]);
 
   const saveBaseline = async () => {
@@ -110,15 +106,18 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
       setBaselineAmt('');
       setBaselineNote('');
       reload();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(describeError(e, t)); }
   };
 
   const doClose = async () => {
+    // Closing releases open commitments, writes carry-over/expiry and locks
+    // the month — never one click away from an accident.
+    if (!confirmAction(t('monthEnd.confirmClose', { month: monthKey(year, month) }))) return;
     setError(null);
     try {
       setCloseResult(await closeMonth(projectId, year, month));
       reload();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(describeError(e, t)); }
   };
 
   const saveRequest = async () => {
@@ -135,23 +134,24 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
       setReqForm({ quantity: '', reason: '', reference: '' });
       setReqOpen(false);
       reload();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(describeError(e, t)); }
   };
 
   const actOnRequest = async (id: string, action: 'approve' | 'reject' | 'withdraw') => {
+    if (action !== 'approve' && !confirmAction(t(`monthEnd.confirm.${action}`))) return;
     setError(null);
     try { await padRequestAction(id, action); reload(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(describeError(e, t)); }
   };
 
   const removeRequest = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try { await deletePadRequest(id); reload(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(describeError(e, t)); }
   };
 
-  const canManage = me !== null && ['Administrator', 'ProjectManager'].includes(me.role);
+  const canManage = canManageRole(me);
 
   const cards: [string, number, string?][] = dash ? [
     ['baseline', dash.baseline, 'text-slate-800'],
@@ -164,11 +164,18 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
     ['expired', dash.expired, 'text-slate-500'],
     ['carryOverOut', dash.carryOverOut, 'text-slate-500'],
   ] : [];
+  // Secondary ledger categories — shown when non-zero so every number in the
+  // ledger is reconcilable from the dashboard (§4.2).
+  const minorCards: [string, number][] = dash ? ([
+    ['released', dash.released],
+    ['borrowedFromThisMonth', dash.borrowedFromThisMonth],
+    ['adjustments', dash.adjustments],
+  ] as [string, number][]).filter(([, v]) => v !== 0) : [];
 
   return (
     <>
-      <Panel title={`${dash?.projectName ?? ''} ${year}-${pad2(month)}`} help={t('monthEnd.dashHelp')}>
-        {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+      <Panel title={`${dash?.projectName ?? ''} ${monthKey(year, month)}`} help={t('monthEnd.dashHelp')}>
+        <ErrorBox message={error} />
         {dash && (
           <>
             {dash.closed && (
@@ -186,7 +193,23 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                 </div>
               ))}
             </div>
+            {minorCards.length > 0 && (
+              <p className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                {minorCards.map(([key, value]) => (
+                  <span key={key}>{t(`monthEnd.${key}`)}: <span className="font-medium text-slate-700">{fmt(value)}</span></span>
+                ))}
+              </p>
+            )}
           </>
+        )}
+        {closeResult && (
+          <p className="mt-2 rounded bg-green-50 px-3 py-1.5 text-sm text-green-800">
+            {t('monthEnd.closeResult', {
+              carried: fmt(closeResult.carryOverOut),
+              expired: fmt(closeResult.expired),
+              next: monthKey(closeResult.nextYear, closeResult.nextMonth),
+            })}
+          </p>
         )}
       </Panel>
 
@@ -204,19 +227,18 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
             <button className={btnCls} disabled={!baselineAmt.trim()} onClick={() => void saveBaseline()}>
               {t('common.save')}
             </button>
+          </div>
+        </Panel>
+      )}
+
+      {dash && isAdmin(me) && !dash.closed && (
+        <Panel title={t('monthEnd.closeMonth')} help={t('monthEnd.closeHelp')}>
+          <div className="flex flex-wrap items-center gap-3">
             <button className={btnDangerCls} onClick={() => void doClose()}>
               {t('monthEnd.closeMonth')}
             </button>
+            <span className="text-xs text-slate-500">{t('monthEnd.closeWarning')}</span>
           </div>
-          {closeResult && (
-            <p className="mt-2 rounded bg-green-50 px-3 py-1.5 text-sm text-green-800">
-              {t('monthEnd.closeResult', {
-                carried: fmt(closeResult.carryOverOut),
-                expired: fmt(closeResult.expired),
-                next: `${closeResult.nextYear}-${pad2(closeResult.nextMonth)}`,
-              })}
-            </p>
-          )}
         </Panel>
       )}
 
@@ -323,8 +345,13 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                   <td className={cn(tdCls, 'text-right', tx.amount < 0 && 'text-red-600')}>
                     {fmt(tx.amount)}
                   </td>
-                  <td className={tdCls}>{tx.note ?? '—'}</td>
-                  <td className={tdCls}>{tx.createdUtc.slice(0, 16).replace('T', ' ')}</td>
+                  <td className={tdCls}>
+                    {tx.note ?? '—'}
+                    {tx.bookingId && (
+                      <span className="ml-1 text-xs text-slate-400">· {t('monthEnd.fromBooking')}</span>
+                    )}
+                  </td>
+                  <td className={tdCls}>{new Date(tx.createdUtc).toLocaleString()}</td>
                 </tr>
               ))}
               {dash.transactions.length === 0 && (

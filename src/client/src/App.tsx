@@ -12,22 +12,12 @@ import { Plan } from '@/pages/Plan';
 import { Projects } from '@/pages/Projects';
 import { Resources } from '@/pages/Resources';
 import { cn } from '@/lib/utils';
-
-const NAV_ITEMS: { to: string; key: string }[] = [
-  { to: '/', key: 'nav.dashboard' },
-  { to: '/plan', key: 'nav.plan' },
-  { to: '/projects', key: 'nav.projects' },
-  { to: '/resources', key: 'nav.resources' },
-  { to: '/my', key: 'nav.myWork' },
-  { to: '/approvals', key: 'nav.approvals' },
-  { to: '/month-end', key: 'nav.monthEnd' },
-  { to: '/economy', key: 'nav.economy' },
-  { to: '/reports', key: 'nav.reports' },
-  { to: '/settings', key: 'nav.settings' },
-];
+import { NAV_ITEMS, visibleNav } from '@/lib/roles';
+import { useMe } from '@/lib/useMe';
 
 export default function App() {
   const { t } = useTranslation();
+  const me = useMe();
 
   return (
     <BrowserRouter>
@@ -39,7 +29,7 @@ export default function App() {
               <p className="text-[11px] leading-tight text-slate-400">{t('appTagline')}</p>
             </div>
             <nav className="flex flex-wrap items-center gap-1">
-              {NAV_ITEMS.map((item) => (
+              {visibleNav(me?.role).map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}

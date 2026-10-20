@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { deleteDocument, documentBlob, errorMessage, getDocuments, uploadDocument } from '@/lib/api';
+import { confirmAction } from '@/lib/confirm';
 import type { DocumentAttachment, DocumentOwnerType } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -28,11 +29,22 @@ export function Attachments({ ownerType, ownerId, canWrite }: {
   };
 
   const download = async (d: DocumentAttachment) => {
-    const blob = await documentBlob(d.id);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = d.fileName; a.click();
-    URL.revokeObjectURL(url);
+    setError(null);
+    try {
+      const blob = await documentBlob(d.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = d.fileName; a.click();
+      // Revoking synchronously can cancel the download in some browsers.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) { setError(errorMessage(e)); }
+  };
+
+  const remove = async (d: DocumentAttachment) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    setError(null);
+    try { await deleteDocument(d.id); reload(); }
+    catch (e) { setError(errorMessage(e)); }
   };
 
   return (
@@ -45,8 +57,7 @@ export function Attachments({ ownerType, ownerId, canWrite }: {
           </button>
           <span className="text-slate-400">{kb(d.sizeBytes)}</span>
           {canWrite && (
-            <button className="text-red-600"
-              onClick={() => void deleteDocument(d.id).then(reload).catch((e) => setError(errorMessage(e)))}>
+            <button className="text-red-600" onClick={() => void remove(d)}>
               {t('common.delete')}
             </button>
           )}

@@ -107,6 +107,7 @@ export function Projects() {
         <ProjectDetail
           key={projectId}
           projectId={projectId}
+          onChanged={() => setContractKey((k) => k + 1)}
           onDeleted={() => {
             setProjectId(null);
             setContractKey((k) => k + 1); // remount → contract refetches its project list

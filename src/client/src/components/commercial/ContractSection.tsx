@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   createContract, deleteContract, errorMessage, getContract, updateContract,
 } from '@/lib/api';
+import { confirmAction } from '@/lib/confirm';
 import type { ContractSummary, CustomerDetail, EndClient } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
@@ -45,7 +46,10 @@ export function ContractSection({
   };
 
   const openEdit = async (id: string) => {
-    const c = await getContract(id);
+    setError(null);
+    let c;
+    try { c = await getContract(id); }
+    catch (e) { setError(errorMessage(e)); return; }
     setEditId(id);
     setF({
       name: c.name,
@@ -68,14 +72,20 @@ export function ContractSection({
       endDate: f.endDate || null,
       isActive: f.isActive,
     };
-    if (editId) await updateContract(editId, body);
-    else await createContract(body);
+    setError(null);
+    try {
+      if (editId) await updateContract(editId, body);
+      else await createContract(body);
+    } catch (e) {
+      setError(errorMessage(e));
+      return;
+    }
     setFormOpen(false);
     onChanged();
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try {
       await deleteContract(id);

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   createCustomer, deleteCustomer, errorMessage, getCustomer, getCustomers, updateCustomer,
 } from '@/lib/api';
+import { confirmAction } from '@/lib/confirm';
 import { countryName } from '@/lib/countries';
 import type { ContactPerson, CustomerSummary } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -61,7 +62,10 @@ export function CustomerSection({
   };
 
   const openEdit = async (id: string) => {
-    const c = await getCustomer(id);
+    setError(null);
+    let c;
+    try { c = await getCustomer(id); }
+    catch (e) { setError(errorMessage(e)); return; }
     setEditId(id);
     setF({
       name: c.name,
@@ -103,14 +107,20 @@ export function CustomerSection({
       notes: f.notes.trim() || null,
       isActive: f.isActive,
     };
-    if (editId) await updateCustomer(editId, body);
-    else await createCustomer(body);
+    setError(null);
+    try {
+      if (editId) await updateCustomer(editId, body);
+      else await createCustomer(body);
+    } catch (e) {
+      setError(errorMessage(e));
+      return;
+    }
     setFormOpen(false);
     await reload();
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try {
       await deleteCustomer(id);

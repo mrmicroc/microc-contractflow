@@ -97,16 +97,9 @@ async function apiUpload<T>(path: string, file: File, label?: string): Promise<T
   return (await res.json()) as T;
 }
 
-/** Extracts a readable message from an API error body ({error, message}). */
-export function errorMessage(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  try {
-    const parsed = JSON.parse(raw) as { message?: string; error?: string };
-    return parsed.message ?? parsed.error ?? raw;
-  } catch {
-    return raw;
-  }
-}
+// Error parsing lives in lib/errors (pure, tested); re-exported here so
+// pages keep importing from one place.
+export { describeError, errorCode, errorMessage } from './errors';
 
 export interface UserDto {
   id: string;
@@ -248,11 +241,26 @@ export const getBookings = (q: { from?: string; to?: string; projectId?: string;
 export const createBooking = (b: BookingRequestBody) => apiPost<Booking>('/api/bookings', b);
 export const updateBooking = (id: string, b: Partial<BookingRequestBody>) =>
   apiPut<Booking>(`/api/bookings/${id}`, b);
+export const getBooking = (id: string) => apiGet<Booking>(`/api/bookings/${id}`);
+/** Result of a booking action — cancel carries the PAD consequence. */
+export interface BookingActionResult {
+  booking?: Booking;
+  padEffect?: string | null;
+  padAmount?: number | null;
+  insufficientPad?: boolean;
+}
 export const bookingAction = (id: string, action: 'confirm' | 'acknowledge' | 'start' | 'complete' | 'cancel') =>
-  apiPost<unknown>(`/api/bookings/${id}/${action}`, {});
+  apiPost<BookingActionResult | Booking>(`/api/bookings/${id}/${action}`, {});
+export interface RescheduleResult {
+  original: Booking;
+  replacement: Booking;
+  replacementConfirmed: boolean;
+  insufficientPad?: boolean;
+  padEffect: string | null;
+  padAmount?: number | null;
+}
 export const rescheduleBooking = (id: string, date: string, plannedHours?: number) =>
-  apiPost<{ original: Booking; replacement: Booking; replacementConfirmed: boolean; padEffect: string }>(
-    `/api/bookings/${id}/reschedule`, { date, plannedHours });
+  apiPost<RescheduleResult>(`/api/bookings/${id}/reschedule`, { date, plannedHours });
 export const deleteBooking = (id: string) => apiDelete(`/api/bookings/${id}`);
 
 // ── PAD ─────────────────────────────────────────────────────────────────────
@@ -359,6 +367,8 @@ export const getAllowances = (q: { from?: string; to?: string; resourceId?: stri
   return apiGet<AllowanceClaim[]>(`/api/allowances${s ? `?${s}` : ''}`);
 };
 export const createAllowance = (b: AllowanceRequestBody) => apiPost<AllowanceClaim>('/api/allowances', b);
+export const updateAllowance = (id: string, b: AllowanceRequestBody) =>
+  apiPut<AllowanceClaim>(`/api/allowances/${id}`, b);
 export const deleteAllowance = (id: string) => apiDelete(`/api/allowances/${id}`);
 
 export const getMobilisations = (q: { projectId?: string; resourceId?: string }) => {
