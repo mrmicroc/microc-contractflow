@@ -3,24 +3,30 @@ import { useTranslation } from 'react-i18next';
 import {
   createAllowance, createExpense, createTimeEntry, createTravelRecord,
   deleteAllowance, deleteExpense, deleteTimeEntry, deleteTravelRecord,
-  getAllowances, getExpenses, getMyProjects, getProjectWorkPackages,
+  describeError, getAllowances, getExpenses, getMyProjects, getProjectWorkPackages,
   getTimeEntries, getTimesheets, getTravelRecords,
-  submitTimesheet, updateExpense, updateTimeEntry, updateTravelRecord,
+  submitTimesheet, updateAllowance, updateExpense, updateTimeEntry, updateTravelRecord,
 } from '@/lib/api';
+import { addDays as shiftIso, matchBooking } from '@/lib/bookings';
+import { confirmAction } from '@/lib/confirm';
+import { localTodayIso as today } from '@/lib/dates';
+import { expenseRuleErrors, saveExpenseConfirmingDuplicates } from '@/lib/expenses';
 import { isoWeekDates, isoWeekLabel, isoWeekMonday, isoWeekOf } from '@/lib/timekeeping';
+import { weekSheetState } from '@/lib/timesheets';
+import { useDevUserReload } from '@/lib/useMe';
+import { useFlash } from '@/lib/useFlash';
+import { invalidNumericFields } from '@/lib/validation';
+import { numOrNull } from '@/lib/versioned';
 import type {
   AllowanceClaim, Booking, EntryBilling, Expense, ProjectSummary, TimeEntry,
   Timesheet, TravelRecord, WorkPackage,
 } from '@/lib/types';
-import { btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, Panel, tdCls, thCls } from '@/components/forms';
+import {
+  btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, OkBox, Panel,
+  tdCls, thCls,
+} from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
 import { cn } from '@/lib/utils';
-
-const today = () => new Date().toISOString().slice(0, 10);
-const addDaysIso = (iso: string, n: number) =>
-  new Date(`${iso}T00:00:00Z`).getTime() + n * 86_400_000;
-const shiftIso = (iso: string, n: number) =>
-  new Date(addDaysIso(iso, n)).toISOString().slice(0, 10);
 
 /**
  * The resource's reporting week — time entries, travel, expenses and per-diem
@@ -36,7 +42,7 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
   const [sheets, setSheets] = useState<Timesheet[]>([]);
   const [myProjects, setMyProjects] = useState<ProjectSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useFlash();
 
   const monday = isoWeekMonday(anchor);
   const sunday = shiftIso(monday, 6);
@@ -44,16 +50,21 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
   const days = isoWeekDates(year, week);
   const range = { from: monday, to: sunday };
 
+  const fail = useCallback((e: unknown) => setError(describeError(e, t)), [t]);
+
   const reload = useCallback(() => {
     const r = { from: isoWeekMonday(anchor), to: shiftIso(isoWeekMonday(anchor), 6) };
-    getTimeEntries(r).then(setEntries).catch(() => {});
-    getTravelRecords(r).then(setTravel).catch(() => {});
-    getExpenses(r).then(setExpenses).catch(() => {});
-    getAllowances(r).then(setAllowances).catch(() => {});
-    getTimesheets().then(setSheets).catch(() => {});
-    getMyProjects().then(setMyProjects).catch(() => {});
-  }, [anchor]);
+    Promise.all([
+      getTimeEntries(r).then(setEntries),
+      getTravelRecords(r).then(setTravel),
+      getExpenses(r).then(setExpenses),
+      getAllowances(r).then(setAllowances),
+      getTimesheets().then(setSheets),
+      getMyProjects().then(setMyProjects),
+    ]).catch(fail);
+  }, [anchor, fail]);
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
+  useDevUserReload(reload);
 
   // Projects the resource may report on: access list ∪ active bookings
   // (/api/projects/mine), plus anything already used on a row this week.
@@ -65,15 +76,9 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [myProjects, bookings, entries]);
 
-  const weekSheet = sheets.find((s) => s.year === year && s.isoWeek === week
-    && s.status !== 'returned' && s.status !== 'rejected');
-  const locked = weekSheet?.status === 'submitted' || weekSheet?.status === 'approved';
-  const draftCount = entries.filter((e) => !e.timesheetId).length
-    + travel.filter((x) => !x.timesheetId).length
-    + expenses.filter((x) => !x.timesheetId).length
-    + allowances.filter((x) => !x.timesheetId).length;
+  const state = weekSheetState(sheets, year, week, [...entries, ...travel, ...expenses, ...allowances]);
+  const { sheet: weekSheet, locked, draftCount } = state;
 
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const submit = async () => {
     setError(null);
     try {
@@ -82,6 +87,8 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
       reload();
     } catch (e) { fail(e); }
   };
+
+  const sectionProps = { days, range, projectOptions, locked, onChanged: reload, onError: fail };
 
   return (
     <Panel
@@ -101,34 +108,32 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
         </span>
       }
     >
-      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
-      {banner && <p className="mb-2 rounded bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700">{banner}</p>}
+      <ErrorBox message={error} />
+      <OkBox message={banner} />
       {weekSheet && (
-        <p className={cn('mb-2 rounded px-3 py-1.5 text-sm',
-          weekSheet.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>
-          {t(`myWork.timesheetStatus.${weekSheet.status}`)}
-        </p>
+        <div className={cn('mb-2 rounded px-3 py-1.5 text-sm',
+          weekSheet.status === 'approved' ? 'bg-emerald-50 text-emerald-700'
+          : state.needsResubmit ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700')}>
+          <p>{t(`myWork.timesheetStatus.${weekSheet.status}`)}</p>
+          {state.needsResubmit && (
+            <p className="mt-0.5 text-xs">
+              {state.returnNote
+                ? t('myWork.reviewerNote', { note: state.returnNote })
+                : t('myWork.returnedNoNote')}
+              {' '}{t('myWork.fixAndResubmit')}
+            </p>
+          )}
+        </div>
       )}
 
-      <TimeSection key={`t-${range.from}`}
-        days={days} range={range} projectOptions={projectOptions}
-        entries={entries} locked={locked ?? false} onChanged={reload} onError={fail} />
-
-      <TravelSection key={`r-${range.from}`}
-        days={days} range={range} projectOptions={projectOptions}
-        rows={travel} locked={locked ?? false} onChanged={reload} onError={fail} />
-
-      <ExpenseSection key={`e-${range.from}`}
-        days={days} range={range} projectOptions={projectOptions}
-        rows={expenses} locked={locked ?? false} onChanged={reload} onError={fail} />
-
-      <AllowanceSection key={`a-${range.from}`}
-        days={days} range={range} projectOptions={projectOptions}
-        rows={allowances} locked={locked ?? false} onChanged={reload} onError={fail} />
+      <TimeSection key={`t-${range.from}`} {...sectionProps} entries={entries} bookings={bookings} />
+      <TravelSection key={`r-${range.from}`} {...sectionProps} rows={travel} />
+      <ExpenseSection key={`e-${range.from}`} {...sectionProps} rows={expenses} />
+      <AllowanceSection key={`a-${range.from}`} {...sectionProps} rows={allowances} />
 
       <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-3">
         <button className={btnCls} disabled={locked || draftCount === 0} onClick={() => void submit()}>
-          {t('myWork.submitWeek')}
+          {state.needsResubmit ? t('myWork.resubmitWeek') : t('myWork.submitWeek')}
         </button>
         <span className="text-xs text-slate-500">{t('myWork.draftRowsNote')}</span>
       </div>
@@ -138,9 +143,10 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
           <h3 className="mb-1 text-xs font-semibold text-slate-500">{t('myWork.sheets')}</h3>
           <div className="flex flex-wrap gap-2">
             {sheets.slice(0, 12).map((s) => (
-              <span key={s.id} className={cn('rounded px-2 py-1 text-xs',
+              <span key={s.id} title={s.reviewerNote ?? undefined} className={cn('rounded px-2 py-1 text-xs',
                 s.status === 'approved' ? 'bg-emerald-50 text-emerald-700'
                 : s.status === 'submitted' ? 'bg-amber-50 text-amber-700'
+                : s.status === 'returned' || s.status === 'rejected' ? 'bg-red-50 text-red-700'
                 : 'bg-slate-100 text-slate-600')}>
                 {isoWeekLabel(s.year, s.isoWeek)} · {t(`myWork.timesheetStatus.${s.status}`)}
               </span>
@@ -184,10 +190,19 @@ function ProjectPicker({ options, value, onChange, label }: {
   );
 }
 
+/** Delete after a translated confirmation. */
+function useConfirmDelete(onChanged: () => void, onError: (e: unknown) => void) {
+  const { t } = useTranslation();
+  return (del: () => Promise<void>) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    void del().then(onChanged).catch(onError);
+  };
+}
+
 // ── Time entries ────────────────────────────────────────────────────────────
 
-function TimeSection({ days, range, projectOptions, entries, locked, onChanged, onError }:
-  SectionProps & { entries: TimeEntry[] }) {
+function TimeSection({ days, range, projectOptions, entries, bookings, locked, onChanged, onError }:
+  SectionProps & { entries: TimeEntry[]; bookings: Booking[] }) {
   const { t } = useTranslation();
   const empty = {
     date: range.from, projectId: '', workPackageId: '', category: 'work', hours: '',
@@ -195,6 +210,7 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
   };
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState<string | null>(null);
+  const confirmDelete = useConfirmDelete(onChanged, onError);
   // Work packages per project — the row-level package picker only appears
   // when the picked project actually has packages to target.
   const [pkgMap, setPkgMap] = useState<Record<string, WorkPackage[]>>({});
@@ -209,13 +225,26 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
     return () => { live = false; };
   }, [form.projectId]);
 
+  // A committed booking on that day + project links the row (booked rows
+  // inherit the booking's package, so an explicit package means unbooked).
+  const booking = form.projectId && !form.workPackageId
+    ? matchBooking(bookings, form.date, form.projectId)
+    : null;
+  const hours = numOrNull(form.hours);
+
   const save = async () => {
+    const bad = invalidNumericFields({ [t('myWork.hours')]: form.hours });
+    if (bad.length || hours === null || hours <= 0 || hours > 24) {
+      onError(new Error(t('common.invalidNumbers', { fields: t('myWork.hours') })));
+      return;
+    }
     try {
       const body = {
         projectId: form.projectId, workPackageId: form.workPackageId || null,
+        bookingId: booking?.id ?? null,
         date: form.date,
         category: form.category as TimeEntry['category'],
-        actualHours: Number(form.hours), billing: form.billing,
+        actualHours: hours, billing: form.billing,
         description: form.description || null,
       };
       if (editId) await updateTimeEntry(editId, body);
@@ -244,7 +273,6 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
             <th className={thCls}>{t('myWork.hours')}</th>
             <th className={thCls}>{t('myWork.billing')}</th>
             <th className={thCls}>{t('myWork.payableHours')}</th>
-            <th className={thCls}>{t('myWork.billableHours')}</th>
             <th className={thCls}>{t('myWork.description')}</th>
             <th className={thCls}></th>
           </tr>
@@ -258,22 +286,24 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
                 {e.workPackageName && (
                   <span className="block text-xs text-slate-500">{e.workPackageName}</span>
                 )}
+                {e.bookingId && (
+                  <span className="block text-xs text-blue-600">{t('myWork.linkedToBooking')}</span>
+                )}
               </td>
               <td className={tdCls}>{t(`myWork.category${e.category[0].toUpperCase()}${e.category.slice(1)}`)}</td>
-              <td className={tdCls}>{e.actualHours}</td>
+              <td className={tdCls}>{t('common.hoursValue', { value: e.actualHours })}</td>
               <td className={cn(tdCls, 'text-xs',
                 e.billing === 'hours' ? 'text-amber-700' : 'text-slate-500')}>
                 {t(`myWork.billingMode.${e.billing}`)}
               </td>
               <td className={tdCls}>{e.payableHours ?? '—'}</td>
-              <td className={tdCls}>{e.billableHours ?? '—'}</td>
               <td className={cn(tdCls, 'text-slate-500')}>{e.description}</td>
               <td className={tdCls}>
                 {!e.timesheetId && (
                   <span className="flex gap-1">
                     <button className={btnSecondaryCls} onClick={() => startEdit(e)}>{t('common.edit')}</button>
                     <button className={btnDangerCls}
-                      onClick={() => void deleteTimeEntry(e.id).then(onChanged).catch(onError)}>
+                      onClick={() => confirmDelete(() => deleteTimeEntry(e.id))}>
                       {t('common.delete')}
                     </button>
                   </span>
@@ -282,7 +312,7 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
             </tr>
           ))}
           {entries.length === 0 && (
-            <tr><td className={tdCls} colSpan={9}>{t('myWork.noRows')}</td></tr>
+            <tr><td className={tdCls} colSpan={8}>{t('myWork.noRows')}</td></tr>
           )}
         </tbody>
       </table>
@@ -313,8 +343,8 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
             </select>
           </Field>
           <Field label={t('myWork.hours')}>
-            <input className={cn(inputCls, 'w-20')} type="number" min="0.25" max="24" step="0.25"
-              value={form.hours} onChange={(e) => setForm({ ...form, hours: e.target.value })} />
+            <NumInput className={cn(inputCls, 'w-20')} value={form.hours}
+              onChange={(v) => setForm({ ...form, hours: v })} />
           </Field>
           <Field label={t('myWork.billing')} help={t('myWork.billingHelp')}>
             <select className={selectCls} value={form.billing}
@@ -328,10 +358,20 @@ function TimeSection({ days, range, projectOptions, entries, locked, onChanged, 
             <input className={inputCls} value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </Field>
-          <button className={btnSecondaryCls} disabled={!form.projectId || !form.hours}
+          <button className={btnSecondaryCls} disabled={!form.projectId || hours === null}
             onClick={() => void save()}>
             {editId ? t('common.save') : t('myWork.addEntry')}
           </button>
+          {editId && (
+            <button className={btnSecondaryCls} onClick={() => { setForm(empty); setEditId(null); }}>
+              {t('common.cancel')}
+            </button>
+          )}
+          {booking && (
+            <span className="text-xs text-blue-600">
+              {t('myWork.willLinkBooking', { status: t(`booking.status.${booking.status}`) })}
+            </span>
+          )}
         </div>
       )}
     </section>
@@ -349,15 +389,24 @@ function TravelSection({ days, range, projectOptions, rows, locked, onChanged, o
   };
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState<string | null>(null);
+  const confirmDelete = useConfirmDelete(onChanged, onError);
 
   const save = async () => {
+    const bad = invalidNumericFields({
+      [t('myWork.distanceKm')]: form.distanceKm,
+      [t('myWork.travelHours')]: form.durationHours,
+    });
+    if (bad.length) {
+      onError(new Error(t('common.invalidNumbers', { fields: bad.join(', ') })));
+      return;
+    }
     try {
       const body = {
         projectId: form.projectId || null, date: form.date,
         fromPlace: form.fromPlace || null, toPlace: form.toPlace || null,
         mode: form.mode as TravelRecord['mode'],
-        distanceKm: form.distanceKm ? Number(form.distanceKm) : null,
-        durationHours: form.durationHours ? Number(form.durationHours) : null,
+        distanceKm: numOrNull(form.distanceKm),
+        durationHours: numOrNull(form.durationHours),
         notes: form.notes || null,
       };
       if (editId) await updateTravelRecord(editId, body);
@@ -403,7 +452,7 @@ function TravelSection({ days, range, projectOptions, rows, locked, onChanged, o
                       });
                     }}>{t('common.edit')}</button>
                     <button className={btnDangerCls}
-                      onClick={() => void deleteTravelRecord(x.id).then(onChanged).catch(onError)}>
+                      onClick={() => confirmDelete(() => deleteTravelRecord(x.id))}>
                       {t('common.delete')}
                     </button>
                   </span>
@@ -442,16 +491,21 @@ function TravelSection({ days, range, projectOptions, rows, locked, onChanged, o
             </span>
           </Field>
           <Field label={t('myWork.distanceKm')}>
-            <input className={cn(inputCls, 'w-16')} type="number" min="0" step="1" value={form.distanceKm}
-              onChange={(e) => setForm({ ...form, distanceKm: e.target.value })} />
+            <NumInput className={cn(inputCls, 'w-16')} value={form.distanceKm}
+              onChange={(v) => setForm({ ...form, distanceKm: v })} />
           </Field>
           <Field label={t('myWork.travelHours')}>
-            <input className={cn(inputCls, 'w-16')} type="number" min="0" step="0.25" value={form.durationHours}
-              onChange={(e) => setForm({ ...form, durationHours: e.target.value })} />
+            <NumInput className={cn(inputCls, 'w-16')} value={form.durationHours}
+              onChange={(v) => setForm({ ...form, durationHours: v })} />
           </Field>
           <button className={btnSecondaryCls} onClick={() => void save()}>
             {editId ? t('common.save') : t('myWork.addTravel')}
           </button>
+          {editId && (
+            <button className={btnSecondaryCls} onClick={() => { setForm(empty); setEditId(null); }}>
+              {t('common.cancel')}
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -470,20 +524,37 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState<string | null>(null);
   const [receiptsFor, setReceiptsFor] = useState<string | null>(null);
+  const confirmDelete = useConfirmDelete(onChanged, onError);
+
+  const amount = numOrNull(form.amount);
+  const ruleErrors = expenseRuleErrors({
+    projectId: form.projectId || null,
+    reimbursableToResource: form.reimbursable,
+    rechargeableToCustomer: form.rechargeable,
+    includedInRate: form.inRate,
+  });
 
   const save = async () => {
+    if (amount === null || amount <= 0) {
+      onError(new Error(t('common.invalidNumbers', { fields: t('myWork.amount') })));
+      return;
+    }
     try {
       const body = {
         projectId: form.projectId || null, date: form.date,
         category: form.category as Expense['category'],
-        amount: Number(form.amount), currency: form.currency,
+        amount, currency: form.currency,
         description: form.description || null, receiptRef: form.receiptRef || null,
         reimbursableToResource: form.reimbursable,
         rechargeableToCustomer: form.rechargeable,
         includedInRate: form.inRate,
       };
-      if (editId) await updateExpense(editId, body);
-      else await createExpense(body);
+      const saved = await saveExpenseConfirmingDuplicates(
+        body,
+        (b) => (editId ? updateExpense(editId, b) : createExpense(b)),
+        () => confirmAction(t('myWork.confirmDuplicateExpense')),
+      );
+      if (saved === null) return; // user declined the duplicate warning
       setForm(empty); setEditId(null); onChanged();
     } catch (e) { onError(e); }
   };
@@ -504,7 +575,7 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
             <th className={thCls}>{t('myWork.project')}</th>
             <th className={thCls}>{t('myWork.category')}</th>
             <th className={thCls}>{t('myWork.amount')}</th>
-            <th className={thCls}>{t('common.actions')}</th>
+            <th className={thCls}>{t('myWork.expenseFlags')}</th>
             <th className={thCls}></th>
           </tr>
         </thead>
@@ -536,7 +607,7 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
                           });
                         }}>{t('common.edit')}</button>
                         <button className={btnDangerCls}
-                          onClick={() => void deleteExpense(x.id).then(onChanged).catch(onError)}>
+                          onClick={() => confirmDelete(() => deleteExpense(x.id))}>
                           {t('common.delete')}
                         </button>
                       </>
@@ -577,8 +648,8 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
           </Field>
           <Field label={t('myWork.amount')}>
             <span className="flex gap-1">
-              <input className={cn(inputCls, 'w-20')} type="number" min="0.01" step="0.01"
-                value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+              <NumInput className={cn(inputCls, 'w-20')} value={form.amount}
+                onChange={(v) => setForm({ ...form, amount: v })} />
               <input className={cn(inputCls, 'w-16')} value={form.currency} maxLength={3}
                 onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />
             </span>
@@ -606,9 +677,19 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
               onChange={(e) => setForm({ ...form, inRate: e.target.checked })} />
             {t('myWork.includedInRate')}
           </label>
-          <button className={btnSecondaryCls} disabled={!form.amount} onClick={() => void save()}>
+          <button className={btnSecondaryCls}
+            disabled={amount === null || form.currency.length !== 3 || ruleErrors.length > 0}
+            onClick={() => void save()}>
             {editId ? t('common.save') : t('myWork.addExpense')}
           </button>
+          {editId && (
+            <button className={btnSecondaryCls} onClick={() => { setForm(empty); setEditId(null); }}>
+              {t('common.cancel')}
+            </button>
+          )}
+          {ruleErrors.map((k) => (
+            <span key={k} className="text-xs text-red-600">{t(k)}</span>
+          ))}
         </div>
       )}
     </section>
@@ -622,14 +703,23 @@ function AllowanceSection({ days, range, projectOptions, rows, locked, onChanged
   const { t } = useTranslation();
   const empty = { date: range.from, projectId: '', amount: '', currency: 'SEK', notes: '' };
   const [form, setForm] = useState(empty);
+  const [editId, setEditId] = useState<string | null>(null);
+  const confirmDelete = useConfirmDelete(onChanged, onError);
+  const amount = numOrNull(form.amount);
 
   const save = async () => {
+    if (amount === null || amount <= 0) {
+      onError(new Error(t('common.invalidNumbers', { fields: t('myWork.amount') })));
+      return;
+    }
     try {
-      await createAllowance({
+      const body = {
         projectId: form.projectId || null, date: form.date,
-        amount: Number(form.amount), currency: form.currency, notes: form.notes || null,
-      });
-      setForm(empty); onChanged();
+        amount, currency: form.currency, notes: form.notes || null,
+      };
+      if (editId) await updateAllowance(editId, body);
+      else await createAllowance(body);
+      setForm(empty); setEditId(null); onChanged();
     } catch (e) { onError(e); }
   };
 
@@ -655,10 +745,19 @@ function AllowanceSection({ days, range, projectOptions, rows, locked, onChanged
               <td className={cn(tdCls, 'text-slate-500')}>{x.notes}</td>
               <td className={tdCls}>
                 {!x.timesheetId && (
-                  <button className={btnDangerCls}
-                    onClick={() => void deleteAllowance(x.id).then(onChanged).catch(onError)}>
-                    {t('common.delete')}
-                  </button>
+                  <span className="flex gap-1">
+                    <button className={btnSecondaryCls} onClick={() => {
+                      setEditId(x.id);
+                      setForm({
+                        date: x.date, projectId: x.projectId ?? '', amount: String(x.amount),
+                        currency: x.currency, notes: x.notes ?? '',
+                      });
+                    }}>{t('common.edit')}</button>
+                    <button className={btnDangerCls}
+                      onClick={() => confirmDelete(() => deleteAllowance(x.id))}>
+                      {t('common.delete')}
+                    </button>
+                  </span>
                 )}
               </td>
             </tr>
@@ -679,8 +778,8 @@ function AllowanceSection({ days, range, projectOptions, rows, locked, onChanged
           </Field>
           <Field label={t('myWork.amount')}>
             <span className="flex gap-1">
-              <input className={cn(inputCls, 'w-20')} type="number" min="0.01" step="0.01"
-                value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+              <NumInput className={cn(inputCls, 'w-20')} value={form.amount}
+                onChange={(v) => setForm({ ...form, amount: v })} />
               <input className={cn(inputCls, 'w-16')} value={form.currency} maxLength={3}
                 onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />
             </span>
@@ -689,9 +788,15 @@ function AllowanceSection({ days, range, projectOptions, rows, locked, onChanged
             <input className={inputCls} value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </Field>
-          <button className={btnSecondaryCls} disabled={!form.amount} onClick={() => void save()}>
-            {t('myWork.addAllowance')}
+          <button className={btnSecondaryCls} disabled={amount === null || form.currency.length !== 3}
+            onClick={() => void save()}>
+            {editId ? t('common.save') : t('myWork.addAllowance')}
           </button>
+          {editId && (
+            <button className={btnSecondaryCls} onClick={() => { setForm(empty); setEditId(null); }}>
+              {t('common.cancel')}
+            </button>
+          )}
         </div>
       )}
     </section>

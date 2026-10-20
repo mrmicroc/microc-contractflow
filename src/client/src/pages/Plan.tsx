@@ -4,45 +4,50 @@ import {
   bookingAction,
   createBooking,
   deleteBooking,
-  errorMessage,
+  describeError,
   getBookings,
   getProjects,
   getProjectWorkPackages,
   getResources,
   rescheduleBooking,
   updateBooking,
+  type BookingActionResult,
 } from '@/lib/api';
 import {
-  addDays, availableActions, monthGrid, statusClasses, weekDates,
-  type BookingAction,
+  addDays, availableActions, bookingTooltip, bookingUpdateBody, monthGrid, padEffectKey,
+  rescheduleOutcomeKey, statusClasses, viewRange, weekDates,
+  type BookingAction, type CalendarView,
 } from '@/lib/bookings';
+import { confirmAction } from '@/lib/confirm';
+import { localMonth, localTodayIso as todayIso, monthKey, shiftMonth } from '@/lib/dates';
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
-import type { Booking, ProjectSummary, ResourceSummary, WorkPackage } from '@/lib/types';
+import type { Booking, BookingRequestBody, ProjectSummary, ResourceSummary, WorkPackage } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { canSeeCommercial, useMe } from '@/lib/useMe';
+import { canManage as canManageRole, canSeeCommercial, useDevUserReload, useMe } from '@/lib/useMe';
+import { useFlash } from '@/lib/useFlash';
 import {
-  btnCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, tdCls, thCls,
+  btnCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, OkBox, Panel, tdCls, thCls,
 } from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
 
-const pad2 = (n: number) => String(n).padStart(2, '0');
-const todayIso = () => new Date().toISOString().slice(0, 10);
-const monthKey = (y: number, m: number) => `${y}-${pad2(m)}`;
-
-type View = 'month' | 'week' | 'day';
 type LaneBy = 'resource' | 'project';
+type PreStatus = BookingRequestBody['status'];
+
+const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+const emptyForm = {
+  projectId: '', resourceId: '', workPackageId: '', date: '', plannedHours: '8',
+  activityRef: '', workDescription: '', customerContact: '', evidenceRef: '',
+  status: 'forecast' as PreStatus,
+};
 
 export function Plan() {
   const { t } = useTranslation();
   const me = useMe();
-  const [view, setView] = useState<View>('month');
+  const [view, setView] = useState<CalendarView>('month');
   const [laneBy, setLaneBy] = useState<LaneBy>('resource');
   const [anchor, setAnchor] = useState(todayIso());
-  const [ym, setYm] = useState(() => {
-    const d = new Date();
-    return { year: d.getFullYear(), month: d.getMonth() + 1 };
-  });
+  const [ym, setYm] = useState(() => localMonth());
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
@@ -53,16 +58,18 @@ export function Plan() {
   const [reschedId, setReschedId] = useState<string | null>(null);
   const [reschedDate, setReschedDate] = useState('');
   const [editing, setEditing] = useState(false);
-  const [ef, setEf] = useState({ date: '', plannedHours: '', workDescription: '', activityRef: '', status: '' });
-  const [error, setError] = useState<string | null>(null);
-  const [f, setF] = useState({
-    projectId: '', resourceId: '', workPackageId: '', date: '', plannedHours: '8',
-    activityRef: '', workDescription: '', status: 'forecast' as 'forecast' | 'tentative' | 'requested',
+  const [ef, setEf] = useState({
+    date: '', plannedHours: '', workDescription: '', activityRef: '',
+    customerContact: '', evidenceRef: '', status: 'requested' as PreStatus,
   });
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useFlash(8000);
+  const [f, setF] = useState(emptyForm);
   const [pkgMap, setPkgMap] = useState<Record<string, WorkPackage[]>>({});
   const pkgs = f.projectId ? (pkgMap[f.projectId] ?? []) : [];
 
   const week = weekDates(anchor);
+  const warningLabel = (w: string) => t(`booking.warning.${w}`);
 
   // Work packages of the booking form's project — the picker only appears
   // when the project has packages to target.
@@ -76,33 +83,26 @@ export function Plan() {
   }, [f.projectId]);
 
   const reload = useCallback(() => {
-    const w = weekDates(anchor);
-    const r = {
-      from: view === 'month' ? `${monthKey(ym.year, ym.month)}-01` : view === 'week' ? w[0] : anchor,
-      to: view === 'month' ? `${monthKey(ym.year, ym.month)}-31` : view === 'week' ? w[6] : anchor,
-    };
     getBookings({
-      ...r,
+      ...viewRange(view, ym, anchor),
       projectId: projectFilter || undefined,
       resourceId: resourceFilter || undefined,
-    }).then(setBookings).catch(() => setBookings([]));
-  }, [view, ym.year, ym.month, anchor, projectFilter, resourceFilter]);
-  useEffect(() => { void reload(); }, [reload]);
+    }).then(setBookings).catch((e) => { setBookings([]); setError(describeError(e, t)); });
+  }, [view, ym, anchor, projectFilter, resourceFilter, t]);
+  useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
 
-  useEffect(() => {
-    void getProjects().then(setProjects).catch(() => setProjects([]));
-    void getResources().then(setResources).catch(() => setResources([]));
+  const loadLists = useCallback(() => {
+    getProjects().then(setProjects).catch(() => setProjects([]));
+    getResources().then(setResources).catch(() => setResources([]));
   }, []);
+  useEffect(() => { void Promise.resolve().then(loadLists); }, [loadLists]);
+  useDevUserReload(useCallback(() => { setSelected(null); loadLists(); reload(); }, [loadLists, reload]));
 
-  const canManage = me !== null && ['Administrator', 'ProjectManager'].includes(me.role);
+  const canManage = canManageRole(me);
   const userResourceIds = new Set(resources.filter((r) => r.userId === me?.id).map((r) => r.id));
 
   const shift = (d: number) => {
-    if (view === 'month')
-      setYm(({ year, month }) => {
-        const next = new Date(year, month - 1 + d, 1);
-        return { year: next.getFullYear(), month: next.getMonth() + 1 };
-      });
+    if (view === 'month') setYm(({ year, month }) => shiftMonth(year, month, d));
     else if (view === 'week') setAnchor((a) => addDays(a, d * 7));
     else setAnchor((a) => addDays(a, d));
   };
@@ -119,48 +119,55 @@ export function Plan() {
         .filter((p) => p.isActive && (!projectFilter || p.id === projectFilter))
         .map((p) => ({ id: p.id, name: p.name }));
 
-  const laneDays = view === 'week' ? week : [anchor];
-  const bookingsFor = (laneId: string, day: string) =>
-    (byDate.get(day) ?? []).filter((b) =>
-      (laneBy === 'resource' ? b.resourceId : b.projectId) === laneId);
-
   const byDate = new Map<string, Booking[]>();
   for (const b of bookings) {
     const list = byDate.get(b.date) ?? [];
     list.push(b);
     byDate.set(b.date, list);
   }
+  const laneDays = view === 'week' ? week : [anchor];
+  const bookingsFor = (laneId: string, day: string) =>
+    (byDate.get(day) ?? []).filter((b) =>
+      (laneBy === 'resource' ? b.resourceId : b.projectId) === laneId);
+  const bookingById = (id: string | null) => (id ? bookings.find((b) => b.id === id) ?? null : null);
 
-  const runAction = async (id: string, action: BookingAction) => {
+  const runAction = async (b: Booking, action: BookingAction) => {
     setError(null);
-    if (action === 'reschedule') { setReschedId(id); return; }
+    if (action === 'reschedule') { setReschedId(b.id); return; }
     if (action === 'edit') {
-      if (selected) {
-        setEf({
-          date: selected.date,
-          plannedHours: String(selected.plannedHours),
-          workDescription: selected.workDescription ?? '',
-          activityRef: selected.activityRef ?? '',
-          status: selected.status,
-        });
-        setEditing(true);
-      }
+      setEf({
+        date: b.date,
+        plannedHours: String(b.plannedHours),
+        workDescription: b.workDescription ?? '',
+        activityRef: b.activityRef ?? '',
+        customerContact: b.customerContact ?? '',
+        evidenceRef: b.evidenceRef ?? '',
+        status: (['forecast', 'tentative', 'requested'] as const).includes(b.status as PreStatus)
+          ? b.status as PreStatus : 'requested',
+      });
+      setEditing(true);
       return;
     }
     try {
       if (action === 'delete') {
-        if (!window.confirm(t('common.confirmDelete'))) return;
-        await deleteBooking(id);
+        if (!confirmAction(t('common.confirmDelete'))) return;
+        await deleteBooking(b.id);
+      } else if (action === 'cancel') {
+        if (!confirmAction(t('booking.confirmCancel'))) return;
+        const res = await bookingAction(b.id, 'cancel') as BookingActionResult;
+        setNotice(t('booking.cancelled', {
+          effect: t(padEffectKey(res.padEffect)), amount: res.padAmount ?? 0,
+        }));
+      } else if (action === 'complete') {
+        if (!confirmAction(t('booking.confirmComplete'))) return;
+        await bookingAction(b.id, 'complete');
       } else {
-        await bookingAction(id, action);
+        await bookingAction(b.id, action);
       }
       setSelected(null);
       reload();
     } catch (e) {
-      const msg = errorMessage(e);
-      setError(msg.includes('insufficientPad') ? t('booking.insufficientPadError')
-        : msg.includes('monthClosed') ? t('booking.monthClosedError')
-        : msg);
+      setError(describeError(e, t));
     }
   };
 
@@ -170,18 +177,14 @@ export function Plan() {
     if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     setError(null);
     try {
-      await updateBooking(selected.id, {
-        date: ef.date,
-        plannedHours: numOrNull(ef.plannedHours) ?? selected.plannedHours,
-        workDescription: ef.workDescription || null,
-        activityRef: ef.activityRef || null,
-        status: ef.status as 'forecast' | 'tentative' | 'requested',
-      });
+      await updateBooking(selected.id, bookingUpdateBody(selected, {
+        ...ef, plannedHours: numOrNull(ef.plannedHours),
+      }));
       setEditing(false);
       setSelected(null);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e, t));
     }
   };
 
@@ -189,13 +192,16 @@ export function Plan() {
     if (!reschedId || !reschedDate) return;
     setError(null);
     try {
-      await rescheduleBooking(reschedId, reschedDate);
+      const res = await rescheduleBooking(reschedId, reschedDate);
+      setNotice(`${t('booking.rescheduledNotice', {
+        date: res.replacement.date, effect: t(padEffectKey(res.padEffect)),
+      })} ${t(rescheduleOutcomeKey(res))}`);
       setReschedId(null);
       setReschedDate('');
       setSelected(null);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e, t));
     }
   };
 
@@ -204,23 +210,29 @@ export function Plan() {
     if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     setError(null);
     try {
-      await createBooking({
+      const created = await createBooking({
         projectId: f.projectId,
         resourceId: f.resourceId,
         workPackageId: f.workPackageId || null,
         date: f.date,
         plannedHours: numOrNull(f.plannedHours) ?? 8,
-        activityRef: f.activityRef || null,
-        workDescription: f.workDescription || null,
-        customerContact: null,
-        evidenceRef: null,
+        activityRef: f.activityRef.trim() || null,
+        workDescription: f.workDescription.trim() || null,
+        customerContact: f.customerContact.trim() || null,
+        evidenceRef: f.evidenceRef.trim() || null,
         status: f.status,
       });
+      // Conflict warnings come back on create — keep them in front of the
+      // planner instead of discarding them.
+      if (created.warnings.length)
+        setNotice(t('booking.createdWithWarnings', {
+          warnings: created.warnings.map(warningLabel).join(', '),
+        }));
       setFormOpen(false);
-      setF({ projectId: '', resourceId: '', workPackageId: '', date: '', plannedHours: '8', activityRef: '', workDescription: '', status: 'forecast' });
+      setF(emptyForm);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e, t));
     }
   };
 
@@ -234,6 +246,24 @@ export function Plan() {
   const selActions = selected
     ? availableActions(selected.status, canManage, userResourceIds.has(selected.resourceId))
     : [];
+  const replaces = bookingById(selected?.replacesBookingId ?? null);
+  const replacedBy = bookingById(selected?.rescheduledToBookingId ?? null);
+
+  const chip = (b: Booking, label: string, extra = '') => (
+    <button
+      key={b.id}
+      onClick={() => { setSelected(b); setEditing(false); setReschedId(null); }}
+      className={cn(
+        'block w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium',
+        extra, statusClasses(b.status),
+        b.warnings.length > 0 && 'ring-1 ring-amber-400',
+      )}
+      title={bookingTooltip(b, warningLabel)}
+    >
+      {label}
+      {b.warnings.length > 0 && ' ⚠'}
+    </button>
+  );
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 px-4 py-6">
@@ -271,9 +301,9 @@ export function Plan() {
                 ))}
               </span>
             )}
-            <button className={btnSecondaryCls} onClick={() => shift(-1)}>←</button>
+            <button className={btnSecondaryCls} onClick={() => shift(-1)} aria-label={t('plan.previous')}>←</button>
             <span className="min-w-24 text-center text-sm font-medium">{periodLabel}</span>
-            <button className={btnSecondaryCls} onClick={() => shift(1)}>→</button>
+            <button className={btnSecondaryCls} onClick={() => shift(1)} aria-label={t('plan.next')}>→</button>
             {canManage && (
               <button className={btnCls} onClick={() => setFormOpen((v) => !v)}>
                 {t('plan.newBooking')}
@@ -282,7 +312,8 @@ export function Plan() {
           </div>
         }
       >
-        {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+        <ErrorBox message={error} />
+        <OkBox message={notice} />
 
         {formOpen && (
           <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
@@ -327,12 +358,20 @@ export function Plan() {
                 <input className={inputCls} value={f.workDescription}
                   onChange={(e) => setF({ ...f, workDescription: e.target.value })} />
               </Field>
-              <Field label={t('booking.status')}>
+              <Field label={t('booking.customerContact')}>
+                <input className={inputCls} value={f.customerContact}
+                  onChange={(e) => setF({ ...f, customerContact: e.target.value })} />
+              </Field>
+              <Field label={t('booking.evidenceRef')}>
+                <input className={inputCls} value={f.evidenceRef}
+                  onChange={(e) => setF({ ...f, evidenceRef: e.target.value })} />
+              </Field>
+              <Field label={t('booking.statusLabel')}>
                 <select className={inputCls} value={f.status}
-                  onChange={(e) => setF({ ...f, status: e.target.value as typeof f.status })}>
-                  <option value="forecast">{t('booking.statusForecast')}</option>
-                  <option value="tentative">{t('booking.statusTentative')}</option>
-                  <option value="requested">{t('booking.statusRequested')}</option>
+                  onChange={(e) => setF({ ...f, status: e.target.value as PreStatus })}>
+                  <option value="forecast">{t('booking.status.forecast')}</option>
+                  <option value="tentative">{t('booking.status.tentative')}</option>
+                  <option value="requested">{t('booking.status.requested')}</option>
                 </select>
               </Field>
             </div>
@@ -351,7 +390,7 @@ export function Plan() {
 
         {view === 'month' ? (
           <div className="grid grid-cols-7 gap-px overflow-hidden rounded border border-slate-200 bg-slate-200">
-            {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((d) => (
+            {WEEKDAYS.map((d) => (
               <div key={d} className="bg-slate-50 px-2 py-1 text-center text-xs font-semibold text-slate-500">
                 {t(`plan.weekday.${d}`)}
               </div>
@@ -365,20 +404,7 @@ export function Plan() {
                       {Number(day.slice(8))}
                     </div>
                     <div className="mt-0.5 space-y-0.5">
-                      {(byDate.get(day) ?? []).map((b) => (
-                        <button
-                          key={b.id}
-                          onClick={() => setSelected(b)}
-                          className={cn(
-                            'block w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium',
-                            statusClasses(b.status),
-                          )}
-                          title={`${b.resourceName} · ${b.projectName}`}
-                        >
-                          {b.resourceName}
-                          {b.warnings.length > 0 && ' ⚠'}
-                        </button>
-                      ))}
+                      {(byDate.get(day) ?? []).map((b) => chip(b, b.resourceName))}
                     </div>
                   </>
                 )}
@@ -395,7 +421,7 @@ export function Plan() {
                 {laneDays.map((d, i) => (
                   <th key={d} className={cn(thCls, 'text-center',
                     d === todayIso() && 'text-blue-600')}>
-                    {view === 'week' && `${t(`plan.weekday.${['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][i]}`)} `}
+                    {view === 'week' && `${t(`plan.weekday.${WEEKDAYS[i]}`)} `}
                     {Number(d.slice(8))}
                   </th>
                 ))}
@@ -407,20 +433,8 @@ export function Plan() {
                   <td className={cn(tdCls, 'font-medium')}>{lane.name}</td>
                   {laneDays.map((d) => (
                     <td key={d} className={cn(tdCls, 'min-w-24')}>
-                      {bookingsFor(lane.id, d).map((b) => (
-                        <button
-                          key={b.id}
-                          onClick={() => setSelected(b)}
-                          className={cn(
-                            'mb-0.5 block w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium',
-                            statusClasses(b.status),
-                          )}
-                          title={`${b.resourceName} · ${b.projectName}`}
-                        >
-                          {laneBy === 'resource' ? b.projectName : b.resourceName}
-                          {b.warnings.length > 0 && ' ⚠'}
-                        </button>
-                      ))}
+                      {bookingsFor(lane.id, d).map((b) =>
+                        chip(b, laneBy === 'resource' ? b.projectName : b.resourceName, 'mb-0.5'))}
                     </td>
                   ))}
                 </tr>
@@ -436,22 +450,42 @@ export function Plan() {
       {selected && (
         <Panel title={`${selected.resourceName} · ${selected.date}`}
           help={t('plan.detailHelp')}
-          actions={<button className={btnSecondaryCls} onClick={() => setSelected(null)}>✕</button>}>
+          actions={<button className={btnSecondaryCls} onClick={() => setSelected(null)} aria-label={t('common.close')}>✕</button>}>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
             <div><span className="text-slate-500">{t('booking.project')}:</span> {selected.projectName}</div>
             <div><span className="text-slate-500">{t('booking.customer')}:</span> {selected.customerName}</div>
             <div><span className="text-slate-500">{t('booking.statusLabel')}:</span> {t(`booking.status.${selected.status}`)}</div>
-            <div><span className="text-slate-500">{t('booking.plannedHours')}:</span> {selected.plannedHours} h</div>
+            <div><span className="text-slate-500">{t('booking.plannedHours')}:</span> {t('common.hoursValue', { value: selected.plannedHours })}</div>
             <div><span className="text-slate-500">{t('booking.expectedPad')}:</span> {selected.expectedPad ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.workPackage')}:</span> {selected.workPackageName ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.activityRef')}:</span> {selected.activityRef ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.workDescription')}:</span> {selected.workDescription ?? '—'}</div>
+            <div><span className="text-slate-500">{t('booking.customerContact')}:</span> {selected.customerContact ?? '—'}</div>
+            <div><span className="text-slate-500">{t('booking.evidenceRef')}:</span> {selected.evidenceRef ?? '—'}</div>
           </div>
+          {(selected.replacesBookingId || selected.rescheduledToBookingId) && (
+            <p className="mt-2 text-xs text-slate-600">
+              {selected.replacesBookingId && (
+                replaces
+                  ? <button className="underline" onClick={() => setSelected(replaces)}>
+                      {t('booking.replacesOn', { date: replaces.date })}
+                    </button>
+                  : t('booking.replacesOther')
+              )}
+              {selected.rescheduledToBookingId && (
+                replacedBy
+                  ? <button className="underline" onClick={() => setSelected(replacedBy)}>
+                      {t('booking.rescheduledToOn', { date: replacedBy.date })}
+                    </button>
+                  : t('booking.rescheduledToOther')
+              )}
+            </p>
+          )}
           {selected.warnings.length > 0 && (
             <div className="mt-2 flex gap-2">
               {selected.warnings.map((w) => (
                 <span key={w} className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                  {t(`booking.warning.${w}`)}
+                  {warningLabel(w)}
                 </span>
               ))}
             </div>
@@ -461,7 +495,7 @@ export function Plan() {
             <Attachments ownerType="booking" ownerId={selected.id} canWrite={canManage} />
           </div>
           {editing && (
-            <div className="mt-3 grid grid-cols-2 gap-2 rounded border border-slate-200 bg-slate-50 p-3 sm:grid-cols-5">
+            <div className="mt-3 grid grid-cols-2 gap-2 rounded border border-slate-200 bg-slate-50 p-3 sm:grid-cols-4">
               <Field label={t('booking.date')}>
                 <input type="date" className={inputCls} value={ef.date}
                   onChange={(e) => setEf({ ...ef, date: e.target.value })} />
@@ -472,7 +506,7 @@ export function Plan() {
               </Field>
               <Field label={t('booking.statusLabel')}>
                 <select className={inputCls} value={ef.status}
-                  onChange={(e) => setEf({ ...ef, status: e.target.value })}>
+                  onChange={(e) => setEf({ ...ef, status: e.target.value as PreStatus })}>
                   <option value="forecast">{t('booking.status.forecast')}</option>
                   <option value="tentative">{t('booking.status.tentative')}</option>
                   <option value="requested">{t('booking.status.requested')}</option>
@@ -486,7 +520,15 @@ export function Plan() {
                 <input className={inputCls} value={ef.workDescription}
                   onChange={(e) => setEf({ ...ef, workDescription: e.target.value })} />
               </Field>
-              <div className="col-span-2 flex gap-2 sm:col-span-5">
+              <Field label={t('booking.customerContact')}>
+                <input className={inputCls} value={ef.customerContact}
+                  onChange={(e) => setEf({ ...ef, customerContact: e.target.value })} />
+              </Field>
+              <Field label={t('booking.evidenceRef')}>
+                <input className={inputCls} value={ef.evidenceRef}
+                  onChange={(e) => setEf({ ...ef, evidenceRef: e.target.value })} />
+              </Field>
+              <div className="col-span-2 flex gap-2 sm:col-span-4">
                 <button className={btnCls} onClick={() => void saveEdit()}>{t('common.save')}</button>
                 <button className={btnSecondaryCls} onClick={() => setEditing(false)}>{t('common.cancel')}</button>
               </div>
@@ -499,18 +541,19 @@ export function Plan() {
                   onChange={(e) => setReschedDate(e.target.value)} />
               </Field>
               <button className={btnCls} disabled={!reschedDate} onClick={() => void doReschedule()}>
-                {t('booking.reschedule')}
+                {t('booking.action.reschedule')}
               </button>
               <button className={btnSecondaryCls} onClick={() => setReschedId(null)}>
                 {t('common.cancel')}
               </button>
+              <span className="text-xs text-slate-500">{t('booking.rescheduleHint')}</span>
             </div>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             {selActions.map((a) => (
               <button key={a}
                 className={a === 'cancel' || a === 'delete' ? 'rounded border border-red-300 px-3 py-1 text-sm text-red-600 hover:bg-red-50' : btnSecondaryCls}
-                onClick={() => void runAction(selected.id, a)}>
+                onClick={() => void runAction(selected, a)}>
                 {t(`booking.action.${a}`)}
               </button>
             ))}

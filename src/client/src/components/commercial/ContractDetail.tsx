@@ -5,117 +5,23 @@ import {
   getContract, getCurrencies,
 } from '@/lib/api';
 import { calendarLabel, currencyName } from '@/lib/countries';
-import { numOrNull, resolveVersion } from '@/lib/versioned';
+import { localTodayIso as todayIso } from '@/lib/dates';
+import { confirmAction } from '@/lib/confirm';
+import { emptyTerms, fromTerms, termsFormToBody, type StepRow, type TermsForm } from '@/lib/terms';
+import { resolveVersion } from '@/lib/versioned';
 import { invalidNumericFields, isInvalidDecimal, isInvalidInteger } from '@/lib/validation';
 import type {
   ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, TimeBilling,
 } from '@/lib/types';
-
-/** Cancellation-ladder row in the form — strings while editing. */
-type StepRow = {
-  minBusinessDaysBefore: string;
-  chargeHours: string;
-  chargeAmount: string;
-};
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
   btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, SearchSelect, tdCls, thCls,
 } from '@/components/forms';
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
 const grpCls =
   'mb-1.5 mt-3 border-b border-slate-200 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500';
 const checkCls = 'flex items-center gap-1.5 text-sm text-slate-700';
-
-type TermsForm = {
-  effectiveFrom: string;
-  currency: string;
-  timeBilling: TimeBilling;
-  padEnabled: boolean;
-  fixedPriceEnabled: boolean;
-  padRate: string;
-  hourlyRate: string;
-  saturdayRate: string;
-  sundayRate: string;
-  holidayRate: string;
-  overtimeAfterHours: string;
-  overtimePercent: string;
-  mobilisationFee: string;
-  expenseMarkupPercent: string;
-  minBillableHoursPerDay: string;
-  dayRate: string;
-  saturdayDayRate: string;
-  sundayDayRate: string;
-  holidayDayRate: string;
-  halfDayRate: string;
-  halfDayMaxHours: string;
-  fixedPriceAmount: string;
-  fixedPriceDate: string;
-  fixedPriceNote: string;
-  padHoursPerDay: string;
-  minPadPerBookedDay: string;
-  carryOverMaxPercent: string;
-  carryOverMonths: string;
-  cancellationDeadlineBusinessDays: string;
-  cancellationSteps: StepRow[];
-  holidayCalendar: string;
-  travelExpensePolicy: string;
-  indexation: string;
-  notes: string;
-};
-
-const emptyTerms: TermsForm = {
-  effectiveFrom: '', currency: 'SEK',
-  timeBilling: 'hourly', padEnabled: false, fixedPriceEnabled: false,
-  padRate: '', hourlyRate: '', saturdayRate: '', sundayRate: '', holidayRate: '',
-  overtimeAfterHours: '8', overtimePercent: '150',
-  mobilisationFee: '', expenseMarkupPercent: '0', minBillableHoursPerDay: '',
-  dayRate: '', saturdayDayRate: '', sundayDayRate: '', holidayDayRate: '',
-  halfDayRate: '', halfDayMaxHours: '',
-  fixedPriceAmount: '', fixedPriceDate: '', fixedPriceNote: '',
-  padHoursPerDay: '8', minPadPerBookedDay: '1', carryOverMaxPercent: '20',
-  carryOverMonths: '1', cancellationDeadlineBusinessDays: '4',
-  cancellationSteps: [], holidayCalendar: 'SE',
-  travelExpensePolicy: '', indexation: '', notes: '',
-};
-
-/** Prefill a new version from the version currently in force — corrections
- * start from today's values instead of a blank slate. */
-const fromTerms = (v: ContractTerms): TermsForm => ({
-  effectiveFrom: todayIso(), currency: v.currency,
-  timeBilling: v.timeBilling, padEnabled: v.padEnabled,
-  fixedPriceEnabled: v.fixedPriceEnabled,
-  padRate: v.padRate?.toString() ?? '', hourlyRate: v.hourlyRate?.toString() ?? '',
-  saturdayRate: v.saturdayRate?.toString() ?? '', sundayRate: v.sundayRate?.toString() ?? '',
-  holidayRate: v.holidayRate?.toString() ?? '',
-  overtimeAfterHours: v.overtimeAfterHours.toString(),
-  overtimePercent: v.overtimePercent.toString(),
-  mobilisationFee: v.mobilisationFee?.toString() ?? '',
-  expenseMarkupPercent: v.expenseMarkupPercent.toString(),
-  minBillableHoursPerDay: v.minBillableHoursPerDay?.toString() ?? '',
-  dayRate: v.dayRate?.toString() ?? '',
-  saturdayDayRate: v.saturdayDayRate?.toString() ?? '',
-  sundayDayRate: v.sundayDayRate?.toString() ?? '',
-  holidayDayRate: v.holidayDayRate?.toString() ?? '',
-  halfDayRate: v.halfDayRate?.toString() ?? '',
-  halfDayMaxHours: v.halfDayMaxHours?.toString() ?? '',
-  fixedPriceAmount: v.fixedPriceAmount?.toString() ?? '',
-  fixedPriceDate: v.fixedPriceDate ?? '', fixedPriceNote: v.fixedPriceNote ?? '',
-  padHoursPerDay: v.padHoursPerDay.toString(),
-  minPadPerBookedDay: v.minPadPerBookedDay.toString(),
-  carryOverMaxPercent: v.carryOverMaxPercent.toString(),
-  carryOverMonths: v.carryOverMonths.toString(),
-  cancellationDeadlineBusinessDays: v.cancellationDeadlineBusinessDays.toString(),
-  cancellationSteps: v.cancellationSteps.map((s) => ({
-    minBusinessDaysBefore: s.minBusinessDaysBefore.toString(),
-    chargeHours: s.chargeHours?.toString() ?? '',
-    chargeAmount: s.chargeAmount?.toString() ?? '',
-  })),
-  holidayCalendar: v.holidayCalendar,
-  travelExpensePolicy: v.travelExpensePolicy ?? '', indexation: v.indexation ?? '',
-  notes: v.notes ?? '',
-});
 
 export function ContractDetail({
   contractId,
@@ -156,18 +62,12 @@ export function ContractDetail({
   const inForce = resolveVersion(contract.termsVersions, todayIso());
 
   const openTermsForm = () => {
-    setTf(inForce ? fromTerms(inForce) : emptyTerms);
+    setTf(inForce ? fromTerms(inForce, todayIso()) : emptyTerms);
     setTermsFormOpen(true);
   };
 
   const saveTerms = async () => {
     setError(null);
-    // Fields the chosen components don't use stay editable in the form (nice
-    // for switching back and forth) but are never persisted — the saved
-    // version must not carry dead rates that imply a different model.
-    const isHourly = tf.timeBilling === 'hourly';
-    const isDaily = tf.timeBilling === 'dailyRate';
-
     // Block the save on any non-empty non-numeric value — letters must never
     // silently degrade to "empty"/default (the user typed something).
     const bad = invalidNumericFields(
@@ -211,48 +111,7 @@ export function ContractDetail({
       return;
     }
     try {
-      await createContractTerms(contract.id, {
-        effectiveFrom: tf.effectiveFrom,
-        currency: tf.currency,
-        timeBilling: tf.timeBilling,
-        padEnabled: tf.padEnabled,
-        fixedPriceEnabled: tf.fixedPriceEnabled,
-        padRate: tf.padEnabled ? numOrNull(tf.padRate) : null,
-        hourlyRate: isHourly ? numOrNull(tf.hourlyRate) : null,
-        saturdayRate: isHourly ? numOrNull(tf.saturdayRate) : null,
-        sundayRate: isHourly ? numOrNull(tf.sundayRate) : null,
-        holidayRate: isHourly ? numOrNull(tf.holidayRate) : null,
-        overtimeAfterHours: Number(tf.overtimeAfterHours) || 8,
-        overtimePercent: Number(tf.overtimePercent) || 150,
-        mobilisationFee: numOrNull(tf.mobilisationFee),
-        expenseMarkupPercent: Number(tf.expenseMarkupPercent) || 0,
-        minBillableHoursPerDay: isHourly ? numOrNull(tf.minBillableHoursPerDay) : null,
-        dayRate: isDaily ? numOrNull(tf.dayRate) : null,
-        saturdayDayRate: isDaily ? numOrNull(tf.saturdayDayRate) : null,
-        sundayDayRate: isDaily ? numOrNull(tf.sundayDayRate) : null,
-        holidayDayRate: isDaily ? numOrNull(tf.holidayDayRate) : null,
-        halfDayRate: isDaily ? numOrNull(tf.halfDayRate) : null,
-        halfDayMaxHours: isDaily ? numOrNull(tf.halfDayMaxHours) : null,
-        fixedPriceAmount: tf.fixedPriceEnabled ? numOrNull(tf.fixedPriceAmount) : null,
-        fixedPriceDate: tf.fixedPriceEnabled ? tf.fixedPriceDate || null : null,
-        fixedPriceNote: tf.fixedPriceEnabled ? tf.fixedPriceNote || null : null,
-        padHoursPerDay: Number(tf.padHoursPerDay) || 8,
-        minPadPerBookedDay: Number(tf.minPadPerBookedDay) || 1,
-        carryOverMaxPercent: Number(tf.carryOverMaxPercent) || 20,
-        carryOverMonths: Math.max(1, Number(tf.carryOverMonths) || 1),
-        cancellationDeadlineBusinessDays: Number(tf.cancellationDeadlineBusinessDays) || 4,
-        cancellationSteps: tf.cancellationSteps
-          .map((s) => ({
-            minBusinessDaysBefore: Number(s.minBusinessDaysBefore),
-            chargeHours: numOrNull(s.chargeHours),
-            chargeAmount: numOrNull(s.chargeAmount),
-          }))
-          .filter((s) => s.minBusinessDaysBefore > 0),
-        holidayCalendar: tf.holidayCalendar,
-        travelExpensePolicy: tf.travelExpensePolicy || null,
-        indexation: tf.indexation || null,
-        notes: tf.notes || null,
-      });
+      await createContractTerms(contract.id, termsFormToBody(tf));
     } catch (e) {
       setError(errorMessage(e));
       return;
@@ -283,7 +142,7 @@ export function ContractDetail({
   };
 
   const removeTerms = async (termId: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try { await deleteContractTerms(contract.id, termId); await reload(); onChanged?.(); }
     catch (e) { setError(errorMessage(e)); }

@@ -9,7 +9,7 @@ import {
   deleteWorkPackageRate,
   deleteProject,
   deleteQuantity,
-  errorMessage,
+  describeError,
   getWorkPackageRates,
   getProject,
   getProjectAccess,
@@ -19,26 +19,35 @@ import {
   removeProjectResource,
   reviewWorkPackageRate,
   revokeProjectAccess,
+  updateProject,
+  updateQuantity,
+  updateWorkPackage,
 } from '@/lib/api';
+import { confirmAction } from '@/lib/confirm';
+import { localTodayIso } from '@/lib/dates';
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
 import type {
-  WorkPackageRate, ProjectAccess, ProjectDetail as ProjectDetailDto,
-  ProjectResource, ResourceSummary,
+  EstimatedQuantity, WorkPackage, WorkPackageRate, ProjectAccess,
+  ProjectDetail as ProjectDetailDto, ProjectResource, ResourceSummary,
 } from '@/lib/types';
-import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
+import { canManage, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel,
+  btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, Panel,
   SearchSelect, tdCls, thCls,
 } from '@/components/forms';
 import { cn } from '@/lib/utils';
 
+const INFO_TYPES = ['address', 'access', 'contact', 'coordinates', 'other'] as const;
+
 export function ProjectDetail({
   projectId,
   onDeleted,
+  onChanged,
 }: {
   projectId: string;
   onDeleted?: () => void;
+  onChanged?: () => void;
 }) {
   const { t } = useTranslation();
   const me = useMe();
@@ -46,7 +55,11 @@ export function ProjectDetail({
   const [error, setError] = useState<string | null>(null);
   const [lf, setLf] = useState({ name: '', notes: '' });
   const [lfInfo, setLfInfo] = useState<{ type: string; description: string }[]>([]);
+  // Editing an existing work package reuses the add form (wpEditId set).
+  const [wpEditId, setWpEditId] = useState<string | null>(null);
   const [qf, setQf] = useState({ label: '', quantity: '', unit: '', notes: '' });
+  const [qEditId, setQEditId] = useState<string | null>(null);
+  const [pf, setPf] = useState<{ name: string; code: string; description: string; isActive: boolean } | null>(null);
   const [ratesFor, setRatesFor] = useState<string | null>(null);
   const [access, setAccess] = useState<ProjectAccess[]>([]);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
@@ -55,8 +68,7 @@ export function ProjectDetail({
   const [memberId, setMemberId] = useState('');
 
   const canWrite = isAdmin(me);
-  const canGrant = me !== null
-    && ['Administrator', 'ProjectManager'].includes(me.role);
+  const canGrant = canManage(me);
 
   // Parent mounts this with key={projectId}, so a new selection remounts with
   // fresh state — the effect only needs to fetch.
@@ -77,17 +89,37 @@ export function ProjectDetail({
 
   if (!project) return <p className="text-sm text-slate-400">{t('common.loading')}</p>;
 
-  const saveWorkPackage = async () => {
+  // Every write reports its failure instead of failing silently.
+  const guarded = async (fn: () => Promise<unknown>) => {
+    setError(null);
+    try { await fn(); return true; }
+    catch (e) { setError(describeError(e, t)); return false; }
+  };
+  const confirmed = async (fn: () => Promise<unknown>) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    await guarded(fn);
+  };
+
+  const saveWorkPackage = () => guarded(async () => {
     const rows = lfInfo.filter((i) => i.type.trim() && i.description.trim());
-    await createWorkPackage({
+    const body = {
       projectId: project.id,
       name: lf.name.trim(),
       notes: lf.notes.trim() || null,
       infoItems: rows.map((i) => ({ type: i.type.trim(), description: i.description.trim() })),
-    });
+    };
+    if (wpEditId) await updateWorkPackage(wpEditId, body);
+    else await createWorkPackage(body);
     setLf({ name: '', notes: '' });
     setLfInfo([]);
+    setWpEditId(null);
     await reload();
+  });
+
+  const editWorkPackage = (w: WorkPackage) => {
+    setWpEditId(w.id);
+    setLf({ name: w.name, notes: w.notes ?? '' });
+    setLfInfo(w.infoItems.map((i) => ({ type: i.type, description: i.description })));
   };
 
   const saveQuantity = async () => {
@@ -95,41 +127,98 @@ export function ProjectDetail({
       [t('quantities.quantity')]: qf.quantity,
     });
     if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
-    setError(null);
-    await createQuantity({
-      projectId: project.id,
-      label: qf.label.trim(),
-      quantity: numOrNull(qf.quantity) ?? 0,
-      unit: qf.unit.trim(),
-      notes: qf.notes.trim() || null,
+    await guarded(async () => {
+      const body = {
+        projectId: project.id,
+        label: qf.label.trim(),
+        quantity: numOrNull(qf.quantity) ?? 0,
+        unit: qf.unit.trim(),
+        notes: qf.notes.trim() || null,
+      };
+      if (qEditId) await updateQuantity(qEditId, body);
+      else await createQuantity(body);
+      setQf({ label: '', quantity: '', unit: '', notes: '' });
+      setQEditId(null);
+      await reload();
     });
-    setQf({ label: '', quantity: '', unit: '', notes: '' });
+  };
+
+  const editQuantity = (q: EstimatedQuantity) => {
+    setQEditId(q.id);
+    setQf({ label: q.label, quantity: String(q.quantity), unit: q.unit, notes: q.notes ?? '' });
+  };
+
+  const saveProject = async () => {
+    if (!pf) return;
+    const ok = await guarded(() => updateProject(project.id, {
+      contractId: project.contractId,
+      name: pf.name.trim(),
+      code: pf.code.trim() || null,
+      description: pf.description.trim() || null,
+      isActive: pf.isActive,
+    }));
+    if (!ok) return;
+    setPf(null);
     await reload();
+    onChanged?.();
   };
 
   const remove = async () => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
-    setError(null);
-    try {
-      await deleteProject(project.id);
-      onDeleted?.();
-    } catch (e) {
-      setError(errorMessage(e));
-    }
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    if (await guarded(() => deleteProject(project.id))) onDeleted?.();
   };
 
   return (
     <div>
+      <ErrorBox message={error} />
       {isAdmin(me) && (
         <div className="mb-2 flex items-center justify-end gap-2">
-          {error && <span className="rounded bg-red-50 px-3 py-1 text-sm text-red-700">{error}</span>}
+          {project.description && !pf && (
+            <span className="mr-auto text-sm text-slate-600">{project.description}</span>
+          )}
+          {!pf && (
+            <button className={btnSecondaryCls} onClick={() => setPf({
+              name: project.name, code: project.code ?? '',
+              description: project.description ?? '', isActive: project.isActive,
+            })}>
+              {t('projects.editProject')}
+            </button>
+          )}
           <button className={btnDangerCls} onClick={() => void remove()}>
             {t('projects.deleteProject')}
           </button>
         </div>
       )}
-      {!isAdmin(me) && error && (
-        <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>
+      {pf && (
+        <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+            <Field label={t('common.name')} help={t('projects.hName')}>
+              <input className={inputCls} value={pf.name}
+                onChange={(e) => setPf({ ...pf, name: e.target.value })} />
+            </Field>
+            <Field label={t('projects.code')} help={t('projects.hCode')}>
+              <input className={inputCls} value={pf.code}
+                onChange={(e) => setPf({ ...pf, code: e.target.value })} />
+            </Field>
+            <Field label={t('projects.description')} help={t('projects.hDescription')}>
+              <input className={inputCls} value={pf.description}
+                onChange={(e) => setPf({ ...pf, description: e.target.value })} />
+            </Field>
+            <Field label={t('common.active')}>
+              <span className="flex items-center gap-1.5 text-sm text-slate-700">
+                <input type="checkbox" checked={pf.isActive}
+                  onChange={(e) => setPf({ ...pf, isActive: e.target.checked })} />
+                {pf.isActive ? t('common.active') : t('common.inactive')}
+              </span>
+            </Field>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button className={btnCls} disabled={!pf.name.trim()} onClick={() => void saveProject()}>
+              {t('common.save')}
+            </button>
+            <button className={btnSecondaryCls} onClick={() => setPf(null)}>{t('common.cancel')}</button>
+          </div>
+        </div>
       )}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Panel title={`${t('workPackages.title')} — ${project.name}`} help={t('workPackages.help')}>
@@ -158,10 +247,19 @@ export function ProjectDetail({
                           {t('workPackageRates.toggle')}
                         </button>
                         {canWrite && (
-                          <button className={btnDangerCls}
-                            onClick={() => void deleteWorkPackage(l.id).then(reload)}>
-                            {t('common.delete')}
-                          </button>
+                          <>
+                            <button className={btnSecondaryCls} onClick={() => editWorkPackage(l)}>
+                              {t('common.edit')}
+                            </button>
+                            <button className={btnDangerCls}
+                              onClick={() => void confirmed(async () => {
+                                await deleteWorkPackage(l.id);
+                                if (wpEditId === l.id) { setWpEditId(null); setLf({ name: '', notes: '' }); setLfInfo([]); }
+                                await reload();
+                              })}>
+                              {t('common.delete')}
+                            </button>
+                          </>
                         )}
                       </span>
                     </td>
@@ -195,8 +293,14 @@ export function ProjectDetail({
               </Field>
               <button className={btnCls} disabled={!lf.name.trim()}
                 onClick={() => void saveWorkPackage()}>
-                {t('workPackages.add')}
+                {wpEditId ? t('common.save') : t('workPackages.add')}
               </button>
+              {wpEditId && (
+                <button className={btnSecondaryCls}
+                  onClick={() => { setWpEditId(null); setLf({ name: '', notes: '' }); setLfInfo([]); }}>
+                  {t('common.cancel')}
+                </button>
+              )}
             </div>
             <div>
               <div className="mb-1 flex items-center gap-2">
@@ -225,8 +329,8 @@ export function ProjectDetail({
                 </div>
               ))}
               <datalist id="wp-info-types">
-                {['Address', 'Access', 'Contact', 'Coordinates', 'Other'].map((x) => (
-                  <option key={x} value={x} />
+                {INFO_TYPES.map((x) => (
+                  <option key={x} value={t(`workPackages.infoTypes.${x}`)} />
                 ))}
               </datalist>
             </div>
@@ -252,10 +356,15 @@ export function ProjectDetail({
                 <td className={tdCls}>{q.unit}</td>
                 {isAdmin(me) && (
                   <td className={tdCls}>
-                    <button className={btnDangerCls}
-                      onClick={() => void deleteQuantity(q.id).then(reload)}>
-                      {t('common.delete')}
-                    </button>
+                    <span className="flex gap-1">
+                      <button className={btnSecondaryCls} onClick={() => editQuantity(q)}>
+                        {t('common.edit')}
+                      </button>
+                      <button className={btnDangerCls}
+                        onClick={() => void confirmed(async () => { await deleteQuantity(q.id); await reload(); })}>
+                        {t('common.delete')}
+                      </button>
+                    </span>
                   </td>
                 )}
               </tr>
@@ -285,8 +394,14 @@ export function ProjectDetail({
             </Field>
             <button className={btnCls} disabled={!qf.label.trim() || !qf.unit.trim()}
               onClick={() => void saveQuantity()}>
-              {t('quantities.add')}
+              {qEditId ? t('common.save') : t('quantities.add')}
             </button>
+            {qEditId && (
+              <button className={btnSecondaryCls}
+                onClick={() => { setQEditId(null); setQf({ label: '', quantity: '', unit: '', notes: '' }); }}>
+                {t('common.cancel')}
+              </button>
+            )}
           </div>
         )}
       </Panel>
@@ -312,9 +427,10 @@ export function ProjectDetail({
                   <td className={tdCls}>
                     {canGrant && (
                       <button className={btnDangerCls}
-                        onClick={() => void removeProjectResource(project.id, m.resourceId)
-                          .then(reloadMembers)
-                          .catch((e) => setError(errorMessage(e)))}>
+                        onClick={() => void confirmed(async () => {
+                          await removeProjectResource(project.id, m.resourceId);
+                          await reloadMembers();
+                        })}>
                         {t('common.delete')}
                       </button>
                     )}
@@ -339,10 +455,11 @@ export function ProjectDetail({
                 />
               </Field>
               <button className={btnCls} disabled={!memberId}
-                onClick={() => void addProjectResource(project.id, memberId)
-                  .then(reloadMembers)
-                  .then(() => setMemberId(''))
-                  .catch((e) => setError(errorMessage(e)))}>
+                onClick={() => void guarded(async () => {
+                  await addProjectResource(project.id, memberId);
+                  await reloadMembers();
+                  setMemberId('');
+                })}>
                 {t('roster.add')}
               </button>
             </div>
@@ -359,14 +476,15 @@ export function ProjectDetail({
                 <tr key={a.resourceId} className="border-b border-slate-100">
                   <td className={tdCls}>{a.resourceName}</td>
                   <td className={cn(tdCls, 'text-xs text-slate-500')}>
-                    {t('access.since')} {a.createdUtc.slice(0, 10)}
+                    {t('access.since')} {new Date(a.createdUtc).toLocaleDateString()}
                   </td>
                   <td className={tdCls}>
                     {canGrant && (
                       <button className={btnDangerCls}
-                        onClick={() => void revokeProjectAccess(project.id, a.resourceId)
-                          .then(() => getProjectAccess(project.id).then(setAccess))
-                          .catch((e) => setError(errorMessage(e)))}>
+                        onClick={() => void confirmed(async () => {
+                          await revokeProjectAccess(project.id, a.resourceId);
+                          setAccess(await getProjectAccess(project.id));
+                        })}>
                         {t('common.delete')}
                       </button>
                     )}
@@ -391,10 +509,11 @@ export function ProjectDetail({
                 />
               </Field>
               <button className={btnCls} disabled={!grantId}
-                onClick={() => void grantProjectAccess(project.id, grantId)
-                  .then(() => getProjectAccess(project.id).then(setAccess))
-                  .then(() => setGrantId(''))
-                  .catch((e) => setError(errorMessage(e)))}>
+                onClick={() => void guarded(async () => {
+                  await grantProjectAccess(project.id, grantId);
+                  setAccess(await getProjectAccess(project.id));
+                  setGrantId('');
+                })}>
                 {t('access.grant')}
               </button>
             </div>
@@ -417,7 +536,7 @@ function WorkPackageRates({ workPackageId, members, canWrite, canGrant }: {
   const [err, setErr] = useState<string | null>(null);
   const empty = {
     resourceId: '',
-    effectiveFrom: new Date().toISOString().slice(0, 10),
+    effectiveFrom: localTodayIso(),
     hourlyRate: '', saturdayRate: '', sundayRate: '', holidayRate: '',
     dayRate: '', saturdayDayRate: '', sundayDayRate: '', holidayDayRate: '',
     halfDayRate: '', halfDayMaxHours: '', mobilisationFee: '', notes: '',
@@ -461,7 +580,13 @@ function WorkPackageRates({ workPackageId, members, canWrite, canGrant }: {
       });
       setF(empty);
       await reload();
-    } catch (e) { setErr(errorMessage(e)); }
+    } catch (e) { setErr(describeError(e, t)); }
+  };
+
+  const removeRate = async (rateId: string) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    try { await deleteWorkPackageRate(workPackageId, rateId); await reload(); }
+    catch (e) { setErr(describeError(e, t)); }
   };
 
   const cell = (v: number | null) => v?.toString() ?? '—';
@@ -510,14 +635,13 @@ function WorkPackageRates({ workPackageId, members, canWrite, canGrant }: {
                       {canGrant && r.needsReview && (
                         <button className={btnSecondaryCls}
                           onClick={() => void reviewWorkPackageRate(workPackageId, r.id)
-                            .then(reload).catch((e) => setErr(errorMessage(e)))}>
+                            .then(reload).catch((e) => setErr(describeError(e, t)))}>
                           {t('workPackageRates.markReviewed')}
                         </button>
                       )}
                       {canWrite && (
                         <button className={btnDangerCls}
-                          onClick={() => void deleteWorkPackageRate(workPackageId, r.id)
-                            .then(reload).catch((e) => setErr(errorMessage(e)))}>
+                          onClick={() => void removeRate(r.id)}>
                           {t('common.delete')}
                         </button>
                       )}
@@ -553,7 +677,11 @@ function WorkPackageRates({ workPackageId, members, canWrite, canGrant }: {
             ['sundayRate', 'terms.sundayRate'],
             ['holidayRate', 'terms.holidayRate'],
             ['dayRate', 'terms.dayRate'],
+            ['saturdayDayRate', 'terms.saturdayDayRate'],
+            ['sundayDayRate', 'terms.sundayDayRate'],
+            ['holidayDayRate', 'terms.holidayDayRate'],
             ['halfDayRate', 'terms.halfDayRate'],
+            ['halfDayMaxHours', 'terms.halfDayMaxHours'],
             ['mobilisationFee', 'terms.mobilisationFee'],
           ] as const).map(([key, label]) => (
             <Field key={key} label={t(label)}>

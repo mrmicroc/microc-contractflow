@@ -44,7 +44,7 @@ export function DevUserBar() {
         >
           {users.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.displayName} · {u.role}
+              {u.displayName} · {t(`roles.${u.role}`)}
             </option>
           ))}
         </select>

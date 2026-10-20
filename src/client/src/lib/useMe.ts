@@ -16,8 +16,14 @@ export function useMe(): UserDto | null {
   return me;
 }
 
-export const isAdmin = (me: UserDto | null) => me?.role === 'Administrator';
-export const canSeeCommercial = (me: UserDto | null) =>
-  me !== null && ['Administrator', 'ProjectManager', 'Finance'].includes(me.role);
-export const canSeeAgreements = (me: UserDto | null) =>
-  me !== null && ['Administrator', 'Finance'].includes(me.role);
+// Role helpers live in lib/roles (pure, tested); re-exported for the pages.
+export { canHandleMoney, canManage, canSeeAgreements, canSeeCommercial, isAdmin } from './roles';
+
+/** Re-runs `reload` whenever the dev role-switcher changes the acting user —
+ * pages must never keep showing the previous user's data. */
+export function useDevUserReload(reload: () => void) {
+  useEffect(() => {
+    window.addEventListener(DEV_USER_CHANGED, reload);
+    return () => window.removeEventListener(DEV_USER_CHANGED, reload);
+  }, [reload]);
+}

@@ -9,7 +9,7 @@ import {
   deleteCompetency,
   deleteLeave,
   deleteResource,
-  errorMessage,
+  describeError,
   getAgreements,
   getContracts,
   getContractWorkPackages,
@@ -23,6 +23,8 @@ import {
   updateResource,
   type UserDto,
 } from '@/lib/api';
+import { agreementFormToBody, emptyAgreement, type AgreementForm } from '@/lib/agreements';
+import { confirmAction } from '@/lib/confirm';
 import { numOrNull } from '@/lib/versioned';
 import type {
   CompensationAgreement,
@@ -38,9 +40,9 @@ import type {
 } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { invalidNumericFields } from '@/lib/validation';
-import { canSeeAgreements, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
+import { canManage, canSeeAgreements, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, SearchSelect,
+  btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, Panel, SearchSelect,
   tdCls, thCls,
 } from '@/components/forms';
 
@@ -115,7 +117,14 @@ export function Resources() {
     setFormOpen(true);
   };
 
-  const save = async () => {
+  // Every write surfaces its failure instead of leaving the form silently open.
+  const guarded = async (fn: () => Promise<void>) => {
+    setError(null);
+    try { await fn(); }
+    catch (e) { setError(describeError(e, t)); }
+  };
+
+  const save = () => guarded(async () => {
     const body = {
       displayName: f.displayName.trim(),
       type: f.type,
@@ -129,39 +138,41 @@ export function Resources() {
     setFormOpen(false);
     await reload();
     reloadDetail();
-  };
+  });
 
   const removeResource = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
-    setError(null);
-    try {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    await guarded(async () => {
       await deleteResource(id);
       if (id === selectedId) { setSelectedId(null); setDetail(null); }
       await reload();
-    } catch (e) {
-      setError(errorMessage(e));
-    }
+    });
   };
 
-  const saveLeave = async () => {
+  const saveLeave = () => guarded(async () => {
     if (!selectedId) return;
+    if (lf.to < lf.from) { setError(t('leave.toBeforeFrom')); return; }
     await createLeave(selectedId, {
       from: lf.from, to: lf.to, type: lf.type, notes: lf.notes.trim() || null,
     });
     setLf({ from: '', to: '', type: 'vacation', notes: '' });
     setLeaveFormOpen(false);
     reloadDetail();
+  });
+
+  const removeLeave = async (resourceId: string, leaveId: string) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    await guarded(async () => { await deleteLeave(resourceId, leaveId); reloadDetail(); });
   };
 
-  const saveCompetency = async () => {
+  const saveCompetency = () => guarded(async () => {
     if (!selectedId) return;
-    const bad = cf.reminderDays.trim() && Number.isNaN(Number(cf.reminderDays))
-      ? [t('resources.competencyReminder')] : [];
+    const bad = invalidNumericFields({}, { [t('resources.competencyReminder')]: cf.reminderDays });
     if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     const body = {
       label: cf.label.trim(),
       expiryDate: cf.expiryDate || null,
-      reminderDays: cf.reminderDays.trim() ? Number(cf.reminderDays) : null,
+      reminderDays: numOrNull(cf.reminderDays),
     };
     if (compEditId) await updateCompetency(selectedId, compEditId, body);
     else await createCompetency(selectedId, body);
@@ -170,6 +181,15 @@ export function Resources() {
     setCompFormOpen(false);
     reloadDetail();
     void reload();
+  });
+
+  const removeCompetency = async (resourceId: string, competencyId: string) => {
+    if (!confirmAction(t('common.confirmDelete'))) return;
+    await guarded(async () => {
+      await deleteCompetency(resourceId, competencyId);
+      reloadDetail();
+      void reload();
+    });
   };
 
   const openCompEdit = (c: Competency) => {
@@ -226,7 +246,7 @@ export function Resources() {
             onChange={(e) => setF({ ...f, userId: e.target.value })}>
             <option value="">{t('resources.noLinkedUser')}</option>
             {users.map((u) => (
-              <option key={u.id} value={u.id}>{u.displayName} · {u.role}</option>
+              <option key={u.id} value={u.id}>{u.displayName} · {t(`roles.${u.role}`)}</option>
             ))}
           </select>
         </Field>
@@ -259,7 +279,7 @@ export function Resources() {
           <button className={btnSecondaryCls} onClick={openNew}>{t('resources.newResource')}</button>
         )}
       >
-        {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+        <ErrorBox message={error} />
         {resourceForm}
         <table className="w-full border-collapse">
           <thead>
@@ -351,7 +371,7 @@ export function Resources() {
                       onChange={(e) => setCf({ ...cf, expiryDate: e.target.value })} />
                   </Field>
                   <Field label={t('resources.competencyReminder')}>
-                    <NumInput className={inputCls} value={cf.reminderDays}
+                    <NumInput integerOnly className={inputCls} value={cf.reminderDays}
                       onChange={(v) => setCf({ ...cf, reminderDays: v })} />
                   </Field>
                   <button className={btnCls} disabled={!cf.label.trim()}
@@ -383,8 +403,7 @@ export function Resources() {
                             {t('common.edit')}
                           </button>
                           <button className={btnDangerCls}
-                            onClick={() => void deleteCompetency(detail.id, c.id)
-                              .then(() => { reloadDetail(); void reload(); })}>
+                            onClick={() => void removeCompetency(detail.id, c.id)}>
                             {t('common.delete')}
                           </button>
                         </td>
@@ -401,7 +420,7 @@ export function Resources() {
             <div className="mt-4 border-t border-slate-100 pt-3">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-semibold text-slate-600">{t('leave.title')}</h3>
-                {(isAdmin(me) || me?.role === 'ProjectManager') && !leaveFormOpen && (
+                {canManage(me) && !leaveFormOpen && (
                   <button className={btnSecondaryCls} onClick={() => setLeaveFormOpen(true)}>
                     {t('leave.add')}
                   </button>
@@ -425,6 +444,10 @@ export function Resources() {
                       <option value="unavailable">{t('leave.unavailable')}</option>
                     </select>
                   </Field>
+                  <Field label={t('common.notes')}>
+                    <input className={inputCls} value={lf.notes}
+                      onChange={(e) => setLf({ ...lf, notes: e.target.value })} />
+                  </Field>
                   <button className={btnCls} disabled={!lf.from || !lf.to}
                     onClick={() => void saveLeave()}>
                     {t('common.save')}
@@ -441,10 +464,10 @@ export function Resources() {
                       <td className={tdCls}>{l.from} → {l.to}</td>
                       <td className={tdCls}>{leaveLabel(l.type)}</td>
                       <td className={tdCls}>{l.notes ?? ''}</td>
-                      {(isAdmin(me) || me?.role === 'ProjectManager') && (
+                      {canManage(me) && (
                         <td className={tdCls}>
                           <button className={btnDangerCls}
-                            onClick={() => void deleteLeave(detail.id, l.id).then(reloadDetail)}>
+                            onClick={() => void removeLeave(detail.id, l.id)}>
                             {t('common.delete')}
                           </button>
                         </td>
@@ -470,19 +493,26 @@ export function Resources() {
 function FeedUrl({ resourceId }: { resourceId: string }) {
   const { t } = useTranslation();
   const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let on = true;
     getFeedUrl(resourceId).then((r) => { if (on) setUrl(r.url); }).catch(() => {});
     return () => { on = false; };
   }, [resourceId]);
   if (!url) return <span className="text-slate-400">—</span>;
+  const rotate = async () => {
+    // Rotating revokes the old link — every subscribed calendar stops updating.
+    if (!confirmAction(t('myWork.confirmRegenerateFeed'))) return;
+    try { setUrl((await rotateFeedUrl(resourceId)).url); setError(null); }
+    catch (e) { setError(describeError(e, t)); }
+  };
   return (
     <span className="flex items-center gap-2">
       <code className="max-w-72 truncate text-xs">{window.location.origin}{url}</code>
-      <button className={btnSecondaryCls}
-        onClick={() => void rotateFeedUrl(resourceId).then((r) => setUrl(r.url))}>
+      <button className={btnSecondaryCls} onClick={() => void rotate()}>
         {t('resources.regenerateFeed')}
       </button>
+      {error && <span className="text-xs text-red-600">{error}</span>}
     </span>
   );
 }
@@ -498,13 +528,7 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
   const [wpMap, setWpMap] = useState<Record<string, ContractWorkPackage[]>>({});
   const [formOpen, setFormOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [af, setAf] = useState({
-    customerId: '', contractId: '', workPackageId: '', effectiveFrom: '', currency: 'SEK',
-    hourlyRate: '', saturdayRate: '',
-    sundayRate: '', holidayRate: '', overtimeAfterHours: '8', overtimePercent: '150',
-    travelTimePercent: '', mileageRate: '', perDiem: 'none' as PerDiemPolicy,
-    perDiemAmount: '', expensePolicy: '', notes: '',
-  });
+  const [af, setAf] = useState<AgreementForm>(emptyAgreement);
   const contractPackages = af.contractId ? (wpMap[af.contractId] ?? []) : [];
   const scopedContracts = af.customerId
     ? contracts.filter((c) => c.customerId === af.customerId)
@@ -545,33 +569,22 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
     if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     if (!af.effectiveFrom) { setError(t('common.invalidNumbers', { fields: t('common.effectiveFrom') })); return; }
     setError(null);
-    await createAgreement(resourceId, {
-      contractId: af.contractId || null,
-      workPackageId: af.contractId ? (af.workPackageId || null) : null,
-      effectiveFrom: af.effectiveFrom,
-      currency: af.currency,
-      hourlyRate: numOrNull(af.hourlyRate),
-      saturdayRate: numOrNull(af.saturdayRate),
-      sundayRate: numOrNull(af.sundayRate),
-      holidayRate: numOrNull(af.holidayRate),
-      overtimeAfterHours: Number(af.overtimeAfterHours) || 8,
-      overtimePercent: Number(af.overtimePercent) || 150,
-      travelTimePercent: numOrNull(af.travelTimePercent),
-      mileageRate: numOrNull(af.mileageRate),
-      perDiem: af.perDiem,
-      perDiemAmount: numOrNull(af.perDiemAmount),
-      expensePolicy: af.expensePolicy || null,
-      notes: af.notes || null,
-    });
+    try {
+      await createAgreement(resourceId, agreementFormToBody(af));
+    } catch (e) {
+      setError(describeError(e, t));
+      return;
+    }
     setFormOpen(false);
+    setAf(emptyAgreement);
     await reload();
   };
 
   const remove = async (agreementId: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try { await deleteAgreement(resourceId, agreementId); await reload(); }
-    catch (e) { setError(errorMessage(e)); }
+    catch (e) { setError(describeError(e, t)); }
   };
 
   const perDiemLabel = (p: PerDiemPolicy) =>
@@ -589,7 +602,7 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
       )}
     >
       <p className="mb-2 text-[11px] text-slate-400">{t('agreements.internalOnly')}</p>
-      {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+      <ErrorBox message={error} />
       {formOpen && (
         <div className="mb-4 rounded border border-slate-200 bg-slate-50 p-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -629,7 +642,7 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
             </Field>
             <Field label={t('common.currency')}>
               <input className={inputCls} value={af.currency} maxLength={3}
-                onChange={(e) => setAf({ ...af, currency: e.target.value })} />
+                onChange={(e) => setAf({ ...af, currency: e.target.value.toUpperCase() })} />
             </Field>
             <Field label={t('agreements.hourlyRate')}>
               <NumInput className={inputCls} value={af.hourlyRate}
@@ -642,6 +655,18 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
             <Field label={t('agreements.sundayRate')}>
               <NumInput className={inputCls} value={af.sundayRate}
                 onChange={(v) => setAf({ ...af, sundayRate: v })} />
+            </Field>
+            <Field label={t('agreements.holidayRate')}>
+              <NumInput className={inputCls} value={af.holidayRate}
+                onChange={(v) => setAf({ ...af, holidayRate: v })} />
+            </Field>
+            <Field label={t('agreements.overtimeAfterHours')}>
+              <NumInput integerOnly className={inputCls} value={af.overtimeAfterHours}
+                onChange={(v) => setAf({ ...af, overtimeAfterHours: v })} />
+            </Field>
+            <Field label={t('agreements.overtimePercent')}>
+              <NumInput className={inputCls} value={af.overtimePercent}
+                onChange={(v) => setAf({ ...af, overtimePercent: v })} />
             </Field>
             <Field label={t('agreements.travelTimePercent')}>
               <NumInput className={inputCls} value={af.travelTimePercent}
@@ -665,9 +690,17 @@ function AgreementsPanel({ resourceId }: { resourceId: string }) {
                   onChange={(v) => setAf({ ...af, perDiemAmount: v })} />
               </Field>
             )}
+            <Field label={t('agreements.expensePolicy')}>
+              <input className={inputCls} value={af.expensePolicy}
+                onChange={(e) => setAf({ ...af, expensePolicy: e.target.value })} />
+            </Field>
+            <Field label={t('common.notes')}>
+              <input className={inputCls} value={af.notes}
+                onChange={(e) => setAf({ ...af, notes: e.target.value })} />
+            </Field>
           </div>
           <div className="mt-3 flex gap-2">
-            <button className={btnCls} disabled={!af.effectiveFrom || !af.currency.trim()}
+            <button className={btnCls} disabled={!af.effectiveFrom || af.currency.trim().length !== 3}
               onClick={() => void save()}>
               {t('common.save')}
             </button>

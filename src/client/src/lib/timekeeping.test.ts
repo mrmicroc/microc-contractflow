@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { isoWeekDates, isoWeekMonday, isoWeekOf, isoWeekStart } from './timekeeping';
+import { isoWeekDates, isoWeekLabel, isoWeekMonday, isoWeekOf, isoWeekStart } from './timekeeping';
+
+describe('isoWeekLabel', () => {
+  it('zero-pads the week', () => {
+    expect(isoWeekLabel(2026, 3)).toBe('2026-W03');
+    expect(isoWeekLabel(2026, 43)).toBe('2026-W43');
+  });
+});
 
 describe('isoWeekMonday', () => {
   it('returns the Monday of the containing week', () => {
