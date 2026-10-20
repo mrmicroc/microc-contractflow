@@ -60,6 +60,7 @@ import type {
   Timesheet,
   TimesheetDetail,
   TimesheetStatus,
+  UnbilledRow,
   TravelRecord,
   TravelRecordRequestBody,
 } from './types';
@@ -431,8 +432,9 @@ export const getTimesheets = (q: { resourceId?: string; status?: TimesheetStatus
 export const getTimesheet = (id: string) => apiGet<TimesheetDetail>(`/api/timesheets/${id}`);
 export const submitTimesheet = (year: number, isoWeek: number, resourceId?: string) =>
   apiPost<TimesheetDetail>('/api/timesheets/submit', { year, isoWeek, resourceId });
-export const timesheetAction = (id: string, action: 'approve' | 'return' | 'reject', note?: string) =>
-  apiPost<Timesheet>(`/api/timesheets/${id}/${action}`, { note });
+export const timesheetAction = (
+  id: string, action: 'approve' | 'return' | 'reject' | 'reopen', note?: string,
+) => apiPost<Timesheet>(`/api/timesheets/${id}/${action}`, { note });
 
 export const getDocuments = (ownerType: DocumentOwnerType, ownerId: string) =>
   apiGet<DocumentAttachment[]>(`/api/documents?ownerType=${ownerType}&ownerId=${ownerId}`);
@@ -459,10 +461,15 @@ export const getInvoices = (q: { projectId?: string; year?: number; month?: numb
   return apiGet<InvoiceSpecification[]>(`/api/invoices${s ? `?${s}` : ''}`);
 };
 export const getInvoice = (id: string) => apiGet<InvoiceDetail>(`/api/invoices/${id}`);
-export const generateInvoice = (projectId: string, year: number, month: number) =>
-  apiPost<InvoiceSpecification>('/api/invoices/generate', { projectId, year, month });
-export const invoiceAction = (id: string, action: 'review' | 'finalize' | 'issue' | 'pay') =>
-  apiPost<InvoiceSpecification>(`/api/invoices/${id}/${action}`);
+/** supplement=true bills what was approved after the month's spec left draft. */
+export const generateInvoice = (projectId: string, year: number, month: number, supplement = false) =>
+  apiPost<InvoiceSpecification>('/api/invoices/generate', { projectId, year, month, supplement });
+export const invoiceAction = (
+  id: string, action: 'review' | 'back-to-draft' | 'finalize' | 'issue' | 'pay',
+) => apiPost<InvoiceSpecification>(`/api/invoices/${id}/${action}`);
+export const getUnbilled = (year: number, month: number, projectId?: string) =>
+  apiGet<UnbilledRow[]>(
+    `/api/invoices/unbilled?year=${year}&month=${month}${projectId ? `&projectId=${projectId}` : ''}`);
 export const deleteInvoice = (id: string) => apiDelete(`/api/invoices/${id}`);
 
 export const getStatements = (q: { resourceId?: string; year?: number; month?: number; status?: string } = {}) => {
@@ -497,8 +504,10 @@ export const registerSupplierInvoice = (body: {
 }) => apiPost<SupplierInvoice>('/api/supplier-invoices', body);
 export const matchSupplierInvoice = (id: string, statementId: string) =>
   apiPost<SupplierInvoiceDetail>(`/api/supplier-invoices/${id}/match`, { statementId });
-export const supplierInvoiceAction = (id: string, action: 'approve' | 'pay') =>
-  apiPost<SupplierInvoice>(`/api/supplier-invoices/${id}/${action}`);
+/** approve takes an optional note — required when the match showed a discrepancy. */
+export const supplierInvoiceAction = (id: string, action: 'approve' | 'pay', note?: string) =>
+  apiPost<SupplierInvoice>(`/api/supplier-invoices/${id}/${action}`,
+    action === 'approve' ? { note } : undefined);
 export const deleteSupplierInvoice = (id: string) => apiDelete(`/api/supplier-invoices/${id}`);
 
 export const getMargins = (year: number, month: number) =>

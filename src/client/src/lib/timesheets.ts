@@ -1,6 +1,35 @@
-import type { Timesheet } from './types';
+import { isAdmin } from './roles';
+import type { Timesheet, TimesheetReview, TimesheetStatus } from './types';
 
 interface DraftRow { timesheetId: string | null }
+
+/** Statuses that freeze a sheet's rows (server: ReportingControllerBase). */
+export const LOCKED_STATUSES: ReadonlySet<TimesheetStatus> =
+  new Set<TimesheetStatus>(['submitted', 'approved', 'invoiced']);
+
+/** Badge colours per timesheet status — one source for every list. */
+export function sheetStatusCls(status: TimesheetStatus): string {
+  switch (status) {
+    case 'approved': return 'bg-emerald-50 text-emerald-700';
+    case 'invoiced': return 'bg-indigo-50 text-indigo-700';
+    case 'submitted': return 'bg-amber-50 text-amber-700';
+    case 'returned':
+    case 'rejected': return 'bg-red-50 text-red-700';
+    default: return 'bg-slate-100 text-slate-600';
+  }
+}
+
+/** Review history oldest first, with blank notes normalised to null. */
+export function reviewHistory(reviews: TimesheetReview[] | undefined): TimesheetReview[] {
+  return [...(reviews ?? [])]
+    .map((r) => ({ ...r, note: r.note?.trim() || null }))
+    .sort((a, b) => a.atUtc.localeCompare(b.atUtc));
+}
+
+/** Only an administrator may reopen, and only an approved (not yet
+ * invoiced) week — the server also refuses closed or billed periods. */
+export const canReopen = (status: TimesheetStatus, me: { role: string } | null | undefined) =>
+  status === 'approved' && isAdmin(me);
 
 export interface WeekSheetState {
   /** The week's timesheet (one per resource and week), if any. */
@@ -26,7 +55,7 @@ export function weekSheetState(
 ): WeekSheetState {
   const sheet = sheets.find((s) => s.year === year && s.isoWeek === week
     && (!resourceId || s.resourceId === resourceId)) ?? null;
-  const locked = sheet?.status === 'submitted' || sheet?.status === 'approved';
+  const locked = sheet ? LOCKED_STATUSES.has(sheet.status) : false;
   const sentBack = sheet?.status === 'returned' || sheet?.status === 'rejected';
   return {
     sheet,

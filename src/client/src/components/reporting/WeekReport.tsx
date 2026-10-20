@@ -4,7 +4,7 @@ import {
   createAllowance, createExpense, createTimeEntry, createTravelRecord,
   deleteAllowance, deleteExpense, deleteTimeEntry, deleteTravelRecord,
   describeError, getAllowances, getExpenses, getMyProjects, getProjectWorkPackages,
-  getTimeEntries, getTimesheets, getTravelRecords,
+  getTimeEntries, getTimesheet, getTimesheets, getTravelRecords,
   submitTimesheet, updateAllowance, updateExpense, updateTimeEntry, updateTravelRecord,
 } from '@/lib/api';
 import { addDays as shiftIso, matchBooking } from '@/lib/bookings';
@@ -12,20 +12,21 @@ import { confirmAction } from '@/lib/confirm';
 import { localTodayIso as today } from '@/lib/dates';
 import { expenseRuleErrors, saveExpenseConfirmingDuplicates } from '@/lib/expenses';
 import { isoWeekDates, isoWeekLabel, isoWeekMonday, isoWeekOf } from '@/lib/timekeeping';
-import { weekSheetState } from '@/lib/timesheets';
+import { sheetStatusCls, weekSheetState } from '@/lib/timesheets';
 import { useDevUserReload } from '@/lib/useMe';
 import { useFlash } from '@/lib/useFlash';
 import { invalidNumericFields } from '@/lib/validation';
 import { numOrNull } from '@/lib/versioned';
 import type {
   AllowanceClaim, Booking, EntryBilling, Expense, ProjectSummary, TimeEntry,
-  Timesheet, TravelRecord, WorkPackage,
+  Timesheet, TimesheetReview, TravelRecord, WorkPackage,
 } from '@/lib/types';
 import {
   btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, OkBox, Panel,
   tdCls, thCls,
 } from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
+import { ReviewHistory } from '@/components/reporting/ReviewHistory';
 import { cn } from '@/lib/utils';
 
 /**
@@ -79,6 +80,19 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
   const state = weekSheetState(sheets, year, week, [...entries, ...travel, ...expenses, ...allowances]);
   const { sheet: weekSheet, locked, draftCount } = state;
 
+  // The week's review trail (returned/reopened comments) from the sheet detail.
+  const [reviews, setReviews] = useState<TimesheetReview[]>([]);
+  const weekSheetId = weekSheet?.id;
+  const weekSheetStatus = weekSheet?.status;
+  useEffect(() => {
+    let live = true;
+    if (!weekSheetId) { void Promise.resolve().then(() => { if (live) setReviews([]); }); return; }
+    getTimesheet(weekSheetId)
+      .then((d) => { if (live) setReviews(d.reviews ?? []); })
+      .catch(() => { if (live) setReviews([]); });
+    return () => { live = false; };
+  }, [weekSheetId, weekSheetStatus]);
+
   const submit = async () => {
     setError(null);
     try {
@@ -111,9 +125,7 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
       <ErrorBox message={error} />
       <OkBox message={banner} />
       {weekSheet && (
-        <div className={cn('mb-2 rounded px-3 py-1.5 text-sm',
-          weekSheet.status === 'approved' ? 'bg-emerald-50 text-emerald-700'
-          : state.needsResubmit ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700')}>
+        <div className={cn('mb-2 rounded px-3 py-1.5 text-sm', sheetStatusCls(weekSheet.status))}>
           <p>{t(`myWork.timesheetStatus.${weekSheet.status}`)}</p>
           {state.needsResubmit && (
             <p className="mt-0.5 text-xs">
@@ -123,6 +135,7 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
               {' '}{t('myWork.fixAndResubmit')}
             </p>
           )}
+          <ReviewHistory reviews={reviews} />
         </div>
       )}
 
@@ -143,11 +156,8 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
           <h3 className="mb-1 text-xs font-semibold text-slate-500">{t('myWork.sheets')}</h3>
           <div className="flex flex-wrap gap-2">
             {sheets.slice(0, 12).map((s) => (
-              <span key={s.id} title={s.reviewerNote ?? undefined} className={cn('rounded px-2 py-1 text-xs',
-                s.status === 'approved' ? 'bg-emerald-50 text-emerald-700'
-                : s.status === 'submitted' ? 'bg-amber-50 text-amber-700'
-                : s.status === 'returned' || s.status === 'rejected' ? 'bg-red-50 text-red-700'
-                : 'bg-slate-100 text-slate-600')}>
+              <span key={s.id} title={s.reviewerNote ?? undefined}
+                className={cn('rounded px-2 py-1 text-xs', sheetStatusCls(s.status))}>
                 {isoWeekLabel(s.year, s.isoWeek)} · {t(`myWork.timesheetStatus.${s.status}`)}
               </span>
             ))}

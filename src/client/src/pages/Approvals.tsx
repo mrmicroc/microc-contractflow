@@ -6,10 +6,10 @@ import {
   getTimesheets, mergeMobilisation, padRequestAction, setMobilisationWorkPackage,
   splitMobilisation, suggestMobilisations, timesheetAction,
 } from '@/lib/api';
-import { confirmAction } from '@/lib/confirm';
+import { confirmAction, promptNote } from '@/lib/confirm';
 import { localMonth, monthKey, monthRange } from '@/lib/dates';
 import { isoWeekLabel } from '@/lib/timekeeping';
-import { reviewNoteValid } from '@/lib/timesheets';
+import { canReopen, reviewNoteValid, sheetStatusCls } from '@/lib/timesheets';
 import { canManage, isAdmin, useDevUserReload, useMe } from '@/lib/useMe';
 import { useFlash } from '@/lib/useFlash';
 import type {
@@ -20,6 +20,7 @@ import {
   btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, OkBox, Panel, tdCls, thCls,
 } from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
+import { ReviewHistory } from '@/components/reporting/ReviewHistory';
 import { cn } from '@/lib/utils';
 
 /** PM/admin review queue — submitted timesheets, Additional PAD requests
@@ -35,6 +36,7 @@ export function Approvals() {
   return (
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
       <TimesheetQueue />
+      {isAdmin(me) && <ApprovedWeeks />}
       <PadRequestQueue canDecide={isAdmin(me)} />
       <MobilisationPanel />
     </div>
@@ -146,6 +148,7 @@ function SheetRow({ sheet, open, note, setNote, onToggle, onAct }: {
         <tr className="border-b border-slate-200 bg-slate-50">
           <td colSpan={6} className="px-3 py-3">
             <DetailTables detail={open!} />
+            <ReviewHistory reviews={open!.reviews} />
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <input className={cn(inputCls, 'w-80')} placeholder={t('approvals.reviewNote')}
                 value={note} onChange={(e) => setNote(e.target.value)} />
@@ -190,7 +193,24 @@ function DetailTables({ detail }: { detail: TimesheetDetail }) {
                   {e.description && <span className="block text-xs text-slate-500">{e.description}</span>}
                 </td>
                 <td className={cn(tdCls, e.category === 'break' && 'text-slate-400')}>{cat(e.category)}</td>
-                <td className={tdCls}>{t('common.hoursValue', { value: e.actualHours })}</td>
+                <td className={tdCls}>
+                  {t('common.hoursValue', { value: e.actualHours })}
+                  {/* Frozen at approval: payable / billable incl. their minimum adjustments. */}
+                  {e.payableHours != null && (
+                    <span className="block text-xs text-slate-500">
+                      {t('approvals.payable', { value: e.payableHours })}
+                      {(e.minimumAdjustmentHours ?? 0) > 0
+                        && ` (${t('approvals.minAdj', { value: e.minimumAdjustmentHours })})`}
+                    </span>
+                  )}
+                  {e.billableHours != null && (
+                    <span className="block text-xs text-slate-500">
+                      {t('approvals.billable', { value: e.billableHours })}
+                      {(e.billableMinimumAdjustmentHours ?? 0) > 0
+                        && ` (${t('approvals.minAdj', { value: e.billableMinimumAdjustmentHours })})`}
+                    </span>
+                  )}
+                </td>
                 <td className={cn(tdCls, 'text-xs', e.billing === 'hours' ? 'text-amber-700' : 'text-slate-500')}>
                   {t(`myWork.billingMode.${e.billing}`)}
                 </td>
@@ -260,6 +280,69 @@ function DetailTables({ detail }: { detail: TimesheetDetail }) {
         </table>
       </div>
     </div>
+  );
+}
+
+/** Recently approved/invoiced weeks — an administrator can reopen an
+ * approved week (with a reason) while no closed month or billed document
+ * covers it; the server re-checks both. */
+function ApprovedWeeks() {
+  const { t } = useTranslation();
+  const me = useMe();
+  const [sheets, setSheets] = useState<Timesheet[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useFlash();
+
+  const reload = useCallback(() => {
+    Promise.all([getTimesheets({ status: 'approved' }), getTimesheets({ status: 'invoiced' })])
+      .then(([a, i]) => setSheets([...a, ...i]
+        .sort((x, y) => y.year * 100 + y.isoWeek - (x.year * 100 + x.isoWeek)).slice(0, 25)))
+      .catch((e) => { setSheets([]); setError(describeError(e, t)); });
+  }, [t]);
+  useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
+  useDevUserReload(reload);
+
+  const reopen = async (s: Timesheet) => {
+    const note = promptNote(t('approvals.reopenPrompt'));
+    if (!note) return;
+    setError(null);
+    try {
+      await timesheetAction(s.id, 'reopen', note);
+      setMsg(t('approvals.reopened'));
+      reload();
+    } catch (e) { setError(describeError(e, t)); }
+  };
+
+  return (
+    <Panel title={t('approvals.approvedWeeks')} help={t('approvals.approvedWeeksHelp')}>
+      <ErrorBox message={error} />
+      <OkBox message={msg} />
+      <table className="w-full border-collapse">
+        <tbody>
+          {(sheets ?? []).map((s) => (
+            <tr key={s.id} className="border-b border-slate-100">
+              <td className={cn(tdCls, 'font-medium')}>{isoWeekLabel(s.year, s.isoWeek)}</td>
+              <td className={tdCls}>{s.resourceName}</td>
+              <td className={tdCls}>{t('common.hoursValue', { value: s.totalActualHours })}</td>
+              <td className={tdCls}>
+                <span className={cn('rounded px-2 py-0.5 text-xs', sheetStatusCls(s.status))}>
+                  {t(`myWork.timesheetStatus.${s.status}`)}
+                </span>
+              </td>
+              <td className={tdCls}>
+                {canReopen(s.status, me) && (
+                  <button className={btnSecondaryCls} onClick={() => void reopen(s)}>
+                    {t('approvals.reopen')}
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+          {sheets === null && <tr><td className={tdCls} colSpan={5}>{t('common.loading')}</td></tr>}
+          {sheets?.length === 0 && <tr><td className={tdCls} colSpan={5}>{t('approvals.noApproved')}</td></tr>}
+        </tbody>
+      </table>
+    </Panel>
   );
 }
 

@@ -1,7 +1,9 @@
 // Billing-document workflow helpers — pure, mirrored from the server's
 // status flows (InvoicesController / StatementsController).
 import { parseDecimal } from './validation';
-import type { InvoiceStatus, StatementLineKind, StatementStatus } from './types';
+import type {
+  InvoiceSpecification, InvoiceStatus, MarginRow, StatementLineKind, StatementStatus,
+} from './types';
 
 export type InvoiceStep = 'review' | 'finalize' | 'issue' | 'pay';
 export type StatementStep = 'finalize' | 'pay';
@@ -21,6 +23,46 @@ export function nextInvoiceStep(s: InvoiceStatus): InvoiceStep | null {
 export function nextStatementStep(s: StatementStatus): StatementStep | null {
   return s === 'draft' ? 'finalize' : s === 'final' ? 'pay' : null;
 }
+
+/** A spec under customer review can be pulled back to draft for rework. */
+export const canBackToDraft = (s: InvoiceStatus) => s === 'customerReview';
+
+export type GenerateMode = 'new' | 'regenerate' | 'supplement';
+
+/**
+ * What "generate" means for a project-month given its existing specs: no
+ * spec yet → a new one; the latest revision still a draft → rebuild it;
+ * otherwise the month is frozen and only a supplement (bills what was
+ * approved since) is possible.
+ */
+export function generateMode(
+  specs: InvoiceSpecification[], projectId: string, year: number, month: number,
+): GenerateMode {
+  const mine = specs.filter((s) => s.projectId === projectId && s.year === year && s.month === month);
+  if (mine.length === 0) return 'new';
+  const latest = mine.reduce((a, b) => (b.revision > a.revision ? b : a));
+  return latest.status === 'draft' ? 'regenerate' : 'supplement';
+}
+
+export interface CurrencyTotals { currency: string; billed: number; cost: number; margin: number }
+
+/** Margin totals per currency — amounts in different currencies are never
+ * added together (the server returns one row per project and currency). */
+export function marginTotalsByCurrency(rows: MarginRow[]): CurrencyTotals[] {
+  const byCcy = new Map<string, CurrencyTotals>();
+  for (const r of rows) {
+    const t = byCcy.get(r.currency) ?? { currency: r.currency, billed: 0, cost: 0, margin: 0 };
+    t.billed += r.billed; t.cost += r.cost; t.margin += r.margin;
+    byCcy.set(r.currency, t);
+  }
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return [...byCcy.values()]
+    .map((t) => ({ ...t, billed: round(t.billed), cost: round(t.cost), margin: round(t.margin) }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+/** A supplier invoice in discrepancy can only be approved with a note. */
+export const approvalNeedsNote = (status: string) => status === 'discrepancy';
 
 /** Steps that can't be undone from the UI — they ask for confirmation. */
 export const IRREVERSIBLE_STEPS: ReadonlySet<string> = new Set(['finalize', 'issue', 'pay']);

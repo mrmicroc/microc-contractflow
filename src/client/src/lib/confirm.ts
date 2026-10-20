@@ -20,6 +20,25 @@ export function setConfirmImpl(fn: ConfirmFn): () => void {
   return () => { impl = prev; };
 }
 
+type PromptFn = (message: string) => string | null;
+
+let promptImpl: PromptFn = (message) =>
+  typeof window === 'undefined' ? null : window.prompt(message);
+
+/** Asks for a required comment (reopen, discrepancy approval): the trimmed
+ * text, or null when cancelled or left blank. */
+export function promptNote(message: string): string | null {
+  const v = promptImpl(message)?.trim();
+  return v ? v : null;
+}
+
+/** Replaces the note prompt (tests); returns a restore function. */
+export function setPromptImpl(fn: PromptFn): () => void {
+  const prev = promptImpl;
+  promptImpl = fn;
+  return () => { promptImpl = prev; };
+}
+
 /** Runs `action` only when confirmed; resolves false when declined. */
 export async function confirmed<T>(message: string, action: () => Promise<T>): Promise<T | false> {
   if (!confirmAction(message)) return false;

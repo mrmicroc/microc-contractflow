@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  IRREVERSIBLE_STEPS, nextInvoiceStep, nextStatementStep, parseSupplierLines,
+  approvalNeedsNote, canBackToDraft, generateMode, IRREVERSIBLE_STEPS, marginTotalsByCurrency,
+  nextInvoiceStep, nextStatementStep, parseSupplierLines,
 } from './economy';
+import type { InvoiceSpecification, MarginRow } from './types';
 
 describe('nextInvoiceStep', () => {
   it('walks draft → customer review → final → issued → paid', () => {
@@ -58,5 +60,69 @@ describe('parseSupplierLines', () => {
 
   it('empty text yields no lines', () => {
     expect(parseSupplierLines('  \n ')).toEqual({ ok: true, lines: [] });
+  });
+});
+
+const spec = (over: Partial<InvoiceSpecification>): InvoiceSpecification => ({
+  id: 'i', projectId: 'p1', projectName: 'North Link', customerName: 'Example Org',
+  year: 2026, month: 10, revision: 0, status: 'draft', currency: 'SEK', totalAmount: 0,
+  lineCount: 0, createdUtc: '', issuedUtc: null, issuedByUserId: null, paidUtc: null,
+  paidByUserId: null, warnings: [], ...over,
+});
+
+describe('generateMode', () => {
+  it('no spec for the project-month → new', () => {
+    expect(generateMode([spec({ month: 9 }), spec({ projectId: 'p2' })], 'p1', 2026, 10)).toBe('new');
+  });
+
+  it('latest revision still a draft → regenerate', () => {
+    expect(generateMode([spec({})], 'p1', 2026, 10)).toBe('regenerate');
+    expect(generateMode(
+      [spec({ status: 'issued' }), spec({ revision: 1, status: 'draft' })], 'p1', 2026, 10,
+    )).toBe('regenerate');
+  });
+
+  it('latest revision beyond draft → supplement', () => {
+    expect(generateMode([spec({ status: 'customerReview' })], 'p1', 2026, 10)).toBe('supplement');
+    expect(generateMode(
+      [spec({ status: 'paid' }), spec({ revision: 1, status: 'issued' })], 'p1', 2026, 10,
+    )).toBe('supplement');
+  });
+});
+
+describe('canBackToDraft', () => {
+  it('only from customer review', () => {
+    expect(canBackToDraft('customerReview')).toBe(true);
+    expect(canBackToDraft('draft')).toBe(false);
+    expect(canBackToDraft('final')).toBe(false);
+    expect(canBackToDraft('issued')).toBe(false);
+  });
+});
+
+const margin = (currency: string, billed: number, cost: number): MarginRow => ({
+  projectId: `p-${currency}-${billed}`, projectName: 'North Link', customerName: 'Example Org',
+  currency, billed, cost, margin: billed - cost, marginPercent: null, costBreakdown: null,
+});
+
+describe('marginTotalsByCurrency', () => {
+  it('sums per currency and never across currencies', () => {
+    const totals = marginTotalsByCurrency([
+      margin('SEK', 1000.1, 400.05), margin('EUR', 100, 120), margin('SEK', 500.2, 100),
+    ]);
+    expect(totals).toEqual([
+      { currency: 'EUR', billed: 100, cost: 120, margin: -20 },
+      { currency: 'SEK', billed: 1500.3, cost: 500.05, margin: 1000.25 },
+    ]);
+  });
+
+  it('no rows → no totals', () => {
+    expect(marginTotalsByCurrency([])).toEqual([]);
+  });
+});
+
+describe('approvalNeedsNote', () => {
+  it('only a discrepancy needs a note', () => {
+    expect(approvalNeedsNote('discrepancy')).toBe(true);
+    expect(approvalNeedsNote('matched')).toBe(false);
   });
 });

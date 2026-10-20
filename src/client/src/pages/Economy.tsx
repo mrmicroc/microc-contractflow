@@ -4,22 +4,24 @@ import {
   deleteInvoice, deleteStatement, deleteSupplierInvoice, describeError,
   generateInvoice, generateStatement,
   getInvoice, getInvoices, getMargins, getProjects, getResources, getStatement,
-  getStatements, getSupplierInvoice, getSupplierInvoices,
+  getStatements, getSupplierInvoice, getSupplierInvoices, getUnbilled,
   invoiceAction, matchSupplierInvoice, registerSupplierInvoice,
   statementAction, supplierInvoiceAction,
 } from '@/lib/api';
-import { confirmAction } from '@/lib/confirm';
+import { confirmAction, promptNote } from '@/lib/confirm';
 import { localMonth, monthKey } from '@/lib/dates';
 import {
-  IRREVERSIBLE_STEPS, nextInvoiceStep, nextStatementStep, parseSupplierLines,
+  approvalNeedsNote, canBackToDraft, generateMode, IRREVERSIBLE_STEPS, marginTotalsByCurrency,
+  nextInvoiceStep, nextStatementStep, parseSupplierLines,
   type InvoiceStep, type StatementStep,
 } from '@/lib/economy';
 import { canHandleMoney, useDevUserReload, useMe } from '@/lib/useMe';
 import { numOrNull } from '@/lib/versioned';
 import type {
-  BillingLine, InvoiceDetail, InvoiceSpecification, InvoiceStatus, MarginRow,
+  BillingLine, CostBreakdown, InvoiceDetail, InvoiceSpecification, InvoiceStatus, MarginRow,
   ProjectSummary, ResourceSummary, StatementDetail, StatementStatus,
   SubcontractorStatement, SupplierInvoice, SupplierInvoiceDetail, SupplierInvoiceStatus,
+  UnbilledRow,
 } from '@/lib/types';
 import {
   btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, Panel, tdCls, thCls,
@@ -97,16 +99,31 @@ function InvoicePanel({ canGenerate }: { canGenerate: boolean }) {
     if (open?.invoice.id === id) setOpen(await getInvoice(id).catch(() => null));
   };
 
+  // Unbilled approved rows for the chosen month — e.g. weeks approved after
+  // the month's spec left draft; they need a supplement.
+  const [unbilled, setUnbilled] = useState<UnbilledRow[]>([]);
+  const reloadUnbilled = useCallback(() => {
+    if (!canGenerate || !validMonth(month)) { setUnbilled([]); return; }
+    const { year, month: m } = ymOf(month);
+    getUnbilled(year, m).then(setUnbilled).catch(() => setUnbilled([]));
+  }, [canGenerate, month]);
+  useEffect(() => { void Promise.resolve().then(reloadUnbilled); }, [reloadUnbilled]);
+
+  const { year: selYear, month: selMonth } = ymOf(month);
+  const mode = projectId && validMonth(month)
+    ? generateMode(rows ?? [], projectId, selYear, selMonth) : 'new';
+
   const generate = async () => {
     setError(null);
-    const { year, month: m } = ymOf(month);
-    try { await generateInvoice(projectId, year, m); reload(); }
-    catch (e) { setError(describeError(e, t)); }
+    try {
+      await generateInvoice(projectId, selYear, selMonth, mode === 'supplement');
+      reload(); reloadUnbilled();
+    } catch (e) { setError(describeError(e, t)); }
   };
-  const act = async (id: string, action: InvoiceStep) => {
+  const act = async (id: string, action: InvoiceStep | 'back-to-draft') => {
     if (!confirmStep(action, t)) return;
     setError(null);
-    try { await invoiceAction(id, action); reload(); await refreshOpen(id); }
+    try { await invoiceAction(id, action); reload(); reloadUnbilled(); await refreshOpen(id); }
     catch (e) { setError(describeError(e, t)); }
   };
   const remove = async (id: string) => {
@@ -136,8 +153,26 @@ function InvoicePanel({ canGenerate }: { canGenerate: boolean }) {
             <input className={inputCls} type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </Field>
           <button className={btnCls} disabled={!projectId || !validMonth(month)} onClick={() => void generate()}>
-            {t('economy.generate')}
+            {t(`economy.generateMode.${mode}`)}
           </button>
+          {mode === 'supplement' && (
+            <span className="text-xs text-slate-500">{t('economy.supplementHint')}</span>
+          )}
+        </div>
+      )}
+      {unbilled.length > 0 && (
+        <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p className="font-medium">{t('economy.unbilledTitle', { month })}</p>
+          <ul className="mt-1 space-y-0.5 text-xs">
+            {unbilled.map((u) => (
+              <li key={u.projectId}>
+                {u.projectName}: {t('economy.unbilledRow', {
+                  entries: u.entryCount, hours: u.hours, expenses: u.expenseCount,
+                })}
+                {u.hasFrozenSpec && <> — {t('economy.unbilledNeedsSupplement')}</>}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       <table className="w-full border-collapse">
@@ -170,15 +205,27 @@ function InvoiceRow({ s, expanded, open, step, canGenerate, onToggle, onAct, onD
   step: InvoiceStep | null;
   canGenerate: boolean;
   onToggle: (s: InvoiceSpecification) => void;
-  onAct: (id: string, a: InvoiceStep) => void;
+  onAct: (id: string, a: InvoiceStep | 'back-to-draft') => void;
   onDelete: (id: string) => void;
 }) {
   const { t } = useTranslation();
   return (
     <>
       <tr className="border-b border-slate-100">
-        <td className={tdCls}>{s.projectName}</td>
-        <td className={tdCls}>{monthKey(s.year, s.month)}</td>
+        <td className={tdCls}>
+          {s.projectName}
+          {s.warnings.length > 0 && (
+            <span className="ml-1 text-amber-600" title={s.warnings.join('\n')}>⚠ {s.warnings.length}</span>
+          )}
+        </td>
+        <td className={tdCls}>
+          {monthKey(s.year, s.month)}
+          {s.revision > 0 && (
+            <span className="ml-1 rounded bg-slate-100 px-1 text-xs text-slate-500">
+              {t('economy.revision', { n: s.revision })}
+            </span>
+          )}
+        </td>
         <td className={tdCls}>
           <span className={cn('rounded px-2 py-0.5 text-xs', invoiceStatusCls[s.status])}>
             {t(`economy.invoiceStatus.${s.status}`)}
@@ -189,6 +236,11 @@ function InvoiceRow({ s, expanded, open, step, canGenerate, onToggle, onAct, onD
         <td className={tdCls}>
           <span className="flex justify-end gap-1">
             <button className={btnSecondaryCls} onClick={() => onToggle(s)}>{t('approvals.expand')}</button>
+            {canGenerate && canBackToDraft(s.status) && (
+              <button className={btnSecondaryCls} onClick={() => onAct(s.id, 'back-to-draft')}>
+                {t('economy.step.backToDraft')}
+              </button>
+            )}
             {canGenerate && step && (
               <button className={btnSecondaryCls} onClick={() => onAct(s.id, step)}>
                 {t(`economy.step.${step}`)}
@@ -202,7 +254,10 @@ function InvoiceRow({ s, expanded, open, step, canGenerate, onToggle, onAct, onD
       </tr>
       {expanded && open && (
         <tr className="border-b border-slate-200 bg-slate-50">
-          <td colSpan={6} className="px-3 py-2"><LineTable lines={open.lines} currency={s.currency} /></td>
+          <td colSpan={6} className="px-3 py-2">
+            <Warnings items={open.invoice.warnings} />
+            <LineTable lines={open.lines} currency={s.currency} />
+          </td>
         </tr>
       )}
     </>
@@ -313,7 +368,12 @@ function StatementRow({ s, expanded, open, step, canGenerate, isResource, onTogg
     <>
       <tr className="border-b border-slate-100">
         {!isResource && <td className={tdCls}>{s.resourceName}</td>}
-        <td className={tdCls}>{monthKey(s.year, s.month)}</td>
+        <td className={tdCls}>
+          {monthKey(s.year, s.month)}
+          {s.warnings.length > 0 && (
+            <span className="ml-1 text-amber-600" title={s.warnings.join('\n')}>⚠ {s.warnings.length}</span>
+          )}
+        </td>
         <td className={tdCls}>
           <span className={cn('rounded px-2 py-0.5 text-xs', statementStatusCls[s.status])}>
             {t(`economy.statementStatus.${s.status}`)}
@@ -338,6 +398,7 @@ function StatementRow({ s, expanded, open, step, canGenerate, isResource, onTogg
       {expanded && open && (
         <tr className="border-b border-slate-200 bg-slate-50">
           <td colSpan={isResource ? 5 : 6} className="px-3 py-2">
+            <Warnings items={open.statement.warnings} />
             <LineTable lines={open.lines} currency={s.currency} />
           </td>
         </tr>
@@ -403,10 +464,19 @@ function SupplierInvoicePanel({ canGenerate, isResource }: { canGenerate: boolea
     catch (e) { setError(describeError(e, t)); }
   };
   const act = async (id: string, action: 'approve' | 'pay') => {
-    if (!confirmAction(t(`economy.confirmStep.${action === 'pay' ? 'pay' : 'approveSupplier'}`))) return;
+    const row = rows?.find((r) => r.id === id);
+    // A discrepancy is approved only with a note explaining why.
+    let note: string | undefined;
+    if (action === 'approve' && row && approvalNeedsNote(row.status)) {
+      const n = promptNote(t('economy.discrepancyNotePrompt'));
+      if (!n) return;
+      note = n;
+    } else if (!confirmAction(t(`economy.confirmStep.${action === 'pay' ? 'pay' : 'approveSupplier'}`))) {
+      return;
+    }
     setError(null);
     try {
-      await supplierInvoiceAction(id, action);
+      await supplierInvoiceAction(id, action, note);
       reload();
       if (open?.invoice.id === id) setOpen(await getSupplierInvoice(id).catch(() => null));
     } catch (e) { setError(describeError(e, t)); }
@@ -584,6 +654,11 @@ function SupplierRow({ x, isResource, canGenerate, open, matchFor, statements,
       {expanded && open && (
         <tr className="border-b border-slate-200 bg-slate-50">
           <td colSpan={isResource ? 5 : 6} className="px-3 py-2">
+            {open.invoice.approvalNote && (
+              <p className="mb-2 text-xs text-slate-600">
+                {t('economy.approvalNote', { note: open.invoice.approvalNote })}
+              </p>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <h4 className="mb-1 text-xs font-semibold text-slate-500">{t('economy.lines')}</h4>
@@ -662,20 +737,60 @@ function MarginsPanel() {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.projectId} className="border-b border-slate-100">
+            <tr key={`${r.projectId}-${r.currency}`} className="border-b border-slate-100">
               <td className={tdCls}>{r.projectName}</td>
               <td className={tdCls}>{r.customerName}</td>
-              <td className={cn(tdCls, 'text-right')}>{r.billed.toLocaleString()}</td>
-              <td className={cn(tdCls, 'text-right')}>{r.cost.toLocaleString()}</td>
+              <td className={cn(tdCls, 'text-right')}>{money(r.billed, r.currency)}</td>
+              <td className={cn(tdCls, 'text-right')} title={costTitle(r.costBreakdown, t)}>
+                {money(r.cost, r.currency)}
+              </td>
               <td className={cn(tdCls, 'text-right font-medium',
-                r.margin < 0 ? 'text-red-600' : 'text-emerald-700')}>{r.margin.toLocaleString()}</td>
+                r.margin < 0 ? 'text-red-600' : 'text-emerald-700')}>{money(r.margin, r.currency)}</td>
               <td className={cn(tdCls, 'text-right')}>{r.marginPercent != null ? `${r.marginPercent}%` : '—'}</td>
             </tr>
           ))}
           {rows.length === 0 && <tr><td className={tdCls} colSpan={6}>{t('economy.noneMargins')}</td></tr>}
         </tbody>
+        {rows.length > 0 && (
+          <tfoot>
+            {marginTotalsByCurrency(rows).map((tot) => (
+              <tr key={tot.currency} className="border-t border-slate-200 font-medium">
+                <td className={tdCls} colSpan={2}>{t('economy.totalIn', { currency: tot.currency })}</td>
+                <td className={cn(tdCls, 'text-right')}>{money(tot.billed, tot.currency)}</td>
+                <td className={cn(tdCls, 'text-right')}>{money(tot.cost, tot.currency)}</td>
+                <td className={cn(tdCls, 'text-right',
+                  tot.margin < 0 ? 'text-red-600' : 'text-emerald-700')}>{money(tot.margin, tot.currency)}</td>
+                <td className={tdCls}></td>
+              </tr>
+            ))}
+          </tfoot>
+        )}
       </table>
     </Panel>
+  );
+}
+
+/** Cost breakdown as a tooltip — hours, expenses, per diem, mileage, travel time. */
+function costTitle(c: CostBreakdown | null, t: (k: string) => string): string | undefined {
+  if (!c) return undefined;
+  const parts: [string, number][] = [
+    ['kind.hours', c.hours], ['kind.expense', c.expenses], ['kind.allowance', c.allowances],
+    ['kind.mileage', c.mileage], ['kind.travelTime', c.travelTime],
+  ];
+  return parts.filter(([, v]) => v !== 0)
+    .map(([k, v]) => `${t(`economy.${k}`)}: ${money(v, c.currency)}`).join('\n') || undefined;
+}
+
+/** Generation warnings (mixed currencies, unreviewed rate cells, PAD without
+ * a rate…) — the amounts they concern were left out of the total. */
+function Warnings({ items }: { items: string[] }) {
+  const { t } = useTranslation();
+  if (items.length === 0) return null;
+  return (
+    <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+      <p className="font-medium">{t('economy.warnings')}</p>
+      <ul className="list-disc pl-4">{items.map((w, i) => <li key={i}>{w}</li>)}</ul>
+    </div>
   );
 }
 

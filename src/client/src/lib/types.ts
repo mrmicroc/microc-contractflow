@@ -535,7 +535,7 @@ export interface AdditionalPadRequest {
 export type TimeEntryCategory = 'work' | 'waiting' | 'standby' | 'break';
 export type TravelMode = 'car' | 'train' | 'flight' | 'boat' | 'other';
 export type ExpenseCategory = 'travel' | 'meal' | 'accommodation' | 'material' | 'equipment' | 'other';
-export type TimesheetStatus = 'draft' | 'submitted' | 'approved' | 'returned' | 'rejected';
+export type TimesheetStatus = 'draft' | 'submitted' | 'approved' | 'returned' | 'rejected' | 'invoiced';
 // How a reported row is billed: 'contract' follows the agreement model
 // (day rate / PAD / hourly), 'hours' always bills plain hourly.
 export type EntryBilling = 'contract' | 'hours';
@@ -559,6 +559,8 @@ export interface TimeEntry {
   minimumAdjustmentHours: number | null;
   timesheetId: string | null;
   timesheetStatus: TimesheetStatus | null;
+  /** Customer-side minimum adjustment — null for Resource callers. */
+  billableMinimumAdjustmentHours?: number | null;
 }
 
 export interface TimeEntryRequestBody {
@@ -699,12 +701,24 @@ export interface Timesheet {
   totalActualHours: number;
 }
 
+export type TimesheetReviewAction = 'submitted' | 'approved' | 'returned' | 'rejected' | 'reopened';
+
+/** One step of the review history, oldest first. */
+export interface TimesheetReview {
+  action: TimesheetReviewAction;
+  note: string | null;
+  byUserId: string | null;
+  byName: string | null;
+  atUtc: string;
+}
+
 export interface TimesheetDetail {
   sheet: Timesheet;
   entries: TimeEntry[];
   travel: TravelRecord[];
   expenses: Expense[];
   allowances: AllowanceClaim[];
+  reviews?: TimesheetReview[];
 }
 
 // ── Documents (receipts, booking evidence) ──────────────────────────────────
@@ -726,7 +740,8 @@ export interface DocumentAttachment {
 
 export type InvoiceStatus = 'draft' | 'customerReview' | 'final' | 'issued' | 'paid';
 export type StatementStatus = 'draft' | 'final' | 'paid';
-export type InvoiceLineKind = 'hours' | 'expense' | 'mobilisation' | 'manual';
+export type InvoiceLineKind =
+  | 'hours' | 'expense' | 'mobilisation' | 'pad' | 'fixedPrice' | 'cancellation' | 'manual';
 export type StatementLineKind = 'hours' | 'expense' | 'allowance' | 'mileage' | 'travelTime' | 'manual';
 
 export interface InvoiceSpecification {
@@ -736,13 +751,30 @@ export interface InvoiceSpecification {
   customerName: string;
   year: number;
   month: number;
+  /** 0 = the month's first spec; supplements count up. */
+  revision: number;
   status: InvoiceStatus;
   currency: string;
   totalAmount: number;
   lineCount: number;
   createdUtc: string;
   issuedUtc: string | null;
+  issuedByUserId: string | null;
   paidUtc: string | null;
+  paidByUserId: string | null;
+  warnings: string[];
+}
+
+/** Approved rows of a month no specification billed yet (/api/invoices/unbilled). */
+export interface UnbilledRow {
+  projectId: string;
+  projectName: string;
+  year: number;
+  month: number;
+  entryCount: number;
+  hours: number;
+  expenseCount: number;
+  hasFrozenSpec: boolean;
 }
 
 export interface BillingLine {
@@ -773,6 +805,8 @@ export interface SubcontractorStatement {
   lineCount: number;
   createdUtc: string;
   paidUtc: string | null;
+  paidByUserId: string | null;
+  warnings: string[];
 }
 
 export interface StatementDetail {
@@ -794,6 +828,7 @@ export interface SupplierInvoice {
   status: SupplierInvoiceStatus;
   statementId: string | null;
   paidUtc: string | null;
+  approvalNote: string | null;
 }
 
 export interface SupplierInvoiceLine {
@@ -816,12 +851,25 @@ export interface SupplierInvoiceDetail {
   diffs: MatchDiff[] | null;
 }
 
+export interface CostBreakdown {
+  currency: string;
+  hours: number;
+  expenses: number;
+  allowances: number;
+  mileage: number;
+  travelTime: number;
+  total: number;
+}
+
+/** One row per project and currency — amounts never mix currencies. */
 export interface MarginRow {
   projectId: string;
   projectName: string;
   customerName: string;
+  currency: string;
   billed: number;
   cost: number;
   margin: number;
   marginPercent: number | null;
+  costBreakdown: CostBreakdown | null;
 }
