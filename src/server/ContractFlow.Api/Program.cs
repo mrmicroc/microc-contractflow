@@ -15,6 +15,7 @@ if (!string.IsNullOrWhiteSpace(connectionString) && !builder.Environment.IsEnvir
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, DevCurrentUser>();
+builder.Services.AddScoped<IAuditActor, HttpAuditActor>();
 builder.Services.AddScoped<PadService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddSingleton<IFileStorage>(sp => new LocalDiskFileStorage(

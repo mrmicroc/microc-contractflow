@@ -1,9 +1,13 @@
 using ContractFlow.Api.Models.Domain;
+using ContractFlow.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContractFlow.Api.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+/// <param name="auditActor">Resolves who is saving for the audit trail;
+/// absent (design-time tooling) ⇒ rows are recorded as system writes.</param>
+public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? auditActor = null)
+    : DbContext(options)
 {
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Customer> Customers => Set<Customer>();
@@ -38,6 +42,44 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<StatementLine> StatementLines => Set<StatementLine>();
     public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
     public DbSet<SupplierInvoiceLine> SupplierInvoiceLines => Set<SupplierInvoiceLine>();
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+
+    /// <summary>Optional justification stamped on the audit rows of the next
+    /// save — set by an endpoint that takes a reason; cleared after saving.</summary>
+    public string? AuditReason { get; set; }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        AppendAuditAsync(CancellationToken.None).GetAwaiter().GetResult();
+        try { return base.SaveChanges(acceptAllChangesOnSuccess); }
+        finally { AuditReason = null; }
+    }
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        await AppendAuditAsync(cancellationToken);
+        try { return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
+        finally { AuditReason = null; }
+    }
+
+    /// <summary>Adds AuditEntry rows for the pending changes — same save, same
+    /// transaction, so a change is never persisted without its audit row.</summary>
+    private async Task AppendAuditAsync(CancellationToken ct)
+    {
+        ChangeTracker.DetectChanges();
+        var rows = AuditTrail.Collect(ChangeTracker);
+        if (rows.Count == 0) return;
+
+        var actor = auditActor is null ? null : await auditActor.ResolveAsync(ct);
+        foreach (var row in rows)
+        {
+            row.UserId = actor?.Id;
+            row.UserDisplayName = actor?.DisplayName;
+            row.Reason = AuditReason;
+        }
+        AuditEntries.AddRange(rows);
+    }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -283,6 +325,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(r => r.Reference).HasMaxLength(200);
             e.HasOne(r => r.Project).WithMany()
                 .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<AuditEntry>(e =>
+        {
+            e.Property(x => x.EntityType).HasMaxLength(100);
+            e.Property(x => x.Action).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.UserDisplayName).HasMaxLength(200);
+            e.Property(x => x.Reason).HasMaxLength(1000);
+            e.HasIndex(x => new { x.EntityType, x.EntityId });
+            e.HasIndex(x => x.OccurredUtc);
         });
 
         builder.Entity<ProjectMonthClose>(e =>
