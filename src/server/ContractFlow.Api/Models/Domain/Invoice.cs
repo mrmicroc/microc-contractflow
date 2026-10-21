@@ -70,6 +70,13 @@ public enum InvoiceLineKind
     Cancellation,
     /// <summary>Free-text/manual line (adjustments stay explicit).</summary>
     Manual,
+    /// <summary>Customer-approved Additional PAD consumed beyond the month's
+    /// allocation — always separate from the allocation line (SourceId = the
+    /// approving request).</summary>
+    AdditionalPad,
+    /// <summary>Additional PAD incurred automatically (a booked day continuing
+    /// past every other source, or unbooked services beyond free PAD).</summary>
+    AutoAdditionalPad,
 }
 
 public class InvoiceLine

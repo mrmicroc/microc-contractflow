@@ -63,6 +63,16 @@ public class Booking
     /// <summary>Resolved fixed cancellation fee in the contract currency.</summary>
     public decimal? CancellationChargeAmount { get; set; }
 
+    /// <summary>Agreed start time (local at the work location); null = none
+    /// agreed — the terms' default start applies once the notice deadline
+    /// passes. Changes are kept in <see cref="StartTimeChanges"/>.</summary>
+    public TimeOnly? StartTime { get; set; }
+    public List<BookingStartTimeChange> StartTimeChanges { get; set; } = [];
+
+    /// <summary>Project split of a booked day shared between projects of the
+    /// same contract — empty = the whole day is <see cref="ProjectId"/>'s.</summary>
+    public List<BookingProjectShare> Shares { get; set; } = [];
+
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
 }

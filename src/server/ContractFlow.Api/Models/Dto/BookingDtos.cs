@@ -12,7 +12,28 @@ public record BookingDto(
     /// <summary>Resolved cancellation charge (hours / fixed amount) — set when
     /// a non-PAD booking is cancelled under a charging step.</summary>
     decimal? CancellationChargeHours, decimal? CancellationChargeAmount,
-    Guid? ReplacesBookingId, Guid? RescheduledToBookingId, string[] Warnings);
+    Guid? ReplacesBookingId, Guid? RescheduledToBookingId, string[] Warnings,
+    /// <summary>Project split of a shared booked day (empty = single project).</summary>
+    List<BookingShareDto>? Shares = null,
+    /// <summary>Agreed start time (null = none agreed).</summary>
+    TimeOnly? StartTime = null,
+    /// <summary>When working time commences per the notice rule — the start
+    /// in force at the notice deadline (or the terms default); later changes
+    /// only ever bring it forward. Null on terms without a booked-day model.</summary>
+    TimeOnly? EffectiveStartTime = null);
+
+/// <summary>One project's part of a shared booked day; <c>ExpectedPad</c> =
+/// its planned share of the commitment (null for resource callers).</summary>
+public record BookingShareDto(Guid ProjectId, string ProjectName, decimal PlannedHours, decimal? ExpectedPad);
+
+/// <summary>A planned project share in a booking request.</summary>
+public class BookingShareRequest
+{
+    [Required]
+    public Guid ProjectId { get; set; }
+    [Range(0.25, 24)]
+    public decimal PlannedHours { get; set; }
+}
 
 public class BookingRequest
 {
@@ -34,6 +55,12 @@ public class BookingRequest
     public string? EvidenceRef { get; set; }
     /// <summary>Initial status — only pre-commitment statuses are allowed here.</summary>
     public BookingStatus Status { get; set; } = BookingStatus.Forecast;
+    /// <summary>Shared booked day: the planned hours per project (all on the
+    /// same contract, primary project included). Overrides PlannedHours with
+    /// their sum. Empty / one entry = a single-project day.</summary>
+    public List<BookingShareRequest> Shares { get; set; } = [];
+    /// <summary>Agreed start time, local at the work location.</summary>
+    public TimeOnly? StartTime { get; set; }
 }
 
 public class BookingUpdateRequest
@@ -52,6 +79,12 @@ public class BookingUpdateRequest
     public BookingStatus? Status { get; set; }
     public DateOnly? Date { get; set; }
     public Guid? ResourceId { get; set; }
+    /// <summary>Null keeps the current split; empty clears it (pre-commitment only).</summary>
+    public List<BookingShareRequest>? Shares { get; set; }
+    /// <summary>Sets the agreed start time (recorded with its notice date).</summary>
+    public TimeOnly? StartTime { get; set; }
+    /// <summary>True withdraws the agreed start time.</summary>
+    public bool ClearStartTime { get; set; }
 }
 
 public class RescheduleRequest
@@ -69,6 +102,9 @@ public class CompleteRequest
 {
     [Range(0.25, 24)]
     public decimal? ActualHours { get; set; }
+    /// <summary>Shared booked day: actual hours per project id — splits the
+    /// day's PAD by actual time. Omitted → the reported time that date.</summary>
+    public Dictionary<Guid, decimal>? ActualHoursByProject { get; set; }
 }
 
 public record PadTransactionDto(

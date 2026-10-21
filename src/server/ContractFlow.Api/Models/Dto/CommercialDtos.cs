@@ -96,7 +96,8 @@ public record ContractTermsDto(
     int CancellationDeadlineBusinessDays, List<CancellationStepDto> CancellationSteps,
     string HolidayCalendar,
     decimal? MinBillableHoursPerDay,
-    string? TravelExpensePolicy, string? Indexation, string? Notes);
+    string? TravelExpensePolicy, string? Indexation, string? Notes,
+    PadRulesDto? PadRules = null);
 
 /// <summary>One rung of the cancellation ladder — see
 /// <see cref="CancellationStep"/>.</summary>
@@ -104,7 +105,7 @@ public record CancellationStepDto(
     int MinBusinessDaysBefore, decimal? ChargeHours, decimal? ChargeAmount);
 
 /// <summary>Creates a new terms version — server assigns Version = max + 1.</summary>
-public class ContractTermsRequest
+public partial class ContractTermsRequest
 {
     [Required]
     public DateOnly EffectiveFrom { get; set; }

@@ -255,6 +255,7 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
             Indexation = req.Indexation,
             Notes = req.Notes,
         };
+        req.ApplyPadRules(terms);
         db.ContractTerms.Add(terms);
         await db.SaveChangesAsync(ct);
 
@@ -331,5 +332,6 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
                 s.MinBusinessDaysBefore, s.ChargeHours, s.ChargeAmount))
             .ToList(),
         t.HolidayCalendar, t.MinBillableHoursPerDay,
-        t.TravelExpensePolicy, t.Indexation, t.Notes);
+        t.TravelExpensePolicy, t.Indexation, t.Notes,
+        PadRulesDto.From(t));
 }

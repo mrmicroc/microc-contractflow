@@ -34,25 +34,105 @@ public static class PadMath
         Math.Min(baseline, Math.Max(0m, utilised - carryIn) + borrowed);
 
     /// <summary>
-    /// Carry-over at month close (spec example: baseline 10, used 7 → 2 carried
-    /// — 20 % of baseline rounded up to whole PAD — and 1 expires). Only unused
-    /// baseline can carry; carry-over is capped at the unused amount. Carry-in
-    /// is consumed first: baseline 10 + carry-in 2 with 11 utilised leaves 1
-    /// unused baseline → 1 carries, nothing expires.
+    /// Carry-over cap: <paramref name="maxPercent"/> of the basis (the unused
+    /// baseline by default, or the whole baseline), rounded UP to a multiple
+    /// of <paramref name="roundUpTo"/> (1.00 = whole PAD; 0 = no rounding).
+    /// </summary>
+    public static decimal CarryCap(decimal baseline, decimal unused, decimal maxPercent,
+        CarryOverBasis basis = CarryOverBasis.UnusedBaseline, decimal roundUpTo = 1m)
+    {
+        var raw = (basis == CarryOverBasis.Baseline ? baseline : Math.Max(0m, unused)) * maxPercent / 100m;
+        return Math.Max(0m, RoundUp(raw, roundUpTo));
+    }
+
+    /// <summary>Rounds up to a multiple of <paramref name="step"/>; step ≤ 0 → unchanged.</summary>
+    public static decimal RoundUp(decimal value, decimal step) =>
+        step <= 0m ? Round4(value) : Math.Ceiling(value / step) * step;
+
+    /// <summary>
+    /// Carry-over at month close: only unused baseline can carry, at most the
+    /// cap and never more than what is unused. Unused-baseline basis (default):
+    /// baseline 12, 3 used → 9 unused, 20 % = 1.8 → 2 carried; 11.5 used →
+    /// 0.5 unused, cap 1 → 0.5 carried. Carry-in is consumed first: baseline
+    /// 10 + carry-in 2 with 11 utilised leaves 1 unused baseline.
     /// </summary>
     public static decimal CarryOver(decimal baseline, decimal utilised, decimal maxPercent,
-        decimal carryIn = 0m, decimal borrowed = 0m)
+        decimal carryIn = 0m, decimal borrowed = 0m,
+        CarryOverBasis basis = CarryOverBasis.UnusedBaseline, decimal roundUpTo = 1m)
     {
-        var unused = baseline - BaselineUsed(baseline, utilised, carryIn, borrowed);
-        var cap = Math.Ceiling(baseline * maxPercent / 100m);
-        return Math.Min(Math.Max(0m, unused), Math.Max(0m, cap));
+        var unused = Math.Max(0m, baseline - BaselineUsed(baseline, utilised, carryIn, borrowed));
+        return Math.Min(unused, CarryCap(baseline, unused, maxPercent, basis, roundUpTo));
     }
 
     /// <summary>PAD that dies at close: unused baseline that did not carry over.</summary>
     public static decimal Expiry(decimal baseline, decimal utilised, decimal maxPercent,
-        decimal carryIn = 0m, decimal borrowed = 0m)
+        decimal carryIn = 0m, decimal borrowed = 0m,
+        CarryOverBasis basis = CarryOverBasis.UnusedBaseline, decimal roundUpTo = 1m)
         => Math.Max(0m, baseline - BaselineUsed(baseline, utilised, carryIn, borrowed))
-           - CarryOver(baseline, utilised, maxPercent, carryIn, borrowed);
+           - CarryOver(baseline, utilised, maxPercent, carryIn, borrowed, basis, roundUpTo);
+
+    /// <summary>
+    /// Splits a booked day's PAD between the projects sharing it. Proportional
+    /// (default): one day total — max(minimum, hours ÷ hours-per-PAD) — split
+    /// in proportion to each project's hours, so 2 h + 4 h → 0.33 + 0.67 and
+    /// 6 h + 6 h → 0.75 + 0.75. PerProject: every project carries its own
+    /// minimum. Shares round to 2 decimals; the last absorbs the remainder.
+    /// </summary>
+    public static List<(Guid ProjectId, decimal Pad)> SplitDay(
+        IReadOnlyList<(Guid ProjectId, decimal Hours)> parts,
+        decimal padHoursPerDay, decimal minPadPerBookedDay,
+        SharedDayMinimum mode = SharedDayMinimum.Proportional)
+    {
+        if (parts.Count == 0) return [];
+        if (mode == SharedDayMinimum.PerProject)
+            return parts.Select(p => (p.ProjectId, CommitAmount(p.Hours, padHoursPerDay, minPadPerBookedDay)))
+                .ToList();
+
+        var totalHours = parts.Sum(p => Math.Max(0m, p.Hours));
+        var total = CommitAmount(totalHours, padHoursPerDay, minPadPerBookedDay);
+        var result = new List<(Guid, decimal)>();
+        var acc = 0m;
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var share = i == parts.Count - 1
+                ? total - acc
+                : totalHours > 0m
+                    ? Math.Round(total * Math.Max(0m, parts[i].Hours) / totalHours, 2, MidpointRounding.AwayFromZero)
+                    : Math.Round(total / parts.Count, 2, MidpointRounding.AwayFromZero);
+            acc += share;
+            result.Add((parts[i].ProjectId, Round4(share)));
+        }
+        return result;
+    }
+
+    /// <summary>Unbooked services (meetings, desktop work…) consume PAD at
+    /// hours ÷ hours-per-PAD, the hours first rounded up to the recording
+    /// increment (15 min: 1 h 05 → 1.25 h → 0.1563 PAD at 8 h/PAD).</summary>
+    public static decimal UnbookedPad(decimal hours, int incrementMinutes, decimal padHoursPerDay)
+    {
+        if (padHoursPerDay <= 0) padHoursPerDay = 8m;
+        var step = incrementMinutes > 0 ? incrementMinutes / 60m : 0m;
+        return Round4(RoundUp(Math.Max(0m, hours), step) / padHoursPerDay);
+    }
+
+    /// <summary>
+    /// Working-time start of a booked day: the start time in force at the
+    /// notice deadline — the last change notified with at least the notice
+    /// period left — else the default. A later change may bring the start
+    /// forward but never postpones it.
+    /// </summary>
+    public static TimeOnly EffectiveStartTime(
+        IEnumerable<(TimeOnly? StartTime, bool Timely)> changesInOrder, TimeOnly defaultStart)
+    {
+        var locked = defaultStart;
+        TimeOnly? latest = null;
+        foreach (var (start, timely) in changesInOrder)
+        {
+            if (timely) locked = start ?? defaultStart;
+            latest = start;
+        }
+        return latest is { } l && l < locked ? l : locked;
+    }
 
     /// <summary>
     /// Continuation beyond commitment (§4.3): a confirmed Booked Day overruns
