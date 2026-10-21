@@ -5,6 +5,8 @@
  * amounts). A contract may carry several at once. */
 export type ContractComponent = 'hourly' | 'dailyRate' | 'pad' | 'scheduledCharges';
 export type CarryOverBasis = 'unusedBaseline' | 'baseline';
+export type CarryOverRounding = 'up' | 'down' | 'nearest';
+export type CarryOverConsumption = 'carryOverFirst' | 'baselineFirst';
 export type PadInvoicing = 'utilised' | 'allocationConsumed';
 export type SharedDayMinimum = 'proportional' | 'perProject';
 export type WorkPackagePricing = 'contract' | 'outsideContract';
@@ -175,7 +177,10 @@ export interface ContractVisits {
 /** PAD rules of a terms version (all switchable per contract). */
 export interface PadRules {
   carryOverBasis: CarryOverBasis;
-  carryOverRoundUpTo: number;
+  carryOverRounding: CarryOverRounding;
+  carryOverRoundingStep: number;
+  carryOverMaxPad: number | null;
+  carryOverConsumption: CarryOverConsumption;
   padInvoicing: PadInvoicing;
   additionalPadRate: number | null;
   sharedDayMinimum: SharedDayMinimum;
@@ -281,7 +286,10 @@ export interface ContractTermsRequestBody {
   includedVisits: number | null;
   // ── PAD rules (top-level on the request) ──
   carryOverBasis: CarryOverBasis;
-  carryOverRoundUpTo: number;
+  carryOverRounding: CarryOverRounding;
+  carryOverRoundingStep: number;
+  carryOverMaxPad: number | null;
+  carryOverConsumption: CarryOverConsumption;
   padInvoicing: PadInvoicing;
   additionalPadRate: number | null;
   sharedDayMinimum: SharedDayMinimum;

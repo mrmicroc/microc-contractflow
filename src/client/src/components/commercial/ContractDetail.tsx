@@ -13,7 +13,7 @@ import {
 import { resolveVersion } from '@/lib/versioned';
 import { invalidNumericFields, isInvalidDecimal, isInvalidInteger } from '@/lib/validation';
 import type {
-  CarryOverBasis, ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, PadInvoicing,
+  CarryOverBasis, CarryOverConsumption, CarryOverRounding, ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, PadInvoicing,
   SharedDayMinimum, TimeBilling,
 } from '@/lib/types';
 import { ScheduledChargesPanel } from './ScheduledChargesPanel';
@@ -95,7 +95,8 @@ export function ContractDetail({
         [t('terms.halfDayRate')]: tf.halfDayRate,
         [t('terms.halfDayMaxHours')]: tf.halfDayMaxHours,
         [t('terms.additionalPadRate')]: tf.additionalPadRate,
-        [t('terms.carryOverRoundUpTo')]: tf.carryOverRoundUpTo,
+        [t('terms.carryOverRoundingStep')]: tf.carryOverRoundingStep,
+        [t('terms.carryOverMaxPad')]: tf.carryOverMaxPad,
         [t('terms.padHoursPerDay')]: tf.padHoursPerDay,
         [t('terms.minPadPerBookedDay')]: tf.minPadPerBookedDay,
         [t('terms.carryOverMaxPercent')]: tf.carryOverMaxPercent,
@@ -354,9 +355,28 @@ export function ContractDetail({
                       <option value="baseline">{t('terms.cobBaseline')}</option>
                     </select>
                   </Field>
-                  <Field label={t('terms.carryOverRoundUpTo')} help={t('terms.hCarryOverRoundUpTo')}>
-                    <NumInput className={inputCls} value={tf.carryOverRoundUpTo}
-                      onChange={(v) => setTf({ ...tf, carryOverRoundUpTo: v })} />
+                  <Field label={t('terms.carryOverRounding')} help={t('terms.hCarryOverRounding')}>
+                    <select className={inputCls} value={tf.carryOverRounding}
+                      onChange={(e) => setTf({ ...tf, carryOverRounding: e.target.value as CarryOverRounding })}>
+                      <option value="up">{t('terms.corUp')}</option>
+                      <option value="down">{t('terms.corDown')}</option>
+                      <option value="nearest">{t('terms.corNearest')}</option>
+                    </select>
+                  </Field>
+                  <Field label={t('terms.carryOverRoundingStep')} help={t('terms.hCarryOverRoundingStep')}>
+                    <NumInput className={inputCls} value={tf.carryOverRoundingStep}
+                      onChange={(v) => setTf({ ...tf, carryOverRoundingStep: v })} />
+                  </Field>
+                  <Field label={t('terms.carryOverMaxPad')} help={t('terms.hCarryOverMaxPad')}>
+                    <NumInput className={inputCls} value={tf.carryOverMaxPad}
+                      onChange={(v) => setTf({ ...tf, carryOverMaxPad: v })} />
+                  </Field>
+                  <Field label={t('terms.carryOverConsumption')} help={t('terms.hCarryOverConsumption')}>
+                    <select className={inputCls} value={tf.carryOverConsumption}
+                      onChange={(e) => setTf({ ...tf, carryOverConsumption: e.target.value as CarryOverConsumption })}>
+                      <option value="carryOverFirst">{t('terms.cocCarryFirst')}</option>
+                      <option value="baselineFirst">{t('terms.cocBaselineFirst')}</option>
+                    </select>
                   </Field>
                   <Field label={t('terms.padInvoicing')} help={t('terms.hPadInvoicing')}>
                     <select className={inputCls} value={tf.padInvoicing}

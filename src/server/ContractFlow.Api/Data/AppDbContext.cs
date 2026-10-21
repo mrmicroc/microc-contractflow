@@ -372,7 +372,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
         builder.Entity<ContractTerms>(e =>
         {
             e.Property(t => t.CarryOverBasis).HasConversion<string>().HasMaxLength(20);
-            e.Property(t => t.CarryOverRoundUpTo).HasPrecision(9, 4);
+            e.Property(t => t.CarryOverRoundingStep).HasPrecision(9, 4);
+            e.Property(t => t.CarryOverMaxPad).HasPrecision(9, 4);
+            e.Property(t => t.CarryOverRounding).HasConversion<string>().HasMaxLength(10);
+            e.Property(t => t.CarryOverConsumption).HasConversion<string>().HasMaxLength(20);
             e.Property(t => t.PadInvoicing).HasConversion<string>().HasMaxLength(30);
             e.Property(t => t.AdditionalPadRate).HasPrecision(18, 2);
             e.Property(t => t.SharedDayMinimum).HasConversion<string>().HasMaxLength(20);

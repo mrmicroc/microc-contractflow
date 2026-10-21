@@ -512,6 +512,15 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("CarryOverConsumption")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal?>("CarryOverMaxPad")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
                     b.Property<decimal>("CarryOverMaxPercent")
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
@@ -519,7 +528,12 @@ namespace ContractFlow.Api.Migrations
                     b.Property<int>("CarryOverMonths")
                         .HasColumnType("int");
 
-                    b.Property<decimal>("CarryOverRoundUpTo")
+                    b.Property<string>("CarryOverRounding")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<decimal>("CarryOverRoundingStep")
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
 

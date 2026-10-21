@@ -642,47 +642,51 @@ public class PadService(AppDbContext db, TimeProvider clock)
         var released = releases.Sum(r => r.Open);
 
         var terms = await TermsForAsync(projectId, monthEnd, ct);
-        var maxPercent = terms?.CarryOverMaxPercent ?? 20m;
+        var policy = CarryOverPolicy.From(terms);
+        var maxPercent = policy.MaxPercent;
         var carryMonths = Math.Max(1, terms?.CarryOverMonths ?? 1);
-
-        var basis = terms?.CarryOverBasis ?? CarryOverBasis.UnusedBaseline;
-        var roundUpTo = terms?.CarryOverRoundUpTo ?? 1m;
 
         var carryIn = sums.CarryOverIn;
         var baselineUsed = PadMath.BaselineUsed(
-            sums.Baseline, sums.Utilised, carryIn, sums.BorrowedFromThisMonth);
+            sums.Baseline, sums.Utilised, carryIn, sums.BorrowedFromThisMonth, policy.Consumption);
         var carryOver = PadMath.CarryOver(
-            sums.Baseline, sums.Utilised, maxPercent, carryIn, sums.BorrowedFromThisMonth, basis, roundUpTo);
+            sums.Baseline, sums.Utilised, policy, carryIn, sums.BorrowedFromThisMonth);
         var expiredBaseline = PadMath.Expiry(
-            sums.Baseline, sums.Utilised, maxPercent, carryIn, sums.BorrowedFromThisMonth, basis, roundUpTo);
+            sums.Baseline, sums.Utilised, policy, carryIn, sums.BorrowedFromThisMonth);
         var unusedBaseline = Math.Max(0m, sums.Baseline - baselineUsed);
-        var cap = PadMath.CarryCap(sums.Baseline, unusedBaseline, maxPercent, basis, roundUpTo);
-        var capBasisText = basis == CarryOverBasis.Baseline
+        var cap = PadMath.CarryCap(sums.Baseline, unusedBaseline, policy);
+        var capBasisText = policy.Basis == CarryOverBasis.Baseline
             ? string.Create(Inv, $"baseline {sums.Baseline:0.####}")
             : string.Create(Inv, $"unused baseline {unusedBaseline:0.####}");
-        var capRoundText = roundUpTo > 0m
-            ? string.Create(Inv, $" rounded up to {roundUpTo:0.##}")
-            : "";
+        var capRoundText = (policy.RoundingStep > 0m
+                ? string.Create(Inv, $" rounded {policy.Rounding.ToString().ToLowerInvariant()} to {policy.RoundingStep:0.##}")
+                : "")
+            + (policy.MaxPad is { } ceiling ? string.Create(Inv, $", at most {ceiling:0.##}") : "");
 
         var reCarries = new List<(int, int, decimal)>();
         var residualExpiries = new List<(int, int, decimal)>();
-        foreach (var r in PadMath.CarryResiduals(allTxs, year, month))
+        foreach (var r in PadMath.CarryResiduals(allTxs, year, month, policy.Consumption))
         {
             var age = closingIndex - (r.OriginYear * 12 + r.OriginMonth);
             if (age < carryMonths) reCarries.Add((r.OriginYear, r.OriginMonth, r.Residual));
             else residualExpiries.Add((r.OriginYear, r.OriginMonth, r.Residual));
         }
 
-        var carryConsumed = Math.Min(sums.Utilised, carryIn);
+        var baselineFirst = policy.Consumption == CarryOverConsumption.BaselineFirst;
+        var carryConsumed = baselineFirst
+            ? Math.Min(carryIn, Math.Max(0m, sums.Utilised - (sums.Baseline - sums.BorrowedFromThisMonth)))
+            : Math.Min(sums.Utilised, carryIn);
         var steps = new List<CloseStepDto>
         {
             Step("baseline", sums.Baseline, $"Baseline {sums.Baseline:0.####}"),
             Step("carryOverIn", carryIn, $"Carry-over in {carryIn:0.####}"),
             Step("utilised", sums.Utilised, $"Utilised {sums.Utilised:0.####}"),
-            Step("carryConsumed", carryConsumed,
-                $"Carry-over consumed first: min({sums.Utilised:0.####}, {carryIn:0.####}) = {carryConsumed:0.####}"),
-            Step("baselineUsed", baselineUsed,
-                $"Baseline used: {sums.Utilised:0.####} − {carryConsumed:0.####} + {sums.BorrowedFromThisMonth:0.####} borrowed = {baselineUsed:0.####}"),
+            Step("carryConsumed", carryConsumed, baselineFirst
+                ? (FormattableString)$"Baseline consumed first; carry-over takes the rest: {carryConsumed:0.####}"
+                : $"Carry-over consumed first: min({sums.Utilised:0.####}, {carryIn:0.####}) = {carryConsumed:0.####}"),
+            Step("baselineUsed", baselineUsed, baselineFirst
+                ? (FormattableString)$"Baseline used: min({sums.Baseline:0.####}, {sums.Utilised:0.####} + {sums.BorrowedFromThisMonth:0.####} borrowed) = {baselineUsed:0.####}"
+                : $"Baseline used: {sums.Utilised:0.####} − {carryConsumed:0.####} + {sums.BorrowedFromThisMonth:0.####} borrowed = {baselineUsed:0.####}"),
             Step("unusedBaseline", sums.Baseline - baselineUsed,
                 $"Unused baseline: {sums.Baseline:0.####} − {baselineUsed:0.####} = {sums.Baseline - baselineUsed:0.####}"),
             Step("carryCap", cap,

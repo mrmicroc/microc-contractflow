@@ -24,52 +24,65 @@ public static class PadMath
     public static decimal Round4(decimal v) => Math.Round(v, 4, MidpointRounding.AwayFromZero);
 
     /// <summary>
-    /// Baseline actually consumed in a month. Carry-over is consumed before
-    /// baseline (§4.3), so utilisation first eats the month's carry-in; PAD
-    /// lent to the previous month's overrun (BorrowNextMonth) eats baseline
-    /// directly.
+    /// Baseline actually consumed in a month. Carry-over first (default,
+    /// §4.3): utilisation eats the month's carry-in before its baseline;
+    /// baseline first: the other way round. PAD lent to the previous month's
+    /// overrun (BorrowNextMonth) eats baseline directly either way.
     /// </summary>
     public static decimal BaselineUsed(
-        decimal baseline, decimal utilised, decimal carryIn = 0m, decimal borrowed = 0m) =>
-        Math.Min(baseline, Math.Max(0m, utilised - carryIn) + borrowed);
+        decimal baseline, decimal utilised, decimal carryIn = 0m, decimal borrowed = 0m,
+        CarryOverConsumption consumption = CarryOverConsumption.CarryOverFirst) =>
+        Math.Min(baseline, (consumption == CarryOverConsumption.BaselineFirst
+            ? Math.Max(0m, utilised)
+            : Math.Max(0m, utilised - carryIn)) + borrowed);
 
     /// <summary>
-    /// Carry-over cap: <paramref name="maxPercent"/> of the basis (the unused
-    /// baseline by default, or the whole baseline), rounded UP to a multiple
-    /// of <paramref name="roundUpTo"/> (1.00 = whole PAD; 0 = no rounding).
+    /// Carry-over cap: the policy's percentage of its basis (the unused
+    /// baseline by default, or the whole baseline), rounded in the policy's
+    /// direction to a multiple of its step, then held under the absolute
+    /// ceiling when one is set.
     /// </summary>
-    public static decimal CarryCap(decimal baseline, decimal unused, decimal maxPercent,
-        CarryOverBasis basis = CarryOverBasis.UnusedBaseline, decimal roundUpTo = 1m)
+    public static decimal CarryCap(decimal baseline, decimal unused, CarryOverPolicy policy)
     {
-        var raw = (basis == CarryOverBasis.Baseline ? baseline : Math.Max(0m, unused)) * maxPercent / 100m;
-        return Math.Max(0m, RoundUp(raw, roundUpTo));
+        var raw = (policy.Basis == CarryOverBasis.Baseline ? baseline : Math.Max(0m, unused))
+            * policy.MaxPercent / 100m;
+        var cap = Math.Max(0m, RoundTo(raw, policy.RoundingStep, policy.Rounding));
+        return policy.MaxPad is { } ceiling ? Math.Min(cap, Math.Max(0m, ceiling)) : cap;
     }
 
+    /// <summary>Rounds to a multiple of <paramref name="step"/> in the given
+    /// direction; step ≤ 0 → ledger precision only.</summary>
+    public static decimal RoundTo(decimal value, decimal step, CarryOverRounding direction) =>
+        step <= 0m ? Round4(value) : direction switch
+        {
+            CarryOverRounding.Down => Math.Floor(value / step) * step,
+            CarryOverRounding.Nearest => Math.Round(value / step, MidpointRounding.AwayFromZero) * step,
+            _ => Math.Ceiling(value / step) * step,
+        };
+
     /// <summary>Rounds up to a multiple of <paramref name="step"/>; step ≤ 0 → unchanged.</summary>
-    public static decimal RoundUp(decimal value, decimal step) =>
-        step <= 0m ? Round4(value) : Math.Ceiling(value / step) * step;
+    public static decimal RoundUp(decimal value, decimal step) => RoundTo(value, step, CarryOverRounding.Up);
 
     /// <summary>
     /// Carry-over at month close: only unused baseline can carry, at most the
-    /// cap and never more than what is unused. Unused-baseline basis (default):
+    /// cap and never more than what is unused (a carry larger than the unused
+    /// baseline would create PAD that was never allocated). Default policy:
     /// baseline 12, 3 used → 9 unused, 20 % = 1.8 → 2 carried; 11.5 used →
     /// 0.5 unused, cap 1 → 0.5 carried. Carry-in is consumed first: baseline
     /// 10 + carry-in 2 with 11 utilised leaves 1 unused baseline.
     /// </summary>
-    public static decimal CarryOver(decimal baseline, decimal utilised, decimal maxPercent,
-        decimal carryIn = 0m, decimal borrowed = 0m,
-        CarryOverBasis basis = CarryOverBasis.UnusedBaseline, decimal roundUpTo = 1m)
+    public static decimal CarryOver(decimal baseline, decimal utilised, CarryOverPolicy policy,
+        decimal carryIn = 0m, decimal borrowed = 0m)
     {
-        var unused = Math.Max(0m, baseline - BaselineUsed(baseline, utilised, carryIn, borrowed));
-        return Math.Min(unused, CarryCap(baseline, unused, maxPercent, basis, roundUpTo));
+        var unused = Math.Max(0m, baseline - BaselineUsed(baseline, utilised, carryIn, borrowed, policy.Consumption));
+        return Math.Min(unused, CarryCap(baseline, unused, policy));
     }
 
     /// <summary>PAD that dies at close: unused baseline that did not carry over.</summary>
-    public static decimal Expiry(decimal baseline, decimal utilised, decimal maxPercent,
-        decimal carryIn = 0m, decimal borrowed = 0m,
-        CarryOverBasis basis = CarryOverBasis.UnusedBaseline, decimal roundUpTo = 1m)
-        => Math.Max(0m, baseline - BaselineUsed(baseline, utilised, carryIn, borrowed))
-           - CarryOver(baseline, utilised, maxPercent, carryIn, borrowed, basis, roundUpTo);
+    public static decimal Expiry(decimal baseline, decimal utilised, CarryOverPolicy policy,
+        decimal carryIn = 0m, decimal borrowed = 0m)
+        => Math.Max(0m, baseline - BaselineUsed(baseline, utilised, carryIn, borrowed, policy.Consumption))
+           - CarryOver(baseline, utilised, policy, carryIn, borrowed);
 
     /// <summary>
     /// Splits a booked day's PAD between the projects sharing it. Proportional
@@ -174,7 +187,8 @@ public static class PadMath
     /// re-carry vs. expiry per origin age (ContractTerms.CarryOverMonths).
     /// </summary>
     public static List<(int OriginYear, int OriginMonth, decimal Residual)>
-        CarryResiduals(IEnumerable<PadTransaction> transactions, int closingYear, int closingMonth)
+        CarryResiduals(IEnumerable<PadTransaction> transactions, int closingYear, int closingMonth,
+            CarryOverConsumption consumption = CarryOverConsumption.CarryOverFirst)
     {
         // origin → residual alive; carry rows without an explicit origin are
         // treated as carried from the month before they landed (pre-lineage).
@@ -198,9 +212,15 @@ public static class PadMath
                     : PrevMonth(g.Key.Year, g.Key.Month);
                 residuals[origin] = residuals.GetValueOrDefault(origin) + c.Amount;
             }
-            // Carry-over is consumed before baseline (§4.3): utilisation eats
-            // living carry first; only the overflow reaches the month's pool.
-            var eatCarry = Math.Min(sums.Utilised, residuals.Values.Sum());
+            // Carry-over first (§4.3): utilisation eats living carry before the
+            // month's own pool. Baseline first: carry only takes what the
+            // month's own pool (baseline less lent, additional, adjustments)
+            // could not cover.
+            var ownPool = Math.Max(0m, sums.Baseline - sums.BorrowedFromThisMonth
+                + sums.AdditionalApproved + sums.Adjustments);
+            var eatCarry = consumption == CarryOverConsumption.BaselineFirst
+                ? Math.Min(Math.Max(0m, sums.Utilised - ownPool), residuals.Values.Sum())
+                : Math.Min(sums.Utilised, residuals.Values.Sum());
             // Allocate this month's carry consumption to the oldest origins.
             foreach (var origin in residuals.Keys.OrderBy(k => k.Y * 12 + k.M).ToList())
             {
@@ -291,4 +311,25 @@ public record OverrunSplit(
     bool NextMonthConflict)
 {
     public decimal Total => FromCurrentFree + FromAdditional + FromNextMonthBaseline + AutoAdditional;
+}
+
+/// <summary>
+/// A terms version's carry-over rules in one place (design §4.3 / contract
+/// 7.1) — percentage, basis, rounding direction + step, absolute ceiling and
+/// consumption order. <see cref="Default"/> reproduces the reference
+/// lump-sum contract: 20 % of unused baseline, rounded up to whole PAD.
+/// </summary>
+public record CarryOverPolicy(
+    decimal MaxPercent = 20m,
+    CarryOverBasis Basis = CarryOverBasis.UnusedBaseline,
+    CarryOverRounding Rounding = CarryOverRounding.Up,
+    decimal RoundingStep = 1m,
+    decimal? MaxPad = null,
+    CarryOverConsumption Consumption = CarryOverConsumption.CarryOverFirst)
+{
+    public static CarryOverPolicy Default { get; } = new();
+
+    public static CarryOverPolicy From(ContractTerms? t) => t is null ? Default : new(
+        t.CarryOverMaxPercent, t.CarryOverBasis, t.CarryOverRounding,
+        t.CarryOverRoundingStep, t.CarryOverMaxPad, t.CarryOverConsumption);
 }

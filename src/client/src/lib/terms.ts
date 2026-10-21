@@ -3,7 +3,7 @@
 // by Vitest (AGENTS.md testing discipline).
 import { numOr, numOrNull } from './versioned';
 import type {
-  CarryOverBasis, ContractTerms, ContractTermsRequestBody, PadInvoicing,
+  CarryOverBasis, CarryOverConsumption, CarryOverRounding, ContractTerms, ContractTermsRequestBody, PadInvoicing,
   SharedDayMinimum, TimeBilling,
 } from './types';
 
@@ -66,7 +66,10 @@ export type TermsForm = {
   includedVisits: string;
   // ── PAD rules ──
   carryOverBasis: CarryOverBasis;
-  carryOverRoundUpTo: string;
+  carryOverRounding: CarryOverRounding;
+  carryOverRoundingStep: string;
+  carryOverMaxPad: string;
+  carryOverConsumption: CarryOverConsumption;
   padInvoicing: PadInvoicing;
   additionalPadRate: string;
   sharedDayMinimum: SharedDayMinimum;
@@ -89,7 +92,8 @@ export const emptyTerms: TermsForm = {
   cancellationSteps: [], holidayCalendar: 'SE',
   travelExpensePolicy: '', indexation: '', notes: '',
   includedVisits: '',
-  carryOverBasis: 'unusedBaseline', carryOverRoundUpTo: '1',
+  carryOverBasis: 'unusedBaseline', carryOverRounding: 'up', carryOverRoundingStep: '1',
+  carryOverMaxPad: '', carryOverConsumption: 'carryOverFirst',
   padInvoicing: 'utilised', additionalPadRate: '',
   sharedDayMinimum: 'proportional',
   unbookedTimeConsumesPad: false, unbookedTimeIncrementMinutes: '15',
@@ -133,7 +137,10 @@ export const fromTerms = (v: ContractTerms, effectiveFrom: string): TermsForm =>
   notes: v.notes ?? '',
   includedVisits: s(v.includedVisits ?? null),
   carryOverBasis: v.padRules?.carryOverBasis ?? emptyTerms.carryOverBasis,
-  carryOverRoundUpTo: v.padRules ? String(v.padRules.carryOverRoundUpTo) : emptyTerms.carryOverRoundUpTo,
+  carryOverRounding: v.padRules?.carryOverRounding ?? emptyTerms.carryOverRounding,
+  carryOverRoundingStep: v.padRules ? String(v.padRules.carryOverRoundingStep) : emptyTerms.carryOverRoundingStep,
+  carryOverMaxPad: s(v.padRules?.carryOverMaxPad ?? null),
+  carryOverConsumption: v.padRules?.carryOverConsumption ?? emptyTerms.carryOverConsumption,
   padInvoicing: v.padRules?.padInvoicing ?? emptyTerms.padInvoicing,
   additionalPadRate: s(v.padRules?.additionalPadRate ?? null),
   sharedDayMinimum: v.padRules?.sharedDayMinimum ?? emptyTerms.sharedDayMinimum,
@@ -197,7 +204,10 @@ export function termsFormToBody(tf: TermsForm): ContractTermsRequestBody {
     // PAD rules travel with every version (defaults when PAD is off) — the
     // server stores them regardless, so a later PAD switch-on starts sane.
     carryOverBasis: tf.carryOverBasis,
-    carryOverRoundUpTo: numOr(tf.carryOverRoundUpTo, 1),
+    carryOverRounding: tf.carryOverRounding,
+    carryOverRoundingStep: numOr(tf.carryOverRoundingStep, 1),
+    carryOverMaxPad: numOrNull(tf.carryOverMaxPad),
+    carryOverConsumption: tf.carryOverConsumption,
     padInvoicing: tf.padInvoicing,
     additionalPadRate: tf.padEnabled ? numOrNull(tf.additionalPadRate) : null,
     sharedDayMinimum: tf.sharedDayMinimum,

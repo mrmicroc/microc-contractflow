@@ -5,14 +5,17 @@ namespace ContractFlow.Api.Models.Dto;
 
 /// <summary>The PAD rules of a terms version (see <c>ContractTermsPadRules.cs</c>).</summary>
 public record PadRulesDto(
-    CarryOverBasis CarryOverBasis, decimal CarryOverRoundUpTo,
+    CarryOverBasis CarryOverBasis, CarryOverRounding CarryOverRounding,
+    decimal CarryOverRoundingStep, decimal? CarryOverMaxPad,
+    CarryOverConsumption CarryOverConsumption,
     PadInvoicing PadInvoicing, decimal? AdditionalPadRate,
     SharedDayMinimum SharedDayMinimum,
     bool UnbookedTimeConsumesPad, int UnbookedTimeIncrementMinutes,
     TimeOnly DefaultStartTime, int StartTimeNoticeBusinessDays)
 {
     public static PadRulesDto From(ContractTerms t) => new(
-        t.CarryOverBasis, t.CarryOverRoundUpTo, t.PadInvoicing, t.AdditionalPadRate,
+        t.CarryOverBasis, t.CarryOverRounding, t.CarryOverRoundingStep, t.CarryOverMaxPad,
+        t.CarryOverConsumption, t.PadInvoicing, t.AdditionalPadRate,
         t.SharedDayMinimum, t.UnbookedTimeConsumesPad, t.UnbookedTimeIncrementMinutes,
         t.DefaultStartTime, t.StartTimeNoticeBusinessDays);
 }
@@ -22,8 +25,14 @@ public record PadRulesDto(
 public partial class ContractTermsRequest
 {
     public CarryOverBasis CarryOverBasis { get; set; } = CarryOverBasis.UnusedBaseline;
+    public CarryOverRounding CarryOverRounding { get; set; } = CarryOverRounding.Up;
+    /// <summary>Rounding step for the carry-over cap; 0 = no rounding.</summary>
     [Range(0, 100)]
-    public decimal CarryOverRoundUpTo { get; set; } = 1m;
+    public decimal CarryOverRoundingStep { get; set; } = 1m;
+    /// <summary>Absolute ceiling on PAD carried out of one month; null = none.</summary>
+    [Range(0, 10000)]
+    public decimal? CarryOverMaxPad { get; set; }
+    public CarryOverConsumption CarryOverConsumption { get; set; } = CarryOverConsumption.CarryOverFirst;
     public PadInvoicing PadInvoicing { get; set; } = PadInvoicing.Utilised;
     public decimal? AdditionalPadRate { get; set; }
     public SharedDayMinimum SharedDayMinimum { get; set; } = SharedDayMinimum.Proportional;
@@ -38,7 +47,10 @@ public partial class ContractTermsRequest
     public void ApplyPadRules(ContractTerms t)
     {
         t.CarryOverBasis = CarryOverBasis;
-        t.CarryOverRoundUpTo = CarryOverRoundUpTo;
+        t.CarryOverRounding = CarryOverRounding;
+        t.CarryOverRoundingStep = CarryOverRoundingStep;
+        t.CarryOverMaxPad = CarryOverMaxPad;
+        t.CarryOverConsumption = CarryOverConsumption;
         t.PadInvoicing = PadInvoicing;
         t.AdditionalPadRate = AdditionalPadRate;
         t.SharedDayMinimum = SharedDayMinimum;

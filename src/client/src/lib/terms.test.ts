@@ -11,12 +11,14 @@ const step = (min: string, hours = '', amount = '', fraction = '') =>
 /** A stored version as the API returns it: PAD rules nested, not top-level. */
 function asStored(body: ContractTermsRequestBody, version = 3): ContractTerms {
   const {
-    carryOverBasis, carryOverRoundUpTo, padInvoicing, additionalPadRate, sharedDayMinimum,
+    carryOverBasis, carryOverRounding, carryOverRoundingStep, carryOverMaxPad, carryOverConsumption,
+    padInvoicing, additionalPadRate, sharedDayMinimum,
     unbookedTimeConsumesPad, unbookedTimeIncrementMinutes, defaultStartTime,
     startTimeNoticeBusinessDays, ...rest
   } = body;
   const padRules: PadRules = {
-    carryOverBasis, carryOverRoundUpTo, padInvoicing, additionalPadRate, sharedDayMinimum,
+    carryOverBasis, carryOverRounding, carryOverRoundingStep, carryOverMaxPad, carryOverConsumption,
+    padInvoicing, additionalPadRate, sharedDayMinimum,
     unbookedTimeConsumesPad, unbookedTimeIncrementMinutes, defaultStartTime,
     startTimeNoticeBusinessDays,
   };
@@ -29,14 +31,14 @@ describe('termsFormToBody', () => {
       ...base, padEnabled: true,
       carryOverMaxPercent: '0', minPadPerBookedDay: '0', overtimePercent: '0',
       cancellationDeadlineBusinessDays: '0', expenseMarkupPercent: '0',
-      carryOverRoundUpTo: '0', startTimeNoticeBusinessDays: '0', includedVisits: '0',
+      carryOverRoundingStep: '0', startTimeNoticeBusinessDays: '0', includedVisits: '0',
     });
     expect(body.carryOverMaxPercent).toBe(0);
     expect(body.minPadPerBookedDay).toBe(0);
     expect(body.overtimePercent).toBe(0);
     expect(body.cancellationDeadlineBusinessDays).toBe(0);
     expect(body.expenseMarkupPercent).toBe(0);
-    expect(body.carryOverRoundUpTo).toBe(0);
+    expect(body.carryOverRoundingStep).toBe(0);
     expect(body.startTimeNoticeBusinessDays).toBe(0);
     expect(body.includedVisits).toBe(0);
   });
@@ -45,13 +47,13 @@ describe('termsFormToBody', () => {
     const body = termsFormToBody({
       ...base, overtimeAfterHours: '', overtimePercent: '', padHoursPerDay: '',
       minPadPerBookedDay: '', carryOverMaxPercent: '', carryOverMonths: '',
-      cancellationDeadlineBusinessDays: '', carryOverRoundUpTo: '',
+      cancellationDeadlineBusinessDays: '', carryOverRoundingStep: '',
       unbookedTimeIncrementMinutes: '', startTimeNoticeBusinessDays: '', defaultStartTime: '',
     });
     expect(body).toMatchObject({
       overtimeAfterHours: 8, overtimePercent: 150, padHoursPerDay: 8, minPadPerBookedDay: 1,
       carryOverMaxPercent: 20, carryOverMonths: 1, cancellationDeadlineBusinessDays: 4,
-      carryOverRoundUpTo: 1, unbookedTimeIncrementMinutes: 15, startTimeNoticeBusinessDays: 4,
+      carryOverRoundingStep: 1, unbookedTimeIncrementMinutes: 15, startTimeNoticeBusinessDays: 4,
       defaultStartTime: '08:00:00', includedVisits: null,
     });
   });
@@ -67,13 +69,13 @@ describe('termsFormToBody', () => {
   it('parses Swedish comma decimals (§5: expense 1 200 + 10 % mark-up)', () => {
     const body = termsFormToBody({
       ...base, hourlyRate: '1250,50', expenseMarkupPercent: '10', minBillableHoursPerDay: '7,5',
-      padEnabled: true, additionalPadRate: '9500,5', carryOverRoundUpTo: '0,5',
+      padEnabled: true, additionalPadRate: '9500,5', carryOverRoundingStep: '0,5',
     });
     expect(body.hourlyRate).toBe(1250.5);
     expect(body.expenseMarkupPercent).toBe(10);
     expect(body.minBillableHoursPerDay).toBe(7.5);
     expect(body.additionalPadRate).toBe(9500.5);
-    expect(body.carryOverRoundUpTo).toBe(0.5);
+    expect(body.carryOverRoundingStep).toBe(0.5);
   });
 
   it('only persists fields of the chosen components', () => {
@@ -153,14 +155,16 @@ describe('fromTerms', () => {
   it('round-trips the PAD rules (nested on the stored version)', () => {
     const v = asStored(termsFormToBody({
       ...base, padEnabled: true, padRate: '1000',
-      carryOverBasis: 'baseline', carryOverRoundUpTo: '0,5', padInvoicing: 'allocationConsumed',
+      carryOverBasis: 'baseline', carryOverRounding: 'nearest', carryOverRoundingStep: '0,5',
+      carryOverMaxPad: '2,5', carryOverConsumption: 'baselineFirst', padInvoicing: 'allocationConsumed',
       additionalPadRate: '1200', sharedDayMinimum: 'perProject', unbookedTimeConsumesPad: true,
       unbookedTimeIncrementMinutes: '30', defaultStartTime: '07:00', startTimeNoticeBusinessDays: '3',
       includedVisits: '20',
     }));
     const form = fromTerms(v, '2026-11-01');
     expect(form).toMatchObject({
-      carryOverBasis: 'baseline', carryOverRoundUpTo: '0.5', padInvoicing: 'allocationConsumed',
+      carryOverBasis: 'baseline', carryOverRounding: 'nearest', carryOverRoundingStep: '0.5',
+      carryOverMaxPad: '2.5', carryOverConsumption: 'baselineFirst', padInvoicing: 'allocationConsumed',
       additionalPadRate: '1200', sharedDayMinimum: 'perProject', unbookedTimeConsumesPad: true,
       unbookedTimeIncrementMinutes: '30', defaultStartTime: '07:00', startTimeNoticeBusinessDays: '3',
       includedVisits: '20',
@@ -191,5 +195,15 @@ describe('padRuleTags', () => {
 
   it('a version without PAD shows no PAD rule tags', () => {
     expect(padRuleTags(asStored(termsFormToBody(base)))).toEqual([]);
+  });
+});
+
+describe('carry-over settings', () => {
+  it('an empty ceiling means no ceiling; defaults round up to whole PAD, carry first', () => {
+    const body = termsFormToBody(emptyTerms);
+    expect(body.carryOverMaxPad).toBeNull();
+    expect(body.carryOverRounding).toBe('up');
+    expect(body.carryOverRoundingStep).toBe(1);
+    expect(body.carryOverConsumption).toBe('carryOverFirst');
   });
 });

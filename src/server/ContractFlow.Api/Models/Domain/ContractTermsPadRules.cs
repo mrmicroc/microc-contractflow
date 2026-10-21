@@ -11,6 +11,26 @@ public enum CarryOverBasis
     Baseline,
 }
 
+/// <summary>Direction the carry-over cap rounds to a multiple of the step.</summary>
+public enum CarryOverRounding
+{
+    /// <summary>Up to the next multiple — 1.8 → 2 at step 1 (default).</summary>
+    Up,
+    /// <summary>Down to the previous multiple — 1.8 → 1.</summary>
+    Down,
+    /// <summary>To the nearest multiple, halves away from zero — 1.5 → 2, 1.4 → 1.</summary>
+    Nearest,
+}
+
+/// <summary>Which pool a month's utilisation draws from first.</summary>
+public enum CarryOverConsumption
+{
+    /// <summary>Carried-in PAD before the month's baseline (default, §4.3).</summary>
+    CarryOverFirst,
+    /// <summary>The month's baseline before carried-in PAD.</summary>
+    BaselineFirst,
+}
+
 /// <summary>Which PAD quantity the month's PAD line bills.</summary>
 public enum PadInvoicing
 {
@@ -45,9 +65,17 @@ public partial class ContractTerms
     /// <summary>What <see cref="CarryOverMaxPercent"/> is a share of — default
     /// the actual unused baseline.</summary>
     public CarryOverBasis CarryOverBasis { get; set; } = CarryOverBasis.UnusedBaseline;
-    /// <summary>The carry-over cap rounds UP to a multiple of this — 1.00 =
-    /// whole PAD (default); 0 = no rounding.</summary>
-    public decimal CarryOverRoundUpTo { get; set; } = 1m;
+    /// <summary>Direction the carry-over cap rounds (default up).</summary>
+    public CarryOverRounding CarryOverRounding { get; set; } = CarryOverRounding.Up;
+    /// <summary>The carry-over cap rounds to a multiple of this — 1.00 =
+    /// whole PAD (default), 0.5 = half PAD; 0 = no rounding.</summary>
+    public decimal CarryOverRoundingStep { get; set; } = 1m;
+    /// <summary>Absolute ceiling on PAD carried out of one month, applied
+    /// after the percentage and rounding; null = no ceiling.</summary>
+    public decimal? CarryOverMaxPad { get; set; }
+    /// <summary>Which pool utilisation draws from first (default carry-over
+    /// before baseline).</summary>
+    public CarryOverConsumption CarryOverConsumption { get; set; } = CarryOverConsumption.CarryOverFirst;
 
     /// <summary>Which PAD quantity is billed each month — default utilised
     /// only; lump-sum contracts bill consumed allocation incl. expiry.</summary>

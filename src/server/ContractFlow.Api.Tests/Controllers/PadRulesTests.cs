@@ -236,6 +236,31 @@ public class PadRulesTests : IClassFixture<ContractFlowWebApplicationFactory>
     }
 
     [Fact]
+    public async Task CarryOverSettings_StoredOnTerms_AndDriveTheClose()
+    {
+        var (ids, _) = await TwoProjectsAsync("carry-settings", new
+        {
+            carryOverMaxPercent = 50m, carryOverRounding = "down", carryOverRoundingStep = 0.5m,
+            carryOverMaxPad = 2m, carryOverConsumption = "baselineFirst",
+        });
+        var terms = await Admin.GetFromJsonAsync<JsonElement[]>($"/api/contracts/{ids.ContractId}/terms");
+        var rules = terms!.OrderByDescending(t => t.GetProperty("version").GetInt32()).First().GetProperty("padRules");
+        Assert.Equal("down", rules.GetProperty("carryOverRounding").GetString());
+        Assert.Equal(0.5m, rules.GetProperty("carryOverRoundingStep").GetDecimal());
+        Assert.Equal(2m, rules.GetProperty("carryOverMaxPad").GetDecimal());
+        Assert.Equal("baselineFirst", rules.GetProperty("carryOverConsumption").GetString());
+
+        // Baseline 10, 7.3 used → 2.7 unused → 50 % = 1.35 → down to 1.0 (step
+        // 0.5), under the 2 PAD ceiling → 1 carried, 1.7 expire.
+        await Scaffold.SetBaselineAsync(Admin, ids, 2030, 4, 10m);
+        await SeedLedgerAsync(ids.ProjectId, 2030, 4, PadTransactionType.Utilise, 7.3m);
+        (await Admin.PostAsync($"/api/projects/{ids.ProjectId}/pad/2030/4/close", null)).EnsureSuccessStatusCode();
+        var april = await DashAsync(ids.ProjectId, 2030, 4);
+        Assert.Equal(1m, Prop(april, "carryOverOut"));
+        Assert.Equal(1.7m, Prop(april, "expired"));
+    }
+
+    [Fact]
     public async Task UnbookedTime_AtPackageOutsideContract_BillsHoursAndConsumesNoPad()
     {
         var (ids, _) = await TwoProjectsAsync("unbooked-outside", new { unbookedTimeConsumesPad = true });

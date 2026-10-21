@@ -37,8 +37,8 @@ cd src/server && dotnet build && dotnet test
 ```
 
 ## Test counts (update after adding tests)
-- Backend: 394
-- Frontend: 201 (25 test files)
+- Backend: 407
+- Frontend: 202 (25 test files)
 
 ## Gotchas
 - A running local backend (`dotnet run`) locks `ContractFlow.Api\bin` — stop it
