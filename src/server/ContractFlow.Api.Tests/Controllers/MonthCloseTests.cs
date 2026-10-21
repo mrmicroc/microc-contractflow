@@ -55,13 +55,13 @@ public class MonthCloseTests : IClassFixture<ContractFlowWebApplicationFactory>
     public async Task Close_CarryConsumedBeforeBaseline()
     {
         var ids = await Scaffold.CommercialGraphAsync(Admin, "carryfirst");
-        // Jan: baseline 10, 8 used → 2 carry into Feb.
+        // Jan: baseline 10, 3 used → 7 unused, 20 % = 1.4 → 2 carry into Feb.
         await Scaffold.SetBaselineAsync(Admin, ids, 2029, 1, 10m);
-        await UseDaysAsync(ids, 2029, 1, 8);
+        await UseDaysAsync(ids, 2029, 1, 3);
         (await CloseAsync(ids, 2029, 1)).EnsureSuccessStatusCode();
 
         // Feb: baseline 10 + carry-in 2, 11 used → carry eaten first, baseline
-        // 9 used → 1 unused carries, 0 expires (design §4.3).
+        // 9 used → 1 unused; 20 % of 1 rounds up to 1 → 1 carries, 0 expires.
         await Scaffold.SetBaselineAsync(Admin, ids, 2029, 2, 10m);
         await UseDaysAsync(ids, 2029, 2, 11);
         var close = await CloseAsync(ids, 2029, 2);
@@ -90,7 +90,11 @@ public class MonthCloseTests : IClassFixture<ContractFlowWebApplicationFactory>
         Assert.False(preview.GetProperty("canClose").GetBoolean());
         Assert.Contains("unresolvedBookings", Codes(preview, "checklist"));
         Assert.Contains("carryCap", Codes(preview, "steps"));
-        Assert.Equal(2m, preview.GetProperty("result").GetProperty("carryOverOut").GetDecimal());
+        // 3 unused → 20 % = 0.6 → 1 carried; the cap step explains its basis.
+        Assert.Equal(1m, preview.GetProperty("result").GetProperty("carryOverOut").GetDecimal());
+        var capStep = preview.GetProperty("steps").EnumerateArray()
+            .First(s => s.GetProperty("code").GetString() == "carryCap");
+        Assert.Contains("unused baseline 3", capStep.GetProperty("explanation").GetString());
         var after = (await DashAsync(ids, 2029, 4)).GetProperty("transactions").GetArrayLength();
         Assert.Equal(before, after);
         Assert.False((await DashAsync(ids, 2029, 4)).GetProperty("closed").GetBoolean());

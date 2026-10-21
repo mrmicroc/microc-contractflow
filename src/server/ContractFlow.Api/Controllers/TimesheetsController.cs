@@ -167,17 +167,27 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
                 .Where(w => packageIds.Contains(w.Id) && w.PricingMode == WorkPackagePricing.OutsideContract)
                 .Select(w => w.Id).ToListAsync(ct))
             .ToHashSet();
+        var sharedDays = sheet.Entries.Count == 0 ? []
+            : await PadCoverage.SharedDaysAsync(Db, [sheet.ResourceId],
+                sheet.Entries.Min(e => e.Date), sheet.Entries.Max(e => e.Date), ct);
 
         foreach (var day in sheet.Entries.GroupBy(e => e.Date))
         {
             var date = day.Key;
+            // "Booked" = covered by the PAD line (booked day, shared booked
+            // day, or unbooked services consuming PAD) — never priced as hours.
             var rows = day.Where(e => Counted.Contains(e.Category))
                 .Select(e =>
                 {
                     var wp = e.BookingId is { } bid ? bookingPackages.GetValueOrDefault(bid) : e.WorkPackageId;
+                    // PAD-covered (booked, shared day or unbooked-consumes-PAD)
+                    // unless the package lies outside the contract — Outside wins.
+                    var covered = PadCoverage.Covers(DayBilling.TermsAt(allTerms, projectContracts[e.ProjectId], date),
+                            e.BookingId != null, e.Billing, sharedDays.Contains((sheet.ResourceId, date, e.ProjectId)))
+                        || e.BookingId != null;
                     return new DayRow(
                         e.Id, e.ProjectId, projectContracts[e.ProjectId], wp,
-                        e.Billing, e.BookingId != null, e.ActualHours,
+                        e.Billing, covered, e.ActualHours,
                         wp is { } w && outsidePackages.Contains(w));
                 })
                 .ToList();
@@ -215,7 +225,13 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         {
             TimesheetId = sheet.Id, Action = TimesheetReviewAction.Approved, ByUserId = me?.Id,
         });
-        await Db.SaveChangesAsync(ct);
+        // Approval and the PAD consumed by unbooked services land together.
+        await pad.InTransactionAsync(async () =>
+        {
+            await Db.SaveChangesAsync(ct);
+            await pad.ConsumeUnbookedAsync(sheet.Entries.Where(e => Counted.Contains(e.Category)), me?.Id, ct);
+            return true;
+        }, ct);
         return Ok(ReportingMapper.Sheet(sheet));
     }
 
@@ -278,6 +294,9 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
                 return Conflict(new { error = "statementFinal", message = "A final statement covers this week." });
 
         foreach (var e in sheet.Entries) e.InvoiceSpecificationId = null;
+        // PAD consumed by the week's unbooked services is given back
+        // (append-only reversal rows); re-approval consumes afresh.
+        await pad.ReverseUnbookedAsync(entryIds, (await Me(ct))?.Id, ct);
         return await ReleaseAsync(id, TimesheetStatus.Returned, reason, ct,
             TimesheetReviewAction.Reopened, sheet);
     }

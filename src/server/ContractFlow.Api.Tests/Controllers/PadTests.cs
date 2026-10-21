@@ -43,12 +43,13 @@ public class PadTests : IClassFixture<ContractFlowWebApplicationFactory>
     }
 
     [Fact]
-    public async Task CloseMonth_SpecExample_Carries2Expires1()
+    public async Task CloseMonth_Baseline10Used7_Carries1Expires2()
     {
         var admin = factory.CreateUserClient(DevSeed.AdminId);
         var ids = await Scaffold.CommercialGraphAsync(admin, "close");
 
-        // Spec §5 worked example: baseline 10, used 7 → carry-over 2, expire 1.
+        // Baseline 10, used 7 → 3 unused; 20 % of the unused (0.6) rounds up
+        // to 1 carried, 2 expire (default unused-baseline basis).
         await Scaffold.SetBaselineAsync(admin, ids, 2027, 7, 10m);
         for (var day = 1; day <= 7; day++)
         {
@@ -61,19 +62,19 @@ public class PadTests : IClassFixture<ContractFlowWebApplicationFactory>
             $"/api/projects/{ids.ProjectId}/pad/2027/7/close", null);
         Assert.Equal(HttpStatusCode.OK, close.StatusCode);
         var result = await close.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(2m, result.GetProperty("carryOverOut").GetDecimal());
-        Assert.Equal(1m, result.GetProperty("expired").GetDecimal());
+        Assert.Equal(1m, result.GetProperty("carryOverOut").GetDecimal());
+        Assert.Equal(2m, result.GetProperty("expired").GetDecimal());
 
         var dash = await DashAsync(admin, ids, 2027, 7);
         Assert.True(dash!.Closed);
-        Assert.Equal(2m, dash.CarryOverOut);
-        Assert.Equal(1m, dash.Expired);
+        Assert.Equal(1m, dash.CarryOverOut);
+        Assert.Equal(2m, dash.Expired);
 
         // Carry-over enters a month that has zero baseline (§4.3).
         var next = await DashAsync(admin, ids, 2027, 8);
         Assert.Equal(0m, next!.Baseline);
-        Assert.Equal(2m, next.CarryOverIn);
-        Assert.Equal(2m, next.Free);
+        Assert.Equal(1m, next.CarryOverIn);
+        Assert.Equal(1m, next.Free);
     }
 
     [Fact]
@@ -86,7 +87,7 @@ public class PadTests : IClassFixture<ContractFlowWebApplicationFactory>
         {
             effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
             timeBilling = "hourly", padEnabled = true, padRate = 100m,
-            carryOverMaxPercent = 50m, carryOverMonths = 2,
+            carryOverMaxPercent = 50m, carryOverMonths = 2, carryOverBasis = "baseline",
         });
 
         // Jan 2028: baseline 10, use 8 → 2 carries into Feb (cap allows 5).

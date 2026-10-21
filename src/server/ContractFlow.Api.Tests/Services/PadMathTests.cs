@@ -15,19 +15,50 @@ public class PadMathTests
         => Assert.Equal(expected, PadMath.CommitAmount(hours, padHoursPerDay: 8m, minPadPerBookedDay: 1m));
 
     [Fact]
-    public void CarryOver_SpecExample_Baseline10Used7_Carries2()
+    public void CarryOver_Baseline10Used7_Carries1_UnusedBasis()
     {
-        // Spec §5: 10 baseline days, 7 used → carry-over 2 (20 % of baseline,
-        // rounded up, capped at unused), 1 expires.
-        Assert.Equal(2m, PadMath.CarryOver(baseline: 10m, utilised: 7m, maxPercent: 20m));
-        Assert.Equal(1m, PadMath.Expiry(baseline: 10m, utilised: 7m, maxPercent: 20m));
+        // 20 % of the 3 unused = 0.6 → rounds up to 1 carried; 2 expire.
+        Assert.Equal(1m, PadMath.CarryOver(baseline: 10m, utilised: 7m, maxPercent: 20m));
+        Assert.Equal(2m, PadMath.Expiry(baseline: 10m, utilised: 7m, maxPercent: 20m));
+    }
+
+    [Fact]
+    public void CarryOver_BaselineBasis_KeepsTheOlderRule()
+    {
+        // Configurable: 20 % of the whole baseline (10 → 2), capped at unused.
+        Assert.Equal(2m, PadMath.CarryOver(10m, 7m, 20m, basis: CarryOverBasis.Baseline));
+        Assert.Equal(1m, PadMath.Expiry(10m, 7m, 20m, basis: CarryOverBasis.Baseline));
+        Assert.Equal(1.5m, PadMath.CarryOver(10m, 8.5m, 20m, basis: CarryOverBasis.Baseline));
+    }
+
+    /// <summary>The contract document's carry-over table: monthly baseline 12,
+    /// max 20 % of the actual unused baseline rounded up to whole PAD, never
+    /// more than what is unused.</summary>
+    [Theory]
+    [InlineData(3.00, 2.00)]
+    [InlineData(7.00, 1.00)]
+    [InlineData(8.00, 1.00)]
+    [InlineData(10.50, 1.00)]
+    [InlineData(11.00, 1.00)]
+    [InlineData(11.50, 0.50)]
+    [InlineData(11.90, 0.10)]
+    [InlineData(12.00, 0.00)]
+    public void CarryOver_DocumentTable(decimal utilised, decimal maxCarry)
+        => Assert.Equal(maxCarry, PadMath.CarryOver(12m, utilised, 20m));
+
+    [Fact]
+    public void CarryOver_RoundUpStepConfigurable()
+    {
+        Assert.Equal(1.8m, PadMath.CarryOver(12m, 3m, 20m, roundUpTo: 0m));    // no rounding
+        Assert.Equal(2m, PadMath.CarryOver(12m, 3m, 20m, roundUpTo: 0.5m));    // 1.8 → 2.0
+        Assert.Equal(0.25m, PadMath.CarryOver(12m, 11m, 20m, roundUpTo: 0.25m)); // 0.2 → 0.25
     }
 
     [Theory]
     [InlineData(10, 10, 0, 0)]   // fully used — nothing to carry or expire
-    [InlineData(10, 0, 2, 8)]    // nothing used — carry capped at 20 % of baseline
+    [InlineData(10, 0, 2, 8)]    // nothing used — 20 % of 10 unused = 2
     [InlineData(11, 0, 3, 8)]    // 20 % of 11 = 2.2 → rounds up to 3
-    [InlineData(10, 8.5, 1.5, 0)] // unused 1.5 < cap 2 → carries the actual unused
+    [InlineData(10, 8.5, 1, 0.5)] // 20 % of 1.5 = 0.3 → 1 (capped at the 1.5 unused)
     public void CarryOver_Rules(decimal baseline, decimal used, decimal carry, decimal expire)
     {
         Assert.Equal(carry, PadMath.CarryOver(baseline, used, 20m));
@@ -50,8 +81,8 @@ public class PadMathTests
     {
         // 2 PAD lent to last month's overrun eat this month's baseline directly.
         Assert.Equal(7m, PadMath.BaselineUsed(10m, 5m, borrowed: 2m));
-        Assert.Equal(2m, PadMath.CarryOver(10m, 5m, 20m, borrowed: 2m));
-        Assert.Equal(1m, PadMath.Expiry(10m, 5m, 20m, borrowed: 2m));
+        Assert.Equal(1m, PadMath.CarryOver(10m, 5m, 20m, borrowed: 2m)); // 20 % of 3 unused → 1
+        Assert.Equal(2m, PadMath.Expiry(10m, 5m, 20m, borrowed: 2m));
     }
 
     [Fact]

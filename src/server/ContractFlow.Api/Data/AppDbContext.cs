@@ -27,6 +27,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
     public DbSet<CompensationAgreement> CompensationAgreements => Set<CompensationAgreement>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<PadTransaction> PadTransactions => Set<PadTransaction>();
+    public DbSet<BookingProjectShare> BookingProjectShares => Set<BookingProjectShare>();
+    public DbSet<BookingStartTimeChange> BookingStartTimeChanges => Set<BookingStartTimeChange>();
     public DbSet<AdditionalPadRequest> AdditionalPadRequests => Set<AdditionalPadRequest>();
     public DbSet<ProjectMonthClose> ProjectMonthCloses => Set<ProjectMonthClose>();
     public DbSet<TimeEntry> TimeEntries => Set<TimeEntry>();
@@ -334,15 +336,46 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
                 .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(t => t.Booking).WithMany()
                 .HasForeignKey(t => t.BookingId).OnDelete(DeleteBehavior.SetNull);
-            // One commitment per booking and one approval row per request —
-            // a concurrent double confirm/approve fails here instead of
-            // reserving PAD twice.
-            e.HasIndex(t => t.BookingId).IsUnique()
+            // One commitment per booking and project (a shared booked day
+            // commits once in each project's ledger) and one approval row per
+            // request — a concurrent double confirm/approve fails here instead
+            // of reserving PAD twice.
+            e.HasIndex(t => new { t.BookingId, t.ProjectId }).IsUnique()
                 .HasFilter("[Type] = 'Commit' AND [BookingId] IS NOT NULL")
                 .HasDatabaseName("IX_PadTransactions_BookingId_Commit");
+            e.HasIndex(t => t.TimeEntryId);
+            e.HasOne<TimeEntry>().WithMany()
+                .HasForeignKey(t => t.TimeEntryId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(t => t.AdditionalPadRequestId).IsUnique()
                 .HasFilter("[Type] = 'AdditionalApproved' AND [AdditionalPadRequestId] IS NOT NULL")
                 .HasDatabaseName("IX_PadTransactions_AdditionalPadRequestId_Approved");
+        });
+
+        builder.Entity<BookingProjectShare>(e =>
+        {
+            e.Property(s => s.PlannedHours).HasPrecision(9, 4);
+            e.HasIndex(s => new { s.BookingId, s.ProjectId }).IsUnique();
+            e.HasOne(s => s.Booking).WithMany(b => b.Shares)
+                .HasForeignKey(s => s.BookingId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(s => s.Project).WithMany()
+                .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<BookingStartTimeChange>(e =>
+        {
+            e.HasIndex(c => new { c.BookingId, c.ChangedUtc });
+            e.HasOne(c => c.Booking).WithMany(b => b.StartTimeChanges)
+                .HasForeignKey(c => c.BookingId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // PAD rules of a terms version (ContractTermsPadRules.cs).
+        builder.Entity<ContractTerms>(e =>
+        {
+            e.Property(t => t.CarryOverBasis).HasConversion<string>().HasMaxLength(20);
+            e.Property(t => t.CarryOverRoundUpTo).HasPrecision(9, 4);
+            e.Property(t => t.PadInvoicing).HasConversion<string>().HasMaxLength(30);
+            e.Property(t => t.AdditionalPadRate).HasPrecision(18, 2);
+            e.Property(t => t.SharedDayMinimum).HasConversion<string>().HasMaxLength(20);
         });
 
         builder.Entity<AdditionalPadRequest>(e =>

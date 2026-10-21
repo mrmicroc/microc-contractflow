@@ -615,8 +615,11 @@ public class MoneyRulesTests(ContractFlowWebApplicationFactory factory)
         await UtiliseAsync(ids.ProjectId, 2029, 9, 3m, 5m);
 
         var inv = await InvoiceAsync(ids.ProjectId, 2029, 9);
-        var pads = Lines(inv, "pad");
-        Assert.Equal(2, pads.Count);
+        // Additional PAD is always identified separately from the allocation.
+        Assert.Equal(3m, Assert.Single(Lines(inv, "pad")).GetProperty("quantity").GetDecimal());
+        var additional = Assert.Single(Lines(inv, "additionalPad"));
+        Assert.Equal(2m, additional.GetProperty("quantity").GetDecimal());
+        Assert.Equal(1000m, additional.GetProperty("unitPrice").GetDecimal());
         Assert.Equal(3m * 800m + 2m * 1000m, Total(inv));
     }
 

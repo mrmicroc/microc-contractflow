@@ -21,7 +21,7 @@ public enum TimeBilling
 /// <see cref="Version"/>, so historical months reconcile against the terms of
 /// their time (design §3, §9.3).
 /// </summary>
-public class ContractTerms
+public partial class ContractTerms
 {
     public Guid Id { get; set; }
     public Guid ContractId { get; set; }

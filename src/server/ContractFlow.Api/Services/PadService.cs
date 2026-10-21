@@ -93,22 +93,45 @@ public class PadService(AppDbContext db, TimeProvider clock)
         return tx;
     }
 
-    /// <summary>Open commitment for one booking: commits − releases − utilises.</summary>
-    public async Task<decimal> OpenCommitmentAsync(Guid bookingId, CancellationToken ct)
+    /// <summary>Open commitment for one booking: commits − releases − utilises
+    /// (all projects of a shared day together).</summary>
+    public async Task<decimal> OpenCommitmentAsync(Guid bookingId, CancellationToken ct) =>
+        (await OpenCommitmentsAsync(bookingId, ct)).Values.Sum();
+
+    /// <summary>Open commitment per project — a shared booked day commits in
+    /// each sharing project's ledger.</summary>
+    public async Task<Dictionary<Guid, decimal>> OpenCommitmentsAsync(Guid bookingId, CancellationToken ct)
     {
         var txs = await db.PadTransactions
-            .Where(t => t.BookingId == bookingId)
+            .Where(t => t.BookingId == bookingId && (t.Type == PadTransactionType.Commit
+                || t.Type == PadTransactionType.Release || t.Type == PadTransactionType.Utilise))
             .ToListAsync(ct);
-        return txs.Where(t => t.Type == PadTransactionType.Commit).Sum(t => t.Amount)
-             - txs.Where(t => t.Type == PadTransactionType.Release).Sum(t => t.Amount)
-             - txs.Where(t => t.Type == PadTransactionType.Utilise).Sum(t => t.Amount);
+        return txs.GroupBy(t => t.ProjectId).ToDictionary(g => g.Key,
+            g => g.Sum(t => t.Type == PadTransactionType.Commit ? t.Amount : -t.Amount));
+    }
+
+    /// <summary>The booking's project split: its shares, or the primary
+    /// project with all planned hours.</summary>
+    public async Task<List<(Guid ProjectId, decimal Hours)>> PlannedPartsAsync(
+        Booking booking, CancellationToken ct)
+    {
+        var shares = await db.BookingProjectShares
+            .Where(s => s.BookingId == booking.Id)
+            .OrderBy(s => s.ProjectId != booking.ProjectId).ThenBy(s => s.ProjectId)
+            .Select(s => new { s.ProjectId, s.PlannedHours })
+            .ToListAsync(ct);
+        return shares.Count > 1
+            ? shares.Select(s => (s.ProjectId, s.PlannedHours)).ToList()
+            : [(booking.ProjectId, booking.PlannedHours)];
     }
 
     /// <summary>
     /// Tries to reserve PAD for a booking being confirmed. Succeeds only when
     /// the month's free PAD covers the commitment — approved Additional PAD
     /// already counts into free, so partial availability works automatically
-    /// (design §4.3).
+    /// (design §4.3). A shared booked day commits each project's planned
+    /// share in its own ledger; one project short of PAD fails the whole
+    /// confirm and names its shortfall.
     /// </summary>
     public async Task<CommitResult> TryCommitAsync(
         Booking booking, Guid? userId, CancellationToken ct)
@@ -119,61 +142,275 @@ public class PadService(AppDbContext db, TimeProvider clock)
         if (terms?.PadEnabled != true)
             return new CommitResult(true, 0m, 0m, MonthClosed: false);
 
-        var amount = PadMath.CommitAmount(
-            booking.PlannedHours,
-            terms?.PadHoursPerDay ?? 8m,
-            terms?.MinPadPerBookedDay ?? 1m);
+        var parts = await PlannedPartsAsync(booking, ct);
+        var split = parts.Count == 1
+            ? [(parts[0].ProjectId, PadMath.CommitAmount(parts[0].Hours, terms.PadHoursPerDay, terms.MinPadPerBookedDay))]
+            : PadMath.SplitDay(parts, terms.PadHoursPerDay, terms.MinPadPerBookedDay, terms.SharedDayMinimum);
+        var amount = split.Sum(s => s.Pad);
 
         var month = new DateOnly(booking.Date.Year, booking.Date.Month, 1);
-        if (await MonthIsClosedAsync(booking.ProjectId, month.Year, month.Month, ct))
-            return new CommitResult(false, 0m, amount, MonthClosed: true);
+        foreach (var (projectId, _) in split)
+            if (await MonthIsClosedAsync(projectId, month.Year, month.Month, ct))
+                return new CommitResult(false, 0m, amount, MonthClosed: true);
 
         return await InTransactionAsync(async () =>
         {
-            var sums = PadMath.Sum(await MonthAsync(booking.ProjectId, month.Year, month.Month, ct));
-            if (sums.Free < amount)
-                return new CommitResult(false, sums.Free, amount, MonthClosed: false);
+            var shortfalls = new List<ProjectShortfall>();
+            var freeAfter = 0m;
+            foreach (var (projectId, pad) in split)
+            {
+                var sums = PadMath.Sum(await MonthAsync(projectId, month.Year, month.Month, ct));
+                if (sums.Free < pad) shortfalls.Add(new ProjectShortfall(projectId, sums.Free, pad));
+                if (projectId == booking.ProjectId) freeAfter = sums.Free - pad;
+            }
+            if (shortfalls.Count > 0)
+            {
+                var primary = shortfalls.FirstOrDefault(s => s.ProjectId == booking.ProjectId) ?? shortfalls[0];
+                return new CommitResult(false, primary.Free, amount, MonthClosed: false, shortfalls);
+            }
 
-            await AppendAsync(booking.ProjectId, month, PadTransactionType.Commit, amount,
-                userId, ct, bookingId: booking.Id);
-            return new CommitResult(true, sums.Free - amount, amount, MonthClosed: false);
+            foreach (var (projectId, pad) in split)
+                await AppendAsync(projectId, month, PadTransactionType.Commit, pad,
+                    userId, ct, bookingId: booking.Id,
+                    note: split.Count > 1 ? "Shared booked day — this project's share" : null);
+            return new CommitResult(true, freeAfter, amount, MonthClosed: false);
         }, ct);
     }
 
-    /// <summary>Writes a Release or Utilise for the booking's open commitment.</summary>
+    /// <summary>Writes a Release or Utilise for the booking's open commitment
+    /// in every project holding one.</summary>
     public async Task<decimal> SettleCommitmentAsync(
         Booking booking, PadTransactionType type, Guid? userId, string? note, CancellationToken ct)
     {
-        var open = await OpenCommitmentAsync(booking.Id, ct);
-        if (open <= 0) return 0m;
         var month = new DateOnly(booking.Date.Year, booking.Date.Month, 1);
-        await AppendAsync(booking.ProjectId, month, type, open, userId, ct,
-            bookingId: booking.Id, note: note);
-        return open;
+        var total = 0m;
+        foreach (var (projectId, open) in await OpenCommitmentsAsync(booking.Id, ct))
+        {
+            if (open <= 0) continue;
+            await AppendAsync(projectId, month, type, open, userId, ct,
+                bookingId: booking.Id, note: note);
+            total += open;
+        }
+        return total;
     }
 
     /// <summary>
     /// Partial-charge cancellation settlement: utilises
     /// <paramref name="utilisePad"/> PAD of the open commitment and releases
-    /// the remainder (stepped cancellation policy, design §4.3).
+    /// the remainder (stepped cancellation policy, design §4.3). A shared day
+    /// splits the charge across its projects by their committed (planned)
+    /// shares.
     /// </summary>
     public async Task<(decimal Utilised, decimal Released)> SettlePartialAsync(
         Booking booking, decimal utilisePad, Guid? userId, CancellationToken ct)
     {
-        var open = await OpenCommitmentAsync(booking.Id, ct);
+        var opens = (await OpenCommitmentsAsync(booking.Id, ct))
+            .Where(o => o.Value > 0).OrderBy(o => o.Key != booking.ProjectId).ThenBy(o => o.Key).ToList();
+        var open = opens.Sum(o => o.Value);
         if (open <= 0) return (0m, 0m);
         var month = new DateOnly(booking.Date.Year, booking.Date.Month, 1);
         var used = PadMath.Round4(Math.Min(open, Math.Max(0m, utilisePad)));
-        if (used > 0)
-            await AppendAsync(booking.ProjectId, month, PadTransactionType.Utilise,
-                used, userId, ct, bookingId: booking.Id,
-                note: "Cancellation — chargeable portion");
-        var rest = open - used;
-        if (rest > 0)
-            await AppendAsync(booking.ProjectId, month, PadTransactionType.Release,
-                rest, userId, ct, bookingId: booking.Id,
-                note: "Cancellation — released remainder");
-        return (used, rest);
+
+        decimal usedAcc = 0m, releasedAcc = 0m;
+        for (var i = 0; i < opens.Count; i++)
+        {
+            var (projectId, projectOpen) = (opens[i].Key, opens[i].Value);
+            var part = i == opens.Count - 1
+                ? used - usedAcc
+                : PadMath.Round4(used * projectOpen / open);
+            part = Math.Min(part, projectOpen);
+            usedAcc += part;
+            if (part > 0)
+                await AppendAsync(projectId, month, PadTransactionType.Utilise,
+                    part, userId, ct, bookingId: booking.Id,
+                    note: "Cancellation — chargeable portion");
+            var rest = projectOpen - part;
+            releasedAcc += rest;
+            if (rest > 0)
+                await AppendAsync(projectId, month, PadTransactionType.Release,
+                    rest, userId, ct, bookingId: booking.Id,
+                    note: "Cancellation — released remainder");
+        }
+        return (usedAcc, releasedAcc);
+    }
+
+    /// <summary>
+    /// Completion of a booked day (design §4.3 / continuation). Without actual
+    /// hours the whole commitment utilises. With actual hours the day's PAD is
+    /// recomputed — never below the commitment of a single-project day; a
+    /// shared day re-splits by the actual time per project, so a project may
+    /// utilise less than its planned share (remainder released) or more
+    /// (overrun ①–④ in that project).
+    /// </summary>
+    public async Task<CompletionResult> CompleteAsync(
+        Booking booking, decimal? actualHours, IReadOnlyDictionary<Guid, decimal>? actualByProject,
+        Guid? userId, CancellationToken ct)
+    {
+        var opens = await OpenCommitmentsAsync(booking.Id, ct);
+        var parts = await PlannedPartsAsync(booking, ct);
+        var shared = parts.Count > 1;
+        var terms = await TermsForAsync(booking.ProjectId, booking.Date, ct);
+        var padHours = terms?.PadHoursPerDay ?? 8m;
+        var minPad = terms?.MinPadPerBookedDay ?? 1m;
+        var month = new DateOnly(booking.Date.Year, booking.Date.Month, 1);
+
+        if (!shared)
+        {
+            var used = await SettleCommitmentAsync(
+                booking, PadTransactionType.Utilise, userId, "Completed booked day", ct);
+            OverrunSplit? split = null;
+            var actual = actualHours ?? actualByProject?.Values.Sum();
+            if (used > 0 && actual is { } a)
+            {
+                var actualPad = PadMath.CommitAmount(a, padHours, minPad);
+                if (actualPad > used)
+                    split = await AllocateOverrunAsync(booking, booking.ProjectId, actualPad - used, userId, ct);
+            }
+            var perProject = new List<ProjectUtilisation>
+            {
+                new(booking.ProjectId, used + (split?.Total ?? 0m), split),
+            };
+            return new CompletionResult(used + (split?.Total ?? 0m), split, perProject);
+        }
+
+        // Shared day: actual per project from the body, else the resource's
+        // reported time that date on the sharing projects, else the plan.
+        var actuals = actualByProject is { Count: > 0 }
+            ? parts.Select(p => (p.ProjectId, Hours: actualByProject.GetValueOrDefault(p.ProjectId))).ToList()
+            : await ReportedPartsAsync(booking, parts, ct) ?? parts;
+        var target = PadMath.SplitDay(actuals, padHours, minPad,
+            terms?.SharedDayMinimum ?? SharedDayMinimum.Proportional);
+
+        var results = new List<ProjectUtilisation>();
+        OverrunSplit? anyOverrun = null;
+        foreach (var (projectId, pad) in target)
+        {
+            var open = Math.Max(0m, opens.GetValueOrDefault(projectId));
+            var use = Math.Min(open, pad);
+            if (use > 0)
+                await AppendAsync(projectId, month, PadTransactionType.Utilise, use, userId, ct,
+                    bookingId: booking.Id, note: "Completed shared booked day — this project's actual share");
+            if (open - use > 0)
+                await AppendAsync(projectId, month, PadTransactionType.Release, open - use, userId, ct,
+                    bookingId: booking.Id, note: "Shared day — planned share above actual released");
+            OverrunSplit? split = null;
+            if (pad - use > 0)
+                split = anyOverrun = await AllocateOverrunAsync(booking, projectId, pad - use, userId, ct);
+            results.Add(new ProjectUtilisation(projectId, use + (split?.Total ?? 0m), split));
+        }
+        // Commitments on projects that dropped out of the split are released.
+        foreach (var (projectId, open) in opens.Where(o => o.Value > 0 && target.All(t => t.ProjectId != o.Key)))
+            await AppendAsync(projectId, month, PadTransactionType.Release, open, userId, ct,
+                bookingId: booking.Id, note: "Shared day — no time on this project");
+        return new CompletionResult(results.Sum(r => r.Utilised),
+            results.Count == 1 ? anyOverrun : results.FirstOrDefault(r => r.Overrun is not null)?.Overrun,
+            results);
+    }
+
+    /// <summary>
+    /// Timesheet approval hook: approved time without a booked day on terms
+    /// whose PAD component has <see cref="ContractTerms.UnbookedTimeConsumesPad"/>
+    /// utilises hours (rounded up to the recording increment) ÷ hours-per-PAD
+    /// in its project-month. Free PAD is used first; a shortfall becomes
+    /// AutoAdditional flagged <c>RequiresApproval</c> — new services beyond
+    /// the allocation need the customer's Additional PAD approval. Rows that
+    /// force plain-hour billing, or that fall inside a shared booked day,
+    /// never consume here. Idempotent per entry (net consumption checked).
+    /// </summary>
+    public async Task<decimal> ConsumeUnbookedAsync(
+        IEnumerable<TimeEntry> entries, Guid? userId, CancellationToken ct)
+    {
+        var total = 0m;
+        foreach (var e in entries.Where(e => e.BookingId == null
+                     && e.Billing == EntryBilling.Contract
+                     && e.Category != TimeEntryCategory.Break && e.ActualHours > 0))
+        {
+            var terms = await TermsForAsync(e.ProjectId, e.Date, ct);
+            if (terms is not { PadEnabled: true, UnbookedTimeConsumesPad: true }) continue;
+            if (await InSharedBookedDayAsync(e.ResourceId, e.ProjectId, e.Date, ct)) continue;
+            // Work at a package outside the contract's scope bills by time.
+            if (await WorkPackageRules.IsOutsideContractAsync(db, e.WorkPackageId, ct)) continue;
+            var net = (await db.PadTransactions
+                .Where(t => t.TimeEntryId == e.Id && t.Type == PadTransactionType.Utilise)
+                .Select(t => t.Amount).ToListAsync(ct)).Sum();
+            if (net > 0) continue;
+
+            var pad = PadMath.UnbookedPad(e.ActualHours, terms.UnbookedTimeIncrementMinutes, terms.PadHoursPerDay);
+            if (pad <= 0) continue;
+            var month = new DateOnly(e.Date.Year, e.Date.Month, 1);
+            var sums = PadMath.Sum(await MonthAsync(e.ProjectId, month.Year, month.Month, ct));
+            var shortfall = PadMath.Round4(pad - Math.Min(pad, Math.Max(0m, sums.Free)));
+            if (shortfall > 0)
+                db.PadTransactions.Add(Row(e, month, PadTransactionType.AutoAdditional, shortfall, userId,
+                    "New services beyond free PAD — Additional PAD approval required", requiresApproval: true));
+            db.PadTransactions.Add(Row(e, month, PadTransactionType.Utilise, pad, userId,
+                string.Create(Inv, $"Unbooked services {e.ActualHours:0.##} h → {pad:0.####} PAD")));
+            await db.SaveChangesAsync(ct);
+            total += pad;
+        }
+        return total;
+    }
+
+    /// <summary>
+    /// Reopened timesheet: the PAD its unbooked rows consumed is given back by
+    /// appending negative Utilise / AutoAdditional rows for the same entries —
+    /// never by deleting history. Re-approval consumes afresh.
+    /// </summary>
+    public async Task ReverseUnbookedAsync(IEnumerable<Guid> entryIds, Guid? userId, CancellationToken ct)
+    {
+        var ids = entryIds.ToList();
+        var rows = await db.PadTransactions
+            .Where(t => t.TimeEntryId != null && ids.Contains(t.TimeEntryId!.Value)
+                && (t.Type == PadTransactionType.Utilise || t.Type == PadTransactionType.AutoAdditional))
+            .ToListAsync(ct);
+        foreach (var g in rows.GroupBy(t => (t.TimeEntryId!.Value, t.Type, t.ProjectId, t.Year, t.Month)))
+        {
+            var net = g.Sum(t => t.Amount);
+            if (net == 0m) continue;
+            db.PadTransactions.Add(new PadTransaction
+            {
+                ProjectId = g.Key.ProjectId, Year = g.Key.Year, Month = g.Key.Month,
+                Type = g.Key.Type, Amount = -net, TimeEntryId = g.Key.Item1,
+                RequiresApproval = g.Any(t => t.RequiresApproval),
+                Note = "Reversed — timesheet reopened", CreatedByUserId = userId,
+            });
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>True when the resource holds a live shared booked day that
+    /// date covering the project — its time utilises through the booking.</summary>
+    public Task<bool> InSharedBookedDayAsync(Guid resourceId, Guid projectId, DateOnly date, CancellationToken ct) =>
+        db.BookingProjectShares.AnyAsync(s => s.ProjectId == projectId
+            && s.Booking.ResourceId == resourceId && s.Booking.Date == date
+            && s.Booking.Status != BookingStatus.Cancelled && s.Booking.Status != BookingStatus.Rescheduled
+            && s.Booking.Status != BookingStatus.Forecast && s.Booking.Status != BookingStatus.Tentative
+            && s.Booking.Status != BookingStatus.Requested, ct);
+
+    private static PadTransaction Row(TimeEntry e, DateOnly month, PadTransactionType type, decimal amount,
+        Guid? userId, string note, bool requiresApproval = false) => new()
+    {
+        ProjectId = e.ProjectId, Year = month.Year, Month = month.Month, Type = type,
+        Amount = PadMath.Round4(amount), TimeEntryId = e.Id, RequiresApproval = requiresApproval,
+        Note = note, CreatedByUserId = userId,
+    };
+
+    /// <summary>The resource's counted time that date on the sharing
+    /// projects — null when nothing is reported yet.</summary>
+    private async Task<List<(Guid ProjectId, decimal Hours)>?> ReportedPartsAsync(
+        Booking booking, List<(Guid ProjectId, decimal Hours)> parts, CancellationToken ct)
+    {
+        var projectIds = parts.Select(p => p.ProjectId).ToList();
+        var rows = await db.TimeEntries
+            .Where(e => e.ResourceId == booking.ResourceId && e.Date == booking.Date
+                && projectIds.Contains(e.ProjectId)
+                && (e.BookingId == booking.Id || e.BookingId == null)
+                && e.Category != TimeEntryCategory.Break)
+            .Select(e => new { e.ProjectId, e.ActualHours })
+            .ToListAsync(ct);
+        if (rows.Count == 0) return null;
+        return parts.Select(p => (p.ProjectId,
+            rows.Where(r => r.ProjectId == p.ProjectId).Sum(r => r.ActualHours))).ToList();
     }
 
     /// <summary>
@@ -184,15 +421,15 @@ public class PadService(AppDbContext db, TimeProvider clock)
     /// rows. Returns the split for display.
     /// </summary>
     public async Task<OverrunSplit> AllocateOverrunAsync(
-        Booking booking, decimal extraPad, Guid? userId, CancellationToken ct)
+        Booking booking, Guid projectId, decimal extraPad, Guid? userId, CancellationToken ct)
     {
         var month = new DateOnly(booking.Date.Year, booking.Date.Month, 1);
         var next = month.AddMonths(1);
-        var currentTxs = await MonthAsync(booking.ProjectId, month.Year, month.Month, ct);
+        var currentTxs = await MonthAsync(projectId, month.Year, month.Month, ct);
         var current = PadMath.Sum(currentTxs);
-        PadMonthSums? nextSums = await MonthIsClosedAsync(booking.ProjectId, next.Year, next.Month, ct)
+        PadMonthSums? nextSums = await MonthIsClosedAsync(projectId, next.Year, next.Month, ct)
             ? null
-            : PadMath.Sum(await MonthAsync(booking.ProjectId, next.Year, next.Month, ct));
+            : PadMath.Sum(await MonthAsync(projectId, next.Year, next.Month, ct));
 
         // Unused approved Additional PAD: what utilisation beyond the
         // month's own pool (baseline + carry + adjustments) hasn't eaten yet.
@@ -203,16 +440,16 @@ public class PadService(AppDbContext db, TimeProvider clock)
         var split = PadMath.AllocateOverrun(extraPad, current, nextSums, additionalAvailable);
         var inMonth = split.FromCurrentFree + split.FromAdditional + split.AutoAdditional;
         if (split.AutoAdditional > 0)
-            await AppendAsync(booking.ProjectId, month, PadTransactionType.AutoAdditional,
+            await AppendAsync(projectId, month, PadTransactionType.AutoAdditional,
                 split.AutoAdditional, userId, ct, bookingId: booking.Id,
                 note: "Continuation overflow — auto-incurred Additional PAD");
         if (inMonth > 0)
-            await AppendAsync(booking.ProjectId, month, PadTransactionType.Utilise,
+            await AppendAsync(projectId, month, PadTransactionType.Utilise,
                 inMonth, userId, ct, bookingId: booking.Id,
                 note: string.Create(Inv,
                     $"Continuation beyond commitment: {split.FromCurrentFree:0.####} free + {split.FromAdditional:0.####} additional + {split.AutoAdditional:0.####} auto-additional"));
         if (split.FromNextMonthBaseline > 0)
-            await AppendAsync(booking.ProjectId, next, PadTransactionType.BorrowNextMonth,
+            await AppendAsync(projectId, next, PadTransactionType.BorrowNextMonth,
                 split.FromNextMonthBaseline, userId, ct, bookingId: booking.Id,
                 note: $"Borrowed by continuation in {month.Year}-{month.Month:D2}" +
                     (split.NextMonthConflict ? " — exceeds free PAD, review conflicts" : ""));
@@ -380,6 +617,16 @@ public class PadService(AppDbContext db, TimeProvider clock)
         var sums = PadMath.Sum(txs);
         Check("negativeFree", sums.Free < 0 ? 1 : 0, true);
 
+        // New services beyond free PAD need the customer's approval — blocking
+        // until approved Additional PAD requests for the month cover them.
+        var awaitingApproval = txs.Where(t => t.Type == PadTransactionType.AutoAdditional && t.RequiresApproval)
+            .Sum(t => t.Amount);
+        var approvedQty = (await db.AdditionalPadRequests
+            .Where(r => r.ProjectId == projectId && r.Year == year && r.Month == month
+                && r.Status == AdditionalPadStatus.Approved)
+            .Select(r => r.Quantity).ToListAsync(ct)).Sum();
+        Check("additionalPadAwaitingApproval", awaitingApproval > approvedQty ? 1 : 0, true);
+
         // ── Calculation ────────────────────────────────────────────────────
         // Commitments that never utilised die with the month rather than
         // dragging into the next one (only reachable when forced past
@@ -398,14 +645,24 @@ public class PadService(AppDbContext db, TimeProvider clock)
         var maxPercent = terms?.CarryOverMaxPercent ?? 20m;
         var carryMonths = Math.Max(1, terms?.CarryOverMonths ?? 1);
 
+        var basis = terms?.CarryOverBasis ?? CarryOverBasis.UnusedBaseline;
+        var roundUpTo = terms?.CarryOverRoundUpTo ?? 1m;
+
         var carryIn = sums.CarryOverIn;
         var baselineUsed = PadMath.BaselineUsed(
             sums.Baseline, sums.Utilised, carryIn, sums.BorrowedFromThisMonth);
         var carryOver = PadMath.CarryOver(
-            sums.Baseline, sums.Utilised, maxPercent, carryIn, sums.BorrowedFromThisMonth);
+            sums.Baseline, sums.Utilised, maxPercent, carryIn, sums.BorrowedFromThisMonth, basis, roundUpTo);
         var expiredBaseline = PadMath.Expiry(
-            sums.Baseline, sums.Utilised, maxPercent, carryIn, sums.BorrowedFromThisMonth);
-        var cap = Math.Ceiling(sums.Baseline * maxPercent / 100m);
+            sums.Baseline, sums.Utilised, maxPercent, carryIn, sums.BorrowedFromThisMonth, basis, roundUpTo);
+        var unusedBaseline = Math.Max(0m, sums.Baseline - baselineUsed);
+        var cap = PadMath.CarryCap(sums.Baseline, unusedBaseline, maxPercent, basis, roundUpTo);
+        var capBasisText = basis == CarryOverBasis.Baseline
+            ? string.Create(Inv, $"baseline {sums.Baseline:0.####}")
+            : string.Create(Inv, $"unused baseline {unusedBaseline:0.####}");
+        var capRoundText = roundUpTo > 0m
+            ? string.Create(Inv, $" rounded up to {roundUpTo:0.##}")
+            : "";
 
         var reCarries = new List<(int, int, decimal)>();
         var residualExpiries = new List<(int, int, decimal)>();
@@ -429,7 +686,7 @@ public class PadService(AppDbContext db, TimeProvider clock)
             Step("unusedBaseline", sums.Baseline - baselineUsed,
                 $"Unused baseline: {sums.Baseline:0.####} − {baselineUsed:0.####} = {sums.Baseline - baselineUsed:0.####}"),
             Step("carryCap", cap,
-                $"Carry-over cap: ⌈{sums.Baseline:0.####} × {maxPercent:0.##} %⌉ = {cap:0.####}"),
+                $"Carry-over cap: {maxPercent:0.##} % of {capBasisText}{capRoundText} = {cap:0.####}"),
             Step("carryOverOut", carryOver,
                 $"Carry-over to {next.Year}-{next.Month:D2}: min(unused, cap) = {carryOver:0.####}"),
             Step("expiredBaseline", expiredBaseline,
@@ -459,7 +716,16 @@ public class PadService(AppDbContext db, TimeProvider clock)
     private static CloseStepDto Step(string code, decimal amount, FormattableString text) =>
         new(code, amount, text.ToString(Inv));
 
-    public record CommitResult(bool Ok, decimal FreeAfter, decimal Amount, bool MonthClosed);
+    public record CommitResult(bool Ok, decimal FreeAfter, decimal Amount, bool MonthClosed,
+        IReadOnlyList<ProjectShortfall>? Shortfalls = null);
+
+    /// <summary>A sharing project whose free PAD can't cover its share.</summary>
+    public record ProjectShortfall(Guid ProjectId, decimal Free, decimal Needed);
+
+    public record ProjectUtilisation(Guid ProjectId, decimal Utilised, OverrunSplit? Overrun);
+
+    public record CompletionResult(decimal Utilised, OverrunSplit? Overrun,
+        IReadOnlyList<ProjectUtilisation> PerProject);
 }
 
 /// <summary>Close refused — ordering errors or unforced blocking checklist items.</summary>

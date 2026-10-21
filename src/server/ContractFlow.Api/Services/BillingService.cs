@@ -21,7 +21,7 @@ public class BillingException(string code, string message) : InvalidOperationExc
 /// and the quantities frozen at approval equal what is invoiced and paid.
 /// Every line carries its explanation (§5).
 /// </summary>
-public class BillingService(AppDbContext db)
+public partial class BillingService(AppDbContext db)
 {
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     private static readonly HashSet<TimeEntryCategory> Counted =
@@ -88,9 +88,9 @@ public class BillingService(AppDbContext db)
 
     /// <summary>All approved/invoiced counted rows of the given resources in
     /// [from, to] — every project, so a day prices with its full context.</summary>
-    private Task<List<MonthRow>> MonthRowsAsync(
+    private async Task<List<MonthRow>> MonthRowsAsync(
         IReadOnlyCollection<Guid> resourceIds, DateOnly from, DateOnly to, CancellationToken ct) =>
-        db.TimeEntries
+        await MarkPadCoveredAsync(await db.TimeEntries
             .Where(e => resourceIds.Contains(e.ResourceId) && e.Date >= from && e.Date <= to
                 && e.Timesheet != null
                 && (e.Timesheet.Status == TimesheetStatus.Approved
@@ -105,7 +105,7 @@ public class BillingService(AppDbContext db)
                         && e.Booking.WorkPackage.PricingMode == WorkPackagePricing.OutsideContract
                     : e.WorkPackage != null
                         && e.WorkPackage.PricingMode == WorkPackagePricing.OutsideContract))
-            .ToListAsync(ct);
+            .ToListAsync(ct), ct);
 
     // ── Customer invoice specification ──────────────────────────────────────
 
@@ -221,60 +221,7 @@ public class BillingService(AppDbContext db)
             .ToList();
         var padTerms = inMonth.LastOrDefault(t => t.PadEnabled);
         if (padTerms is not null && CurrencyOk(padTerms.Currency, "The PAD component"))
-        {
-            var tx = await db.PadTransactions
-                .Where(t => t.ProjectId == projectId && t.Year == year && t.Month == month)
-                .ToListAsync(ct);
-            var sums = PadMath.Sum(tx);
-            var billedPad = others.SelectMany(s => s.Lines)
-                .Where(l => l.Kind == InvoiceLineKind.Pad).Sum(l => l.Quantity);
-            var remaining = sums.Utilised - billedPad;
-            if (remaining > 0m && billedPad == 0m)
-            {
-                // Approved Additional PAD carrying its own rate bills the
-                // utilisation above the month's own allocation at that rate.
-                var over = Math.Max(0m, sums.Utilised - (sums.Baseline + sums.CarryOverIn + sums.Adjustments));
-                var rated = await db.AdditionalPadRequests
-                    .Where(r => r.ProjectId == projectId && r.Year == year && r.Month == month
-                        && r.Status == AdditionalPadStatus.Approved && r.Rate != null)
-                    .OrderBy(r => r.CreatedUtc).ToListAsync(ct);
-                foreach (var r in rated)
-                {
-                    var take = Math.Min(Math.Min(over, r.Quantity), remaining);
-                    if (take <= 0m) break;
-                    spec.Lines.Add(new InvoiceLine
-                    {
-                        InvoiceSpecificationId = specId,
-                        Kind = InvoiceLineKind.Pad, Date = to,
-                        Description = string.Create(Inv, $"Additional PAD {year}-{month:00}")
-                            + (r.Reference is null ? "" : $" · {r.Reference}"),
-                        Explanation = string.Create(Inv,
-                            $"{take:0.##} additional PAD × {r.Rate!.Value:0.##} {spec.Currency} (approved request rate)"),
-                        Quantity = take, UnitPrice = r.Rate.Value,
-                        Amount = TimeMath.Round2(take * r.Rate.Value),
-                    });
-                    over -= take; remaining -= take;
-                }
-            }
-            if (remaining > 0m)
-            {
-                if (padTerms.PadRate is > 0m)
-                    spec.Lines.Add(new InvoiceLine
-                    {
-                        InvoiceSpecificationId = specId,
-                        Kind = InvoiceLineKind.Pad, Date = to,
-                        Description = string.Create(Inv, $"PAD utilised {year}-{month:00}"),
-                        Explanation = string.Create(Inv,
-                            $"{remaining:0.##} PAD utilised × {padTerms.PadRate.Value:0.##} {spec.Currency}")
-                            + (billedPad > 0m ? string.Create(Inv, $" (after {billedPad:0.##} PAD on earlier revisions)") : ""),
-                        Quantity = remaining, UnitPrice = padTerms.PadRate.Value,
-                        Amount = TimeMath.Round2(remaining * padTerms.PadRate.Value),
-                    });
-                else
-                    Warn(string.Create(Inv,
-                        $"The PAD component is enabled but has no PAD rate — {remaining:0.##} utilised PAD not billed."));
-            }
-        }
+            await AddPadLinesAsync(spec, projectId, year, month, to, padTerms, others, Warn, ct);
 
         // ── Time billing: every day of a resource who worked on this project,
         // priced with the full day's context (shared minimum / OT per contract).
