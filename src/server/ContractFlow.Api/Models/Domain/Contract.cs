@@ -25,6 +25,24 @@ public class Contract
     public bool IsActive { get; set; } = true;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
+    /// <summary>The customer's authorised representatives — who may request,
+    /// confirm, cancel and reschedule booked days, approve Additional PAD and
+    /// agree allocations between projects (JSON-owned list).</summary>
+    public List<AuthorisedRepresentative> Representatives { get; set; } = [];
+
     public List<ContractTerms> TermsVersions { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
+    /// <summary>One-off dated amounts (milestones, instalments).</summary>
+    public List<ScheduledCharge> ScheduledCharges { get; set; } = [];
+}
+
+/// <summary>A person at the customer authorised to instruct MICROC under the
+/// contract, with a free-text note on the scope of that authority.</summary>
+public class AuthorisedRepresentative
+{
+    public required string Name { get; set; }
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    /// <summary>E.g. "Bookings and Additional PAD", "Operational only".</summary>
+    public string? Authority { get; set; }
 }

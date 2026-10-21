@@ -161,15 +161,25 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
             .Select(e => e.BookingId!.Value).Distinct().ToList();
         var bookingPackages = await Db.Bookings.Where(b => bookingIds.Contains(b.Id))
             .ToDictionaryAsync(b => b.Id, b => b.WorkPackageId, ct);
+        var packageIds = sheet.Entries.Select(e => e.WorkPackageId)
+            .Concat(bookingPackages.Values).OfType<Guid>().Distinct().ToList();
+        var outsidePackages = (await Db.WorkPackages
+                .Where(w => packageIds.Contains(w.Id) && w.PricingMode == WorkPackagePricing.OutsideContract)
+                .Select(w => w.Id).ToListAsync(ct))
+            .ToHashSet();
 
         foreach (var day in sheet.Entries.GroupBy(e => e.Date))
         {
             var date = day.Key;
             var rows = day.Where(e => Counted.Contains(e.Category))
-                .Select(e => new DayRow(
-                    e.Id, e.ProjectId, projectContracts[e.ProjectId],
-                    e.BookingId is { } bid ? bookingPackages.GetValueOrDefault(bid) : e.WorkPackageId,
-                    e.Billing, e.BookingId != null, e.ActualHours))
+                .Select(e =>
+                {
+                    var wp = e.BookingId is { } bid ? bookingPackages.GetValueOrDefault(bid) : e.WorkPackageId;
+                    return new DayRow(
+                        e.Id, e.ProjectId, projectContracts[e.ProjectId], wp,
+                        e.Billing, e.BookingId != null, e.ActualHours,
+                        wp is { } w && outsidePackages.Contains(w));
+                })
                 .ToList();
 
             // Hour quantities depend only on the contract's rules, never on the

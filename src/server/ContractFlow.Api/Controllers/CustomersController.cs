@@ -30,6 +30,7 @@ public class CustomersController(AppDbContext db) : ControllerBase
     {
         var customer = await db.Customers
             .Include(c => c.Contracts).ThenInclude(c => c.TermsVersions)
+            .Include(c => c.Contracts).ThenInclude(c => c.ScheduledCharges)
             .Include(c => c.EndClientContracts).ThenInclude(c => c.Customer)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (customer is null) return NotFound();

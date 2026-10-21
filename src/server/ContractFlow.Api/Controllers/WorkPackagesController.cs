@@ -38,6 +38,8 @@ public class WorkPackagesController(AppDbContext db, BillingService billing) : C
             ProjectId = req.ProjectId,
             Name = req.Name.Trim(),
             Notes = req.Notes,
+            PricingMode = req.PricingMode,
+            CountsAsVisit = req.CountsAsVisit,
             InfoItems = (req.InfoItems ?? []).Select(i => new WorkPackageInfo
             {
                 Type = i.Type.Trim(), Description = i.Description.Trim(),
@@ -63,6 +65,8 @@ public class WorkPackagesController(AppDbContext db, BillingService billing) : C
 
         workPackage.Name = req.Name.Trim();
         workPackage.Notes = req.Notes;
+        workPackage.PricingMode = req.PricingMode;
+        workPackage.CountsAsVisit = req.CountsAsVisit;
         if (req.InfoItems is not null)
         {
             db.WorkPackageInfos.RemoveRange(workPackage.InfoItems);
@@ -77,7 +81,8 @@ public class WorkPackagesController(AppDbContext db, BillingService billing) : C
 
     private static WorkPackageDto ToDto(WorkPackage w) => new(
         w.Id, w.ProjectId, w.Name, w.Notes,
-        w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList());
+        w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList(),
+        w.PricingMode, w.CountsAsVisit);
 
     [HttpDelete("{id:guid}")]
     [RequireRole(AppRole.Administrator)]

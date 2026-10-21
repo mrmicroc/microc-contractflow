@@ -88,7 +88,8 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             .Include(w => w.InfoItems)
             .OrderBy(w => w.Name)
             .Select(w => new WorkPackageDto(w.Id, w.ProjectId, w.Name, w.Notes,
-                w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList()))
+                w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList(),
+                w.PricingMode, w.CountsAsVisit))
             .ToListAsync(ct));
     }
 
@@ -119,6 +120,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             Name = req.Name.Trim(),
             Code = req.Code,
             Description = req.Description,
+            ContractedBaselinePad = req.ContractedBaselinePad,
             IsActive = req.IsActive,
         };
         db.Projects.Add(project);
@@ -142,6 +144,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
         project.Name = req.Name.Trim();
         project.Code = req.Code;
         project.Description = req.Description;
+        project.ContractedBaselinePad = req.ContractedBaselinePad;
         project.IsActive = req.IsActive;
         await db.SaveChangesAsync(ct);
 
@@ -170,6 +173,12 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             {
                 error = "hasDependents",
                 message = "Project has bookings or reported time — they anchor the audit trail and cannot be deleted.",
+            });
+        if (await db.ScheduledCharges.AnyAsync(c => c.ProjectId == id, ct))
+            return Conflict(new
+            {
+                error = "hasDependents",
+                message = "Scheduled charges bill on this project — move or delete them first.",
             });
 
         db.Projects.Remove(project);
@@ -341,10 +350,12 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
         p.Name, p.Code, p.Description, p.IsActive,
         p.WorkPackages.OrderBy(l => l.Name)
             .Select(l => new WorkPackageDto(l.Id, l.ProjectId, l.Name, l.Notes,
-                l.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList()))
+                l.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList(),
+                l.PricingMode, l.CountsAsVisit))
             .ToList(),
         p.EstimatedQuantities
             .Select(q => new EstimatedQuantityDto(
                 q.Id, q.ProjectId, q.Label, q.Quantity, q.Unit, q.Notes))
-            .ToList());
+            .ToList(),
+        p.ContractedBaselinePad);
 }

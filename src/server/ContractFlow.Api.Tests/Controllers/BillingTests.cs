@@ -306,22 +306,25 @@ public class BillingTests(ContractFlowWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task Invoice_FixedPriceComponent_BillsOnItsMonth()
+    public async Task Invoice_ScheduledCharge_BillsOnItsMonth()
     {
         var ids = await Scaffold.CommercialGraphAsync(Admin, "inv-fp");
         await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
         {
             effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
-            timeBilling = "none", fixedPriceEnabled = true,
-            fixedPriceAmount = 50000m, fixedPriceDate = "2028-10-15",
+            timeBilling = "none",
         });
+        (await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/charges", new
+        {
+            date = "2028-10-15", amount = 50000m, description = "Milestone payment",
+        })).EnsureSuccessStatusCode();
 
         // The dated month carries the charge…
         var oct = await Admin.PostAsJsonAsync("/api/invoices/generate",
             new { projectId = ids.ProjectId, year = 2028, month = 10 });
         var octDetail = await Admin.GetFromJsonAsync<InvoiceDetail>(
             $"/api/invoices/{(await oct.Content.ReadFromJsonAsync<InvoiceDto>())!.Id}");
-        var fp = Assert.Single(octDetail!.Lines, l => l.Kind == "fixedPrice");
+        var fp = Assert.Single(octDetail!.Lines, l => l.Kind == "scheduledCharge");
         Assert.Equal(50000m, fp.Amount);
         Assert.Equal(50000m, octDetail.Invoice.TotalAmount);
 

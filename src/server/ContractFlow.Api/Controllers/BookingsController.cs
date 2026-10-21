@@ -92,6 +92,8 @@ public class BookingsController(
             WorkDescription = req.WorkDescription,
             CustomerContact = req.CustomerContact,
             EvidenceRef = req.EvidenceRef,
+            InstructedBy = req.InstructedBy,
+            InstructedAtUtc = req.InstructedAtUtc,
             Status = req.Status,
             CreatedByUserId = me?.Id,
         };
@@ -144,6 +146,8 @@ public class BookingsController(
         booking.WorkDescription = req.WorkDescription;
         booking.CustomerContact = req.CustomerContact;
         booking.EvidenceRef = req.EvidenceRef;
+        booking.InstructedBy = req.InstructedBy;
+        booking.InstructedAtUtc = req.InstructedAtUtc;
 
         // Non-committed bookings may move freely between the pre-commitment statuses.
         if (req.Status.HasValue)
@@ -178,7 +182,11 @@ public class BookingsController(
             // confirm hits the one-commit-per-booking index instead.
             result = await pad.InTransactionAsync(async () =>
             {
-                var r = await pad.TryCommitAsync(booking, me?.Id, ct);
+                // Work at a package outside the contract's scope is additional
+                // — confirmed without touching the PAD ledger (WorkPackageRules).
+                var r = await WorkPackageRules.IsOutsideContractAsync(db, booking.WorkPackageId, ct)
+                    ? new PadService.CommitResult(true, 0m, 0m, MonthClosed: false)
+                    : await pad.TryCommitAsync(booking, me?.Id, ct);
                 if (r.Ok)
                 {
                     booking.Status = BookingStatus.Confirmed;
@@ -344,6 +352,8 @@ public class BookingsController(
                 WorkDescription = booking.WorkDescription,
                 CustomerContact = booking.CustomerContact,
                 EvidenceRef = booking.EvidenceRef,
+                InstructedBy = booking.InstructedBy,
+                InstructedAtUtc = booking.InstructedAtUtc,
                 Status = wasCommitted ? BookingStatus.Requested : booking.Status,
                 ReplacesBookingId = booking.Id,
                 CreatedByUserId = me?.Id,
@@ -358,7 +368,9 @@ public class BookingsController(
             PadService.CommitResult? c = null;
             if (wasCommitted)
             {
-                c = await pad.TryCommitAsync(copy, me?.Id, ct);
+                c = await WorkPackageRules.IsOutsideContractAsync(db, copy.WorkPackageId, ct)
+                    ? new PadService.CommitResult(true, 0m, 0m, MonthClosed: false)
+                    : await pad.TryCommitAsync(copy, me?.Id, ct);
                 if (c.Ok) copy.Status = BookingStatus.Confirmed;
             }
             await db.SaveChangesAsync(ct);
@@ -478,8 +490,14 @@ public class BookingsController(
         // the month's invoice.
         booking.CancellationChargeHours = charge.Hours;
         booking.CancellationChargeAmount = charge.Amount;
+        booking.CancellationChargeFull = charge.Full;
+        // Day-rate contracts charge a share of the day: a whole day when the
+        // booking is charged in full, else the rung's fraction (if it set one).
+        booking.CancellationChargeDayFraction = terms?.TimeBilling == TimeBilling.DailyRate
+            ? charge.Full ? 1m : charge.DayFraction
+            : null;
         return (charge.IsFree ? "released" : "charged",
-            charge.Amount ?? charge.Hours ?? 0m);
+            charge.Amount ?? booking.CancellationChargeDayFraction ?? charge.Hours ?? 0m);
     }
 
     private async Task<BookingDto> SingleDtoAsync(Guid id, CancellationToken ct) =>
@@ -548,7 +566,9 @@ public class BookingsController(
                 hidePricing ? null : b.CancellationChargeHours,
                 hidePricing ? null : b.CancellationChargeAmount,
                 b.ReplacesBookingId, b.RescheduledToBookingId,
-                warnings.ToArray());
+                warnings.ToArray(),
+                b.InstructedBy, b.InstructedAtUtc,
+                hidePricing ? null : b.CancellationChargeDayFraction);
         }).ToList();
     }
 }

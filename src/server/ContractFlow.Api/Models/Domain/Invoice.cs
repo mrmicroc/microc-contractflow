@@ -62,8 +62,16 @@ public enum InvoiceLineKind
     Mobilisation,
     /// <summary>Utilised PAD × PAD rate (PAD-component contracts).</summary>
     Pad,
-    /// <summary>One-off fixed price (lump-sum component) on its dated month.</summary>
+    /// <summary>Legacy: the former one-off "fixed price" terms component —
+    /// kept so historical specifications still read. New one-off amounts are
+    /// <see cref="ScheduledCharge"/> lines.</summary>
     FixedPrice,
+    /// <summary>A contract's one-off dated amount (milestone, instalment).</summary>
+    ScheduledCharge,
+    /// <summary>Travel time / travel costs billed because the mobilisation
+    /// was additional (beyond the included visits, or to a package outside
+    /// the contract's scope).</summary>
+    Travel,
     /// <summary>Cancellation charge — hours or a fixed fee resolved by the
     /// terms' cancellation ladder (non-PAD contracts; PAD contracts charge via
     /// utilised PAD instead).</summary>

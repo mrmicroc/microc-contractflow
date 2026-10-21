@@ -157,16 +157,17 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
         var client = factory.CreateUserClient(DevSeed.AdminId);
         var contract = await CreateContractAsync(client);
 
-        // Hourly + PAD + fixed price can all be on at once (§4 components).
+        // Hourly + PAD + one-off scheduled charges can all be on at once (§4 components).
         await client.PostAsJsonAsync($"/api/contracts/{contract.Id}/terms",
             new { effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
-                  timeBilling = "hourly", padEnabled = true, padRate = 100m,
-                  fixedPriceEnabled = true, fixedPriceAmount = 5000m,
-                  fixedPriceDate = "2026-02-01" });
+                  timeBilling = "hourly", padEnabled = true, padRate = 100m });
+        (await client.PostAsJsonAsync($"/api/contracts/{contract.Id}/charges",
+            new { date = "2026-02-01", amount = 5000m, description = "Set-up fee" }))
+            .EnsureSuccessStatusCode();
 
         var detail = await client.GetFromJsonAsync<ContractDto>(
             $"/api/contracts/{contract.Id}");
-        Assert.Equal(new[] { "hourly", "pad", "fixedPrice" }, detail!.Components);
+        Assert.Equal(new[] { "hourly", "pad", "scheduledCharges" }, detail!.Components);
 
         // A later version flipping to daily-rate without PAD re-labels it.
         await client.PostAsJsonAsync($"/api/contracts/{contract.Id}/terms",
@@ -175,7 +176,7 @@ public class ContractsTests(ContractFlowWebApplicationFactory factory)
                   dayRate = 8000m, halfDayRate = 4000m });
         var after = await client.GetFromJsonAsync<ContractDto>(
             $"/api/contracts/{contract.Id}");
-        Assert.Equal(["dailyRate"], after!.Components);
+        Assert.Equal(["dailyRate", "scheduledCharges"], after!.Components); // charges are contract-level, not per version
     }
 
     [Fact]

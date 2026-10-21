@@ -81,9 +81,9 @@ public class BillingService(AppDbContext db)
     private record MonthRow(
         Guid Id, Guid ResourceId, DateOnly Date, Guid ProjectId, Guid ContractId,
         Guid? WorkPackageId, EntryBilling Billing, bool Booked, decimal Hours,
-        Guid? InvoiceSpecificationId)
+        Guid? InvoiceSpecificationId, bool Outside = false)
     {
-        public DayRow Day => new(Id, ProjectId, ContractId, WorkPackageId, Billing, Booked, Hours);
+        public DayRow Day => new(Id, ProjectId, ContractId, WorkPackageId, Billing, Booked, Hours, Outside);
     }
 
     /// <summary>All approved/invoiced counted rows of the given resources in
@@ -99,7 +99,12 @@ public class BillingService(AppDbContext db)
             .Select(e => new MonthRow(
                 e.Id, e.ResourceId, e.Date, e.ProjectId, e.Project.ContractId,
                 e.BookingId != null ? e.Booking!.WorkPackageId : e.WorkPackageId,
-                e.Billing, e.BookingId != null, e.ActualHours, e.InvoiceSpecificationId))
+                e.Billing, e.BookingId != null, e.ActualHours, e.InvoiceSpecificationId,
+                e.BookingId != null
+                    ? e.Booking!.WorkPackage != null
+                        && e.Booking.WorkPackage.PricingMode == WorkPackagePricing.OutsideContract
+                    : e.WorkPackage != null
+                        && e.WorkPackage.PricingMode == WorkPackagePricing.OutsideContract))
             .ToListAsync(ct);
 
     // ── Customer invoice specification ──────────────────────────────────────
@@ -339,21 +344,24 @@ public class BillingService(AppDbContext db)
             }
         }
 
-        // ── Fixed-price component: one-off amount on its configured month.
-        if (endTerms?.FixedPriceEnabled == true && endTerms.FixedPriceAmount is > 0m
-            && endTerms.FixedPriceDate is { } fpDate && fpDate >= from && fpDate <= to
-            && !others.SelectMany(s => s.Lines).Any(l => l.Kind == InvoiceLineKind.FixedPrice)
-            && CurrencyOk(endTerms.Currency, "The fixed price"))
+        // ── One-off scheduled charges: each bills once, on its project's spec
+        // for the month of its date (no project → the contract's default).
+        var defaultProjectId = await DefaultChargeProjectAsync(project.ContractId, ct);
+        var charges = await db.ScheduledCharges
+            .Where(c => c.ContractId == project.ContractId && c.Date >= from && c.Date <= to
+                && (c.ProjectId == projectId || (c.ProjectId == null && defaultProjectId == projectId)))
+            .OrderBy(c => c.Date).ToListAsync(ct);
+        foreach (var c in charges.Where(c => !billedSources.Contains(c.Id)))
         {
+            if (!CurrencyOk(TermsAt(c.Date)?.Currency, string.Create(Inv, $"Scheduled charge {c.Date:yyyy-MM-dd}")))
+                continue;
             spec.Lines.Add(new InvoiceLine
             {
                 InvoiceSpecificationId = specId,
-                Kind = InvoiceLineKind.FixedPrice, Date = fpDate,
-                Description = endTerms.FixedPriceNote
-                    ?? string.Create(Inv, $"Fixed price {year}-{month:00}"),
-                Explanation = "Fixed-price contract component",
-                Quantity = 1m, UnitPrice = endTerms.FixedPriceAmount.Value,
-                Amount = endTerms.FixedPriceAmount.Value,
+                Kind = InvoiceLineKind.ScheduledCharge, Date = c.Date, SourceId = c.Id,
+                Description = c.Description,
+                Explanation = string.Create(Inv, $"One-off amount scheduled for {c.Date:yyyy-MM-dd}"),
+                Quantity = 1m, UnitPrice = c.Amount, Amount = c.Amount,
             });
         }
 
@@ -365,40 +373,71 @@ public class BillingService(AppDbContext db)
                 && b.Status == BookingStatus.Cancelled
                 && b.Date >= from && b.Date <= to
                 && ((b.CancellationChargeHours ?? 0m) > 0m
-                    || (b.CancellationChargeAmount ?? 0m) > 0m))
+                    || (b.CancellationChargeAmount ?? 0m) > 0m
+                    || (b.CancellationChargeDayFraction ?? 0m) > 0m))
             .ToListAsync(ct);
         foreach (var b in cancellations.Where(b => !billedSources.Contains(b.Id)).OrderBy(x => x.Date))
         {
             var t = TermsAt(b.Date);
             if (!CurrencyOk(t?.Currency, string.Create(Inv, $"Cancellation {b.Date:yyyy-MM-dd}"))) continue;
             var (cGen, cRes) = OverridesAt(b.WorkPackageId, b.ResourceId, b.Date);
-            if (b.CancellationChargeHours is > 0m)
+            var daily = t?.TimeBilling == TimeBilling.DailyRate;
+            var rates = DayBilling.MergeRates(t, cGen, cRes, daily);
+            var kind = TimeMath.KindOf(b.Date, t?.HolidayCalendar ?? "SE");
+            decimal? qty = null, unit = null;
+            string? explanation = null;
+            if (daily && b.CancellationChargeDayFraction is > 0m)
             {
-                var rates = DayBilling.MergeRates(t, cGen, cRes, t?.TimeBilling == TimeBilling.DailyRate);
-                var kind = TimeMath.KindOf(b.Date, t?.HolidayCalendar ?? "SE");
-                decimal qty, unit;
-                if (t?.TimeBilling == TimeBilling.DailyRate)
+                // Day-rate contract: a share of the day; a full day whose
+                // planned hours fit the half-day ceiling bills the half-day rate.
+                var fraction = b.CancellationChargeDayFraction.Value;
+                if (fraction == 1m && rates.HalfDayRate is > 0m && rates.HalfDayMaxHours is > 0m
+                    && b.PlannedHours <= rates.HalfDayMaxHours.Value)
                 {
-                    // Hours charge priced as a fraction of the day rate.
-                    var norm = t.OvertimeAfterHours > 0 ? t.OvertimeAfterHours : 8;
-                    qty = Math.Round(b.CancellationChargeHours.Value / norm, 4);
-                    unit = TimeMath.DayRateFor(kind, rates) ?? 0m;
+                    qty = 1m; unit = rates.HalfDayRate.Value;
+                    explanation = string.Create(Inv,
+                        $"Late cancellation — half day (planned {b.PlannedHours:0.##} h ≤ {rates.HalfDayMaxHours.Value:0.##} h)");
                 }
                 else
                 {
-                    qty = b.CancellationChargeHours.Value;
-                    unit = TimeMath.RateFor(kind, rates) ?? 0m;
+                    qty = fraction; unit = TimeMath.DayRateFor(kind, rates) ?? 0m;
+                    explanation = fraction == 1m
+                        ? "Late cancellation — full day"
+                        : string.Create(Inv, $"{fraction:0.###} day cancellation charge");
                 }
+            }
+            else if (b.CancellationChargeHours is > 0m)
+            {
+                if (daily)
+                {
+                    // Hours charge priced as a fraction of the day rate.
+                    var norm = t!.OvertimeAfterHours > 0 ? t.OvertimeAfterHours : 8;
+                    qty = Math.Round(b.CancellationChargeHours.Value / norm, 4);
+                    unit = TimeMath.DayRateFor(kind, rates) ?? 0m;
+                    explanation = string.Create(Inv,
+                        $"{b.CancellationChargeHours.Value:0.##} h cancellation charge");
+                }
+                else
+                {
+                    // A booking charged in full bills at least the daily minimum.
+                    var hours = b.CancellationChargeHours.Value;
+                    var min = b.CancellationChargeFull ? t?.MinBillableHoursPerDay : null;
+                    qty = min is { } m && m > hours ? m : hours;
+                    unit = TimeMath.RateFor(kind, rates) ?? 0m;
+                    explanation = string.Create(Inv, $"{hours:0.##} h cancellation charge")
+                        + (qty > hours ? string.Create(Inv, $", raised to the {qty:0.##} h daily minimum") : "");
+                }
+            }
+            if (qty is { } q && unit is { } u)
+            {
                 spec.Lines.Add(new InvoiceLine
                 {
                     InvoiceSpecificationId = specId,
                     Kind = InvoiceLineKind.Cancellation, Date = b.Date, SourceId = b.Id,
                     Description = string.Create(Inv, $"Cancellation {b.Date:yyyy-MM-dd}"),
-                    Explanation = string.Create(Inv,
-                            $"{b.CancellationChargeHours.Value:0.##} h cancellation charge")
-                        + RateSource(cGen, cRes),
-                    Quantity = qty, UnitPrice = unit,
-                    Amount = TimeMath.Round2(qty * unit),
+                    Explanation = explanation + RateSource(cGen, cRes),
+                    Quantity = q, UnitPrice = u,
+                    Amount = TimeMath.Round2(q * u),
                 });
             }
             if (b.CancellationChargeAmount is > 0m)
@@ -415,16 +454,81 @@ public class BillingService(AppDbContext db)
             }
         }
 
+        // ── Visits & additional travel: a mobilisation to a package outside the
+        // contract's scope, or a visit beyond the included limit, bills its
+        // travel time (hourly rate) and recharges its travel costs; within
+        // the limit both are included in the contract.
+        var visits = await WorkPackageRules.NumberVisitsAsync(db, project.ContractId, ct);
+        var travelPeriods = await db.MobilisationPeriods.Include(p => p.WorkPackage)
+            .Where(p => p.ProjectId == projectId && p.WorkPackage != null
+                && p.StartDate <= to && p.EndDate >= from)
+            .ToListAsync(ct);
+        MobilisationPeriod? PeriodOn(Guid resourceId, DateOnly d) => travelPeriods
+            .FirstOrDefault(p => p.ResourceId == resourceId && d >= p.StartDate && d <= p.EndDate);
+        string TravelReason(MobilisationPeriod p) =>
+            p.WorkPackage!.PricingMode == WorkPackagePricing.OutsideContract
+                ? $"travel to {p.WorkPackage.Name}, outside the contract scope"
+                : visits.TryGetValue(p.Id, out var v)
+                    ? string.Create(Inv, $"visit {v.Number} — beyond the {v.Included} included visits")
+                    : "additional travel";
+        bool Billable(MobilisationPeriod? p) =>
+            p is not null && WorkPackageRules.TravelBillable(p, visits.GetValueOrDefault(p.Id));
+        bool IncludedVisit(MobilisationPeriod? p) =>
+            p is not null && !Billable(p) && visits.ContainsKey(p.Id);
+
+        var travelRows = await db.TravelRecords
+            .Where(r => r.ProjectId == projectId && r.Date >= from && r.Date <= to
+                && (r.DurationHours ?? 0m) > 0m
+                && r.Timesheet != null
+                && (r.Timesheet.Status == TimesheetStatus.Approved
+                    || r.Timesheet.Status == TimesheetStatus.Invoiced))
+            .OrderBy(r => r.Date).ToListAsync(ct);
+        foreach (var r in travelRows.Where(r => !billedSources.Contains(r.Id)))
+        {
+            var p = travelPeriods.FirstOrDefault(x => x.Id == r.MobilisationPeriodId)
+                ?? PeriodOn(r.ResourceId, r.Date);
+            if (!Billable(p)) continue;
+            var t = TermsAt(r.Date);
+            if (!CurrencyOk(t?.Currency, string.Create(Inv, $"Travel {r.Date:yyyy-MM-dd}"))) continue;
+            var (tGen, tRes) = OverridesAt(p!.WorkPackageId, r.ResourceId, r.Date);
+            var rate = TimeMath.RateFor(TimeMath.KindOf(r.Date, t?.HolidayCalendar ?? "SE"),
+                DayBilling.MergeRates(t, tGen, tRes, daily: false)) ?? 0m;
+            var hours = r.DurationHours!.Value;
+            spec.Lines.Add(new InvoiceLine
+            {
+                InvoiceSpecificationId = specId,
+                Kind = InvoiceLineKind.Travel, Date = r.Date, SourceId = r.Id,
+                Description = string.Create(Inv, $"Travel time {r.Date:yyyy-MM-dd}")
+                    + (r.FromPlace is null && r.ToPlace is null ? "" : $" · {r.FromPlace} → {r.ToPlace}"),
+                Explanation = string.Create(Inv, $"{hours:0.##} h travel × {rate:0.##} — ")
+                    + TravelReason(p) + RateSource(tGen, tRes),
+                Quantity = hours, UnitPrice = rate, Amount = TimeMath.Round2(hours * rate),
+            });
+        }
+
         // ── Recharged expenses with contract mark-up (§5: 1200 +10% → 1320).
+        // Travel costs follow the visit rules above: recharged for billable
+        // travel even unflagged, never for travel an included visit covers.
         var expenses = await db.Expenses
             .Where(x => x.ProjectId == projectId && x.Date >= from && x.Date <= to
-                && x.RechargeableToCustomer
+                && !x.IncludedInRate
                 && x.Timesheet != null
                 && (x.Timesheet.Status == TimesheetStatus.Approved
                     || x.Timesheet.Status == TimesheetStatus.Invoiced))
             .ToListAsync(ct);
         foreach (var x in expenses.Where(x => !billedSources.Contains(x.Id)).OrderBy(x => x.Date))
         {
+            var travelCost = x.Category is ExpenseCategory.Travel or ExpenseCategory.Accommodation;
+            var period = travelCost ? PeriodOn(x.ResourceId, x.Date) : null;
+            if (IncludedVisit(period))
+            {
+                if (x.RechargeableToCustomer)
+                    Warn(string.Create(Inv,
+                        $"Expense {x.Date:yyyy-MM-dd} ({x.Amount:0.##} {x.Currency}) is travel within an included visit — not recharged."));
+                continue;
+            }
+            var viaTravel = Billable(period);
+            if (!x.RechargeableToCustomer && !viaTravel) continue;
             if (!CurrencyOk(x.Currency, string.Create(Inv, $"Expense {x.Date:yyyy-MM-dd} ({x.Amount:0.##})")))
                 continue;
             var markup = TermsAt(x.Date)?.ExpenseMarkupPercent ?? 0m;
@@ -434,7 +538,8 @@ public class BillingService(AppDbContext db)
                 InvoiceSpecificationId = specId,
                 Kind = InvoiceLineKind.Expense, Date = x.Date, SourceId = x.Id,
                 Description = x.Description ?? $"Expense {x.Category}",
-                Explanation = string.Create(Inv, $"{x.Amount:0.##} {x.Currency} + {markup:0.##}% mark-up"),
+                Explanation = string.Create(Inv, $"{x.Amount:0.##} {x.Currency} + {markup:0.##}% mark-up")
+                    + (viaTravel ? " · " + TravelReason(period!) : ""),
                 Quantity = 1m, UnitPrice = amount, Amount = amount,
             });
         }
@@ -594,6 +699,20 @@ public class BillingService(AppDbContext db)
     private static bool Overlaps(
         List<(DateOnly From, DateOnly To)> frozen, DateOnly from, DateOnly? nextFrom) =>
         frozen.Any(m => m.To >= from && (nextFrom is null || m.From < nextFrom));
+
+    /// <summary>The project a scheduled charge without one lands on: the
+    /// contract's first active project by name (any project when none is active).</summary>
+    public async Task<Guid?> DefaultChargeProjectAsync(Guid contractId, CancellationToken ct) =>
+        await db.Projects.Where(p => p.ContractId == contractId)
+            .OrderByDescending(p => p.IsActive).ThenBy(p => p.Name).ThenBy(p => p.Id)
+            .Select(p => (Guid?)p.Id).FirstOrDefaultAsync(ct);
+
+    /// <summary>True when the scheduled charge sits on a specification that
+    /// has left draft — it can then no longer change or be deleted.</summary>
+    public Task<bool> ChargeInvoicedAsync(Guid chargeId, CancellationToken ct) =>
+        db.InvoiceLines.AnyAsync(l => l.SourceId == chargeId
+            && l.Kind == InvoiceLineKind.ScheduledCharge
+            && l.Invoice.Status != InvoiceStatus.Draft, ct);
 
     /// <summary>Null when the change is allowed; otherwise why not.</summary>
     public async Task<string?> TermsChangeBlockedAsync(
