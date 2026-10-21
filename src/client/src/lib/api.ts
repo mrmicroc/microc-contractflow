@@ -15,6 +15,11 @@ import type {
   Competency,
   CompetencyRequestBody,
   ContractDetail,
+  ContractVisits,
+  ScheduledCharge,
+  ScheduledChargeRequestBody,
+  BaselineSchedule,
+  BaselineMonth,
   ContractRequestBody,
   ContractWorkPackage,
   ContractSummary,
@@ -141,6 +146,19 @@ export const getEffectiveTerms = (contractId: string, on?: string) =>
   apiGet<ContractTerms>(`/api/contracts/${contractId}/terms/effective${on ? `?on=${on}` : ''}`);
 export const createContractTerms = (contractId: string, b: ContractTermsRequestBody) =>
   apiPost<ContractTerms>(`/api/contracts/${contractId}/terms`, b);
+// ── One-off scheduled charges, visits (contract level) ─────────────────────
+
+export const getScheduledCharges = (contractId: string) =>
+  apiGet<ScheduledCharge[]>(`/api/contracts/${contractId}/charges`);
+export const createScheduledCharge = (contractId: string, b: ScheduledChargeRequestBody) =>
+  apiPost<ScheduledCharge>(`/api/contracts/${contractId}/charges`, b);
+export const updateScheduledCharge = (contractId: string, id: string, b: ScheduledChargeRequestBody) =>
+  apiPut<ScheduledCharge>(`/api/contracts/${contractId}/charges/${id}`, b);
+export const deleteScheduledCharge = (contractId: string, id: string) =>
+  apiDelete(`/api/contracts/${contractId}/charges/${id}`);
+export const getContractVisits = (contractId: string) =>
+  apiGet<ContractVisits>(`/api/contracts/${contractId}/visits`);
+
 export const deleteContractTerms = (contractId: string, termId: string) =>
   apiDelete(`/api/contracts/${contractId}/terms/${termId}`);
 
@@ -252,12 +270,19 @@ export interface CompleteResult {
   booking: Booking;
   padUtilised: number;
   overrun: OverrunSplit | null;
+  /** Shared day: each project's utilisation (and overrun) — one row otherwise. */
+  perProject?: { projectId: string; padUtilised: number; overrun: OverrunSplit | null }[];
 }
 /** Admin/PM completion; actual hours beyond the commitment run the §4.3
- * continuation allocation and come back as the overrun split. */
-export const completeBooking = (id: string, actualHours?: number | null) =>
+ * continuation allocation and come back as the overrun split. A shared day
+ * takes the actual hours per project instead. */
+export const completeBooking = (
+  id: string, actualHours?: number | null, actualHoursByProject?: Record<string, number> | null,
+) =>
   apiPost<CompleteResult>(`/api/bookings/${id}/complete`,
-    actualHours ? { actualHours } : {});
+    actualHoursByProject && Object.keys(actualHoursByProject).length
+      ? { actualHoursByProject }
+      : actualHours ? { actualHours } : {});
 export interface RescheduleResult {
   original: Booking;
   replacement: Booking;
@@ -298,8 +323,19 @@ export const createPadRequest = (b: {
   /** A prepared booking waiting on this request — approval confirms it. */
   bookingId?: string | null;
 }) => apiPost<AdditionalPadRequest>('/api/pad-requests', b);
-export const padRequestAction = (id: string, action: 'approve' | 'reject' | 'withdraw') =>
-  apiPost<AdditionalPadRequest>(`/api/pad-requests/${id}/${action}`, {});
+export const padRequestAction = (
+  id: string, action: 'approve' | 'reject' | 'withdraw', approvedByRepresentative?: string | null,
+) =>
+  apiPost<AdditionalPadRequest>(`/api/pad-requests/${id}/${action}`,
+    action === 'approve' && approvedByRepresentative?.trim()
+      ? { approvedByRepresentative: approvedByRepresentative.trim() } : {});
+
+/** The project's baseline per month + sum vs the contracted total. */
+export const getBaselineSchedule = (projectId: string) =>
+  apiGet<BaselineSchedule>(`/api/projects/${projectId}/pad/baseline-schedule`);
+/** Sets several months at once (admin); 409 monthClosed lists the closed months. */
+export const putBaselineSchedule = (projectId: string, months: BaselineMonth[]) =>
+  apiPut<BaselineSchedule>(`/api/projects/${projectId}/pad/baseline-schedule`, months);
 export const deletePadRequest = (id: string) => apiDelete(`/api/pad-requests/${id}`);
 
 // ── Audit log ───────────────────────────────────────────────────────────────

@@ -23,7 +23,7 @@ import type {
 import { viewRange } from '@/lib/bookings';
 import { blockedPreview, canSubmitForce, closeView, type ClosePreview } from '@/lib/monthClose';
 import { cn } from '@/lib/utils';
-import { confirmAction } from '@/lib/confirm';
+import { confirmAction, promptOptional } from '@/lib/confirm';
 import { localMonth, monthKey, shiftMonth as shiftYm } from '@/lib/dates';
 import { canManage as canManageRole, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -40,6 +40,8 @@ const CHECK_LINKS: Record<string, string> = {
   unapprovedTimesheets: '/approvals',
   unapprovedExpenses: '/approvals',
   travelNeedingReview: '/approvals',
+  pendingAdditionalPad: '/approvals',
+  additionalPadAwaitingApproval: '/approvals',
 };
 
 /** Selector for project + month; the data body remounts on change. */
@@ -176,8 +178,10 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
 
   const actOnRequest = async (id: string, action: 'approve' | 'reject' | 'withdraw') => {
     if (action !== 'approve' && !confirmAction(t(`monthEnd.confirm.${action}`))) return;
+    const rep = action === 'approve' ? promptOptional(t('approvals.approvedByRepPrompt')) : '';
+    if (rep === undefined) return;
     setError(null);
-    try { await padRequestAction(id, action); reload(); }
+    try { await padRequestAction(id, action, rep); reload(); }
     catch (e) { setError(describeError(e, t)); }
   };
 

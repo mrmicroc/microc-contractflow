@@ -5,7 +5,9 @@ import {
 } from '@/lib/api';
 import { confirmAction } from '@/lib/confirm';
 import { contractPartiesBody, endClientOptions } from '@/lib/organisations';
-import type { ContractSummary, CustomerDetail, CustomerSummary } from '@/lib/types';
+import type {
+  AuthorisedRepresentative, ContractSummary, CustomerDetail, CustomerSummary,
+} from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -36,6 +38,9 @@ export function ContractSection({
   const emptyForm = () => ({
     customerId: customer.id, name: '', externalReference: '',
     startDate: '', endDate: '', endClientId: '', endClientReference: '', isActive: true,
+    // Kept as loaded — the representatives panel edits them; an update is
+    // replace-all, so editing the header must carry them through unchanged.
+    representatives: [] as AuthorisedRepresentative[],
   });
   const [f, setF] = useState(emptyForm);
 
@@ -60,6 +65,7 @@ export function ContractSection({
       endClientId: c.endClientId ?? '',
       endClientReference: c.endClientReference ?? '',
       isActive: c.isActive,
+      representatives: c.representatives ?? [],
     });
     setFormOpen(true);
   };
@@ -72,6 +78,7 @@ export function ContractSection({
       startDate: f.startDate,
       endDate: f.endDate || null,
       isActive: f.isActive,
+      representatives: f.representatives,
     };
     setError(null);
     try {

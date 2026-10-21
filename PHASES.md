@@ -123,6 +123,22 @@ Items are marked ✅ only when implemented **and** tested. See
       text in non-dev 500s
 - [x] Role-aware navigation and dashboard; Swedish decimal comma everywhere
 
+## Contract-document rules (2026-10) — all per-contract terms settings
+- [x] One organisation register: party + optional end client (+ reference)
+- [x] Carry-over basis (unused baseline default | whole baseline), round-up step
+- [x] PAD invoicing: utilised only | lump sum (utilised + expired, carried PAD
+      billed when it lands); Additional / auto-incurred PAD on separate lines
+- [x] Shared booked day across projects of one contract (minimum split
+      proportionally or per project; utilisation by actual hours)
+- [x] Unbooked services consume PAD (15-min increments; shortfall needs
+      Additional PAD approval before close)
+- [x] Booking start time with notice rule (default 08:00, 4 business days)
+- [x] Work packages outside the contract (billed by time, no PAD) and
+      included-visit limit (travel billed beyond it)
+- [x] Cancellation charges as share of the day rate on day-rate contracts
+- [x] One-off scheduled charges replace the "fixed price" terms component
+- [x] Baseline schedule grid vs contracted total; authorised representatives
+
 ## Backlog
 - PM ↔ project assignment (§2.1 "assigned projects" — PMs currently see all)
 - Standalone hourly activities consuming actual/8 PAD (§4.3)

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmAction, confirmed, promptNote, setConfirmImpl, setPromptImpl } from './confirm';
+import {
+  confirmAction, confirmed, promptNote, promptOptional, setConfirmImpl, setPromptImpl,
+} from './confirm';
 
 describe('confirm helper', () => {
   let restore: (() => void) | null = null;
@@ -39,5 +41,16 @@ describe('promptNote', () => {
     restore();
     restore = setPromptImpl(() => '   ');
     expect(promptNote('Reason?')).toBeNull();
+  });
+});
+
+describe('promptOptional', () => {
+  it('cancel aborts (undefined); blank is an empty answer; text is trimmed', () => {
+    const answers: (string | null)[] = [null, '   ', ' Sam Example '];
+    const restore = setPromptImpl(() => answers.shift() ?? null);
+    expect(promptOptional('Who?')).toBeUndefined();
+    expect(promptOptional('Who?')).toBe('');
+    expect(promptOptional('Who?')).toBe('Sam Example');
+    restore();
   });
 });

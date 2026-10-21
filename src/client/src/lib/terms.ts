@@ -2,21 +2,41 @@
 // survives, comma decimals, only the chosen components persist) are covered
 // by Vitest (AGENTS.md testing discipline).
 import { numOr, numOrNull } from './versioned';
-import type { ContractTerms, ContractTermsRequestBody, TimeBilling } from './types';
+import type {
+  CarryOverBasis, ContractTerms, ContractTermsRequestBody, PadInvoicing,
+  SharedDayMinimum, TimeBilling,
+} from './types';
 
 /** Cancellation-ladder row in the form — strings while editing. */
 export type StepRow = {
   minBusinessDaysBefore: string;
   chargeHours: string;
   chargeAmount: string;
+  /** Share of the day rate (0–1) — day-rate contracts. */
+  chargeDayFraction: string;
 };
+
+/** "08:00:00" / "08:00" → "08:00" for a time input; '' stays ''. */
+export const hhmm = (t: string | null | undefined): string => (t ? t.slice(0, 5) : '');
+
+/** Time input value → API TimeOnly ("HH:mm:00"); empty → the fallback. */
+export const toTimeOnly = (v: string, fallback = '08:00'): string => {
+  const m = /^(\d{1,2}):(\d{2})/.exec(v.trim());
+  const [h, min] = m ? [Number(m[1]), Number(m[2])] : fallback.split(':').map(Number);
+  const ok = h >= 0 && h < 24 && min >= 0 && min < 60;
+  const [hh, mm] = ok ? [h, min] : fallback.split(':').map(Number);
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+};
+
+/** A share of the day rate must lie within 0–1 (null = not set). */
+export const clampFraction = (v: number | null): number | null =>
+  v === null ? null : Math.min(1, Math.max(0, v));
 
 export type TermsForm = {
   effectiveFrom: string;
   currency: string;
   timeBilling: TimeBilling;
   padEnabled: boolean;
-  fixedPriceEnabled: boolean;
   padRate: string;
   hourlyRate: string;
   saturdayRate: string;
@@ -33,9 +53,6 @@ export type TermsForm = {
   holidayDayRate: string;
   halfDayRate: string;
   halfDayMaxHours: string;
-  fixedPriceAmount: string;
-  fixedPriceDate: string;
-  fixedPriceNote: string;
   padHoursPerDay: string;
   minPadPerBookedDay: string;
   carryOverMaxPercent: string;
@@ -46,21 +63,37 @@ export type TermsForm = {
   travelExpensePolicy: string;
   indexation: string;
   notes: string;
+  includedVisits: string;
+  // ── PAD rules ──
+  carryOverBasis: CarryOverBasis;
+  carryOverRoundUpTo: string;
+  padInvoicing: PadInvoicing;
+  additionalPadRate: string;
+  sharedDayMinimum: SharedDayMinimum;
+  unbookedTimeConsumesPad: boolean;
+  unbookedTimeIncrementMinutes: string;
+  defaultStartTime: string;
+  startTimeNoticeBusinessDays: string;
 };
 
 export const emptyTerms: TermsForm = {
   effectiveFrom: '', currency: 'SEK',
-  timeBilling: 'hourly', padEnabled: false, fixedPriceEnabled: false,
+  timeBilling: 'hourly', padEnabled: false,
   padRate: '', hourlyRate: '', saturdayRate: '', sundayRate: '', holidayRate: '',
   overtimeAfterHours: '8', overtimePercent: '150',
   mobilisationFee: '', expenseMarkupPercent: '0', minBillableHoursPerDay: '',
   dayRate: '', saturdayDayRate: '', sundayDayRate: '', holidayDayRate: '',
   halfDayRate: '', halfDayMaxHours: '',
-  fixedPriceAmount: '', fixedPriceDate: '', fixedPriceNote: '',
   padHoursPerDay: '8', minPadPerBookedDay: '1', carryOverMaxPercent: '20',
   carryOverMonths: '1', cancellationDeadlineBusinessDays: '4',
   cancellationSteps: [], holidayCalendar: 'SE',
   travelExpensePolicy: '', indexation: '', notes: '',
+  includedVisits: '',
+  carryOverBasis: 'unusedBaseline', carryOverRoundUpTo: '1',
+  padInvoicing: 'utilised', additionalPadRate: '',
+  sharedDayMinimum: 'proportional',
+  unbookedTimeConsumesPad: false, unbookedTimeIncrementMinutes: '15',
+  defaultStartTime: '08:00', startTimeNoticeBusinessDays: '4',
 };
 
 const s = (n: number | null) => (n === null ? '' : String(n));
@@ -70,7 +103,6 @@ const s = (n: number | null) => (n === null ? '' : String(n));
 export const fromTerms = (v: ContractTerms, effectiveFrom: string): TermsForm => ({
   effectiveFrom, currency: v.currency,
   timeBilling: v.timeBilling, padEnabled: v.padEnabled,
-  fixedPriceEnabled: v.fixedPriceEnabled,
   padRate: s(v.padRate), hourlyRate: s(v.hourlyRate),
   saturdayRate: s(v.saturdayRate), sundayRate: s(v.sundayRate),
   holidayRate: s(v.holidayRate),
@@ -85,8 +117,6 @@ export const fromTerms = (v: ContractTerms, effectiveFrom: string): TermsForm =>
   holidayDayRate: s(v.holidayDayRate),
   halfDayRate: s(v.halfDayRate),
   halfDayMaxHours: s(v.halfDayMaxHours),
-  fixedPriceAmount: s(v.fixedPriceAmount),
-  fixedPriceDate: v.fixedPriceDate ?? '', fixedPriceNote: v.fixedPriceNote ?? '',
   padHoursPerDay: String(v.padHoursPerDay),
   minPadPerBookedDay: String(v.minPadPerBookedDay),
   carryOverMaxPercent: String(v.carryOverMaxPercent),
@@ -96,10 +126,23 @@ export const fromTerms = (v: ContractTerms, effectiveFrom: string): TermsForm =>
     minBusinessDaysBefore: String(st.minBusinessDaysBefore),
     chargeHours: s(st.chargeHours),
     chargeAmount: s(st.chargeAmount),
+    chargeDayFraction: s(st.chargeDayFraction ?? null),
   })),
   holidayCalendar: v.holidayCalendar,
   travelExpensePolicy: v.travelExpensePolicy ?? '', indexation: v.indexation ?? '',
   notes: v.notes ?? '',
+  includedVisits: s(v.includedVisits ?? null),
+  carryOverBasis: v.padRules?.carryOverBasis ?? emptyTerms.carryOverBasis,
+  carryOverRoundUpTo: v.padRules ? String(v.padRules.carryOverRoundUpTo) : emptyTerms.carryOverRoundUpTo,
+  padInvoicing: v.padRules?.padInvoicing ?? emptyTerms.padInvoicing,
+  additionalPadRate: s(v.padRules?.additionalPadRate ?? null),
+  sharedDayMinimum: v.padRules?.sharedDayMinimum ?? emptyTerms.sharedDayMinimum,
+  unbookedTimeConsumesPad: v.padRules?.unbookedTimeConsumesPad ?? false,
+  unbookedTimeIncrementMinutes: v.padRules
+    ? String(v.padRules.unbookedTimeIncrementMinutes) : emptyTerms.unbookedTimeIncrementMinutes,
+  defaultStartTime: hhmm(v.padRules?.defaultStartTime) || emptyTerms.defaultStartTime,
+  startTimeNoticeBusinessDays: v.padRules
+    ? String(v.padRules.startTimeNoticeBusinessDays) : emptyTerms.startTimeNoticeBusinessDays,
 });
 
 /**
@@ -117,7 +160,6 @@ export function termsFormToBody(tf: TermsForm): ContractTermsRequestBody {
     currency: tf.currency,
     timeBilling: tf.timeBilling,
     padEnabled: tf.padEnabled,
-    fixedPriceEnabled: tf.fixedPriceEnabled,
     padRate: tf.padEnabled ? numOrNull(tf.padRate) : null,
     hourlyRate: isHourly ? numOrNull(tf.hourlyRate) : null,
     saturdayRate: isHourly ? numOrNull(tf.saturdayRate) : null,
@@ -134,9 +176,6 @@ export function termsFormToBody(tf: TermsForm): ContractTermsRequestBody {
     holidayDayRate: isDaily ? numOrNull(tf.holidayDayRate) : null,
     halfDayRate: isDaily ? numOrNull(tf.halfDayRate) : null,
     halfDayMaxHours: isDaily ? numOrNull(tf.halfDayMaxHours) : null,
-    fixedPriceAmount: tf.fixedPriceEnabled ? numOrNull(tf.fixedPriceAmount) : null,
-    fixedPriceDate: tf.fixedPriceEnabled ? tf.fixedPriceDate || null : null,
-    fixedPriceNote: tf.fixedPriceEnabled ? tf.fixedPriceNote || null : null,
     padHoursPerDay: numOr(tf.padHoursPerDay, 8),
     minPadPerBookedDay: numOr(tf.minPadPerBookedDay, 1),
     carryOverMaxPercent: numOr(tf.carryOverMaxPercent, 20),
@@ -147,11 +186,40 @@ export function termsFormToBody(tf: TermsForm): ContractTermsRequestBody {
         minBusinessDaysBefore: numOr(st.minBusinessDaysBefore, 0),
         chargeHours: numOrNull(st.chargeHours),
         chargeAmount: numOrNull(st.chargeAmount),
+        chargeDayFraction: isDaily ? clampFraction(numOrNull(st.chargeDayFraction)) : null,
       }))
       .filter((st) => st.minBusinessDaysBefore > 0),
     holidayCalendar: tf.holidayCalendar,
     travelExpensePolicy: tf.travelExpensePolicy || null,
     indexation: tf.indexation || null,
     notes: tf.notes || null,
+    includedVisits: numOrNull(tf.includedVisits),
+    // PAD rules travel with every version (defaults when PAD is off) — the
+    // server stores them regardless, so a later PAD switch-on starts sane.
+    carryOverBasis: tf.carryOverBasis,
+    carryOverRoundUpTo: numOr(tf.carryOverRoundUpTo, 1),
+    padInvoicing: tf.padInvoicing,
+    additionalPadRate: tf.padEnabled ? numOrNull(tf.additionalPadRate) : null,
+    sharedDayMinimum: tf.sharedDayMinimum,
+    unbookedTimeConsumesPad: tf.padEnabled && tf.unbookedTimeConsumesPad,
+    unbookedTimeIncrementMinutes: numOr(tf.unbookedTimeIncrementMinutes, 15),
+    defaultStartTime: toTimeOnly(tf.defaultStartTime),
+    startTimeNoticeBusinessDays: numOr(tf.startTimeNoticeBusinessDays, 4),
   };
+}
+
+/** i18n keys (+ params) summarising the non-default PAD rules of a version
+ * for the versions table — defaults stay silent. */
+export function padRuleTags(v: ContractTerms): { key: string; params?: Record<string, unknown> }[] {
+  const tags: { key: string; params?: Record<string, unknown> }[] = [];
+  const r = v.padRules;
+  if (v.padEnabled && r) {
+    tags.push({ key: r.carryOverBasis === 'baseline' ? 'terms.tagCarryBaseline' : 'terms.tagCarryUnused' });
+    if (r.padInvoicing === 'allocationConsumed') tags.push({ key: 'terms.tagLumpSum' });
+    if (r.sharedDayMinimum === 'perProject') tags.push({ key: 'terms.tagSharedPerProject' });
+    if (r.unbookedTimeConsumesPad) tags.push({ key: 'terms.tagUnbooked' });
+  }
+  if (v.includedVisits !== null && v.includedVisits !== undefined)
+    tags.push({ key: 'terms.tagVisits', params: { count: v.includedVisits } });
+  return tags;
 }

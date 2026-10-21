@@ -130,6 +130,9 @@ export interface BookingEdits {
   /** Optional — omitted means "keep the booking's value". */
   customerContact?: string;
   evidenceRef?: string;
+  instructedBy?: string;
+  /** "HH:mm"; '' clears the agreed start time; omitted keeps it. */
+  startTime?: string;
 }
 
 /**
@@ -151,7 +154,23 @@ export function bookingUpdateBody(b: Booking, edits: BookingEdits): BookingReque
     evidenceRef: edits.evidenceRef === undefined
       ? b.evidenceRef : edits.evidenceRef.trim() || null,
     status: edits.status,
+    instructedBy: edits.instructedBy === undefined
+      ? b.instructedBy ?? null : edits.instructedBy.trim() || null,
+    instructedAtUtc: b.instructedAtUtc ?? null,
+    ...startTimeEdit(b.startTime ?? null, edits.startTime),
   };
+}
+
+/** Start-time part of an update: unchanged → nothing sent (the server keeps
+ * it); '' on a booking with a start time → clear; a new value → "HH:mm:00". */
+export function startTimeEdit(
+  current: string | null, edited: string | undefined,
+): Pick<BookingRequestBody, 'startTime' | 'clearStartTime'> {
+  if (edited === undefined) return {};
+  const now = edited.trim();
+  if (!now) return current ? { clearStartTime: true } : {};
+  const value = `${now.slice(0, 5)}:00`;
+  return current && current.slice(0, 5) === now.slice(0, 5) ? {} : { startTime: value };
 }
 
 /**

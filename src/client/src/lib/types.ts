@@ -1,8 +1,13 @@
 // Mirrors the API DTOs in ContractFlow.Api/Models/Dto (camelCase JSON).
 
 /** Billing-component keys on the terms version in force: 'hourly' |
- * 'dailyRate' | 'pad' | 'fixedPrice'. A contract may carry several at once. */
-export type ContractComponent = 'hourly' | 'dailyRate' | 'pad' | 'fixedPrice';
+ * 'dailyRate' | 'pad' | 'scheduledCharges' (the contract has one-off dated
+ * amounts). A contract may carry several at once. */
+export type ContractComponent = 'hourly' | 'dailyRate' | 'pad' | 'scheduledCharges';
+export type CarryOverBasis = 'unusedBaseline' | 'baseline';
+export type PadInvoicing = 'utilised' | 'allocationConsumed';
+export type SharedDayMinimum = 'proportional' | 'perProject';
+export type WorkPackagePricing = 'contract' | 'outsideContract';
 export type TimeBilling = 'none' | 'hourly' | 'dailyRate';
 export type ResourceType = 'employee' | 'subcontractor' | 'directlyContracted';
 export type LeaveType = 'vacation' | 'leave' | 'unavailable';
@@ -111,6 +116,74 @@ export interface ContractDetail {
   isActive: boolean;
   termsVersions: ContractTerms[];
   projects: ProjectSummary[];
+  /** Customer people authorised to order, cancel and approve Additional PAD. */
+  representatives: AuthorisedRepresentative[];
+}
+
+export interface AuthorisedRepresentative {
+  name: string;
+  email: string | null;
+  phone: string | null;
+  authority: string | null;
+}
+
+/** A contract's one-off dated amount (milestone, instalment, set-up fee). */
+export interface ScheduledCharge {
+  id: string;
+  contractId: string;
+  /** null = billed on the contract's default project — see billedProjectId. */
+  projectId: string | null;
+  projectName: string | null;
+  billedProjectId: string | null;
+  date: string;
+  amount: number;
+  description: string;
+  /** On a specification beyond draft — frozen. */
+  invoiced: boolean;
+}
+
+export interface ScheduledChargeRequestBody {
+  projectId: string | null;
+  date: string;
+  amount: number;
+  description: string;
+}
+
+/** GET /api/contracts/{id}/visits row. */
+export interface ContractVisit {
+  periodId: string;
+  number: number;
+  withinLimit: boolean;
+  projectId: string;
+  projectName: string;
+  resourceId: string;
+  resourceName: string;
+  workPackageId: string;
+  workPackageName: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface ContractVisits {
+  used: number;
+  /** null = no limit configured. */
+  included: number | null;
+  remaining: number | null;
+  visits: ContractVisit[];
+}
+
+/** PAD rules of a terms version (all switchable per contract). */
+export interface PadRules {
+  carryOverBasis: CarryOverBasis;
+  carryOverRoundUpTo: number;
+  padInvoicing: PadInvoicing;
+  additionalPadRate: number | null;
+  sharedDayMinimum: SharedDayMinimum;
+  unbookedTimeConsumesPad: boolean;
+  unbookedTimeIncrementMinutes: number;
+  /** "HH:mm:ss" */
+  defaultStartTime: string;
+  startTimeNoticeBusinessDays: number;
 }
 
 export interface ContractRequestBody {
@@ -122,6 +195,7 @@ export interface ContractRequestBody {
   startDate: string;
   endDate: string | null;
   isActive: boolean;
+  representatives: AuthorisedRepresentative[];
 }
 
 export interface ContractTerms {
@@ -134,7 +208,6 @@ export interface ContractTerms {
   // ── Billing components ──
   timeBilling: TimeBilling;
   padEnabled: boolean;
-  fixedPriceEnabled: boolean;
   padRate: number | null;
   hourlyRate: number | null;
   saturdayRate: number | null;
@@ -151,9 +224,6 @@ export interface ContractTerms {
   holidayDayRate: number | null;
   halfDayRate: number | null;
   halfDayMaxHours: number | null;
-  fixedPriceAmount: number | null;
-  fixedPriceDate: string | null;
-  fixedPriceNote: string | null;
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;
@@ -164,12 +234,17 @@ export interface ContractTerms {
   travelExpensePolicy: string | null;
   indexation: string | null;
   notes: string | null;
+  /** Mobilisations to visit-counted packages included in the price; null = no limit. */
+  includedVisits: number | null;
+  padRules: PadRules | null;
 }
 
 export interface CancellationStep {
   minBusinessDaysBefore: number;
   chargeHours: number | null;
   chargeAmount: number | null;
+  /** Share of the day rate charged (0–1) — day-rate contracts. */
+  chargeDayFraction?: number | null;
 }
 
 export interface ContractTermsRequestBody {
@@ -177,7 +252,6 @@ export interface ContractTermsRequestBody {
   currency: string;
   timeBilling: TimeBilling;
   padEnabled: boolean;
-  fixedPriceEnabled: boolean;
   padRate: number | null;
   hourlyRate: number | null;
   saturdayRate: number | null;
@@ -194,9 +268,6 @@ export interface ContractTermsRequestBody {
   holidayDayRate: number | null;
   halfDayRate: number | null;
   halfDayMaxHours: number | null;
-  fixedPriceAmount: number | null;
-  fixedPriceDate: string | null;
-  fixedPriceNote: string | null;
   padHoursPerDay: number;
   minPadPerBookedDay: number;
   carryOverMaxPercent: number;
@@ -207,6 +278,18 @@ export interface ContractTermsRequestBody {
   travelExpensePolicy: string | null;
   indexation: string | null;
   notes: string | null;
+  includedVisits: number | null;
+  // ── PAD rules (top-level on the request) ──
+  carryOverBasis: CarryOverBasis;
+  carryOverRoundUpTo: number;
+  padInvoicing: PadInvoicing;
+  additionalPadRate: number | null;
+  sharedDayMinimum: SharedDayMinimum;
+  unbookedTimeConsumesPad: boolean;
+  unbookedTimeIncrementMinutes: number;
+  /** "HH:mm" */
+  defaultStartTime: string;
+  startTimeNoticeBusinessDays: number;
 }
 
 export interface ProjectSummary {
@@ -228,6 +311,8 @@ export interface ProjectDetail {
   isActive: boolean;
   workPackages: WorkPackage[];
   estimatedQuantities: EstimatedQuantity[];
+  /** The project's contracted total baseline in PAD (null = not tracked). */
+  contractedBaselinePad: number | null;
 }
 
 export interface ProjectRequestBody {
@@ -236,6 +321,7 @@ export interface ProjectRequestBody {
   code: string | null;
   description: string | null;
   isActive: boolean;
+  contractedBaselinePad?: number | null;
 }
 
 export interface WorkPackage {
@@ -244,6 +330,10 @@ export interface WorkPackage {
   name: string;
   notes: string | null;
   infoItems: WorkPackageInfoItem[];
+  /** contract = follows the contract (e.g. PAD); outsideContract = billed by time, no PAD. */
+  pricingMode: WorkPackagePricing;
+  /** Mobilisations here count against the contract's included visits. */
+  countsAsVisit: boolean;
 }
 
 /** One typed information field on a work package ("Address", "Access"…). */
@@ -258,6 +348,8 @@ export interface WorkPackageRequestBody {
   name: string;
   notes: string | null;
   infoItems?: { type: string; description: string }[];
+  pricingMode?: WorkPackagePricing;
+  countsAsVisit?: boolean;
 }
 
 // One versioned package-rate override row — set fields win over contract terms,
@@ -451,6 +543,28 @@ export interface Booking {
   replacesBookingId: string | null;
   rescheduledToBookingId: string | null;
   warnings: string[];
+  /** Who at the customer requested/confirmed the day (evidence, §5). */
+  instructedBy?: string | null;
+  instructedAtUtc?: string | null;
+  /** Project split of a shared booked day (empty = single project). */
+  shares?: BookingShare[] | null;
+  /** Agreed start time "HH:mm:ss" (null = none agreed). */
+  startTime?: string | null;
+  /** When working time commences per the notice rule. */
+  effectiveStartTime?: string | null;
+}
+
+/** One project's part of a shared booked day; expectedPad null for resources. */
+export interface BookingShare {
+  projectId: string;
+  projectName: string;
+  plannedHours: number;
+  expectedPad: number | null;
+}
+
+export interface BookingShareRequest {
+  projectId: string;
+  plannedHours: number;
 }
 
 export interface BookingRequestBody {
@@ -464,6 +578,12 @@ export interface BookingRequestBody {
   customerContact: string | null;
   evidenceRef: string | null;
   status: 'forecast' | 'tentative' | 'requested';
+  instructedBy?: string | null;
+  instructedAtUtc?: string | null;
+  shares?: BookingShareRequest[];
+  startTime?: string | null;
+  /** Update only: remove the agreed start time. */
+  clearStartTime?: boolean;
 }
 
 export type PadTransactionType =
@@ -529,6 +649,8 @@ export interface AdditionalPadRequest {
   decidedUtc: string | null;
   /** The prepared booking waiting on this request, if any. */
   bookingId: string | null;
+  /** The customer representative who approved it (evidence, §14). */
+  approvedByRepresentative?: string | null;
 }
 
 // ── Time reporting (execution ledger) ───────────────────────────────────────
@@ -676,6 +798,11 @@ export interface MobilisationPeriod {
   confirmedUtc: string;
   workPackageId: string | null;
   workPackageName: string | null;
+  /** Place in the contract's visit count (null = not a visit-counted package). */
+  visitNumber?: number | null;
+  includedVisits?: number | null;
+  /** Beyond the included visits: travel time bills and travel costs recharge. */
+  additionalTravel?: boolean;
 }
 
 export interface MobilisationSuggestion {
@@ -742,7 +869,8 @@ export interface DocumentAttachment {
 export type InvoiceStatus = 'draft' | 'customerReview' | 'final' | 'issued' | 'paid';
 export type StatementStatus = 'draft' | 'final' | 'paid';
 export type InvoiceLineKind =
-  | 'hours' | 'expense' | 'mobilisation' | 'pad' | 'fixedPrice' | 'cancellation' | 'manual';
+  | 'hours' | 'expense' | 'mobilisation' | 'pad' | 'additionalPad' | 'autoAdditionalPad'
+  | 'fixedPrice' | 'scheduledCharge' | 'travel' | 'cancellation' | 'manual';
 export type StatementLineKind = 'hours' | 'expense' | 'allowance' | 'mileage' | 'travelTime' | 'manual';
 
 export interface InvoiceSpecification {
@@ -881,4 +1009,21 @@ export interface MarginRow {
   margin: number;
   marginPercent: number | null;
   costBreakdown: CostBreakdown | null;
+}
+
+// ── Baseline schedule (GET/PUT /api/projects/{id}/pad/baseline-schedule) ────
+
+export interface BaselineMonth {
+  year: number;
+  month: number;
+  amount: number;
+}
+
+/** difference = contracted total − scheduled sum (null without a total). */
+export interface BaselineSchedule {
+  months: BaselineMonth[];
+  scheduled: number;
+  contractedTotal: number | null;
+  difference: number | null;
+  warning: string | null;
 }

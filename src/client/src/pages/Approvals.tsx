@@ -6,7 +6,7 @@ import {
   getTimesheets, mergeMobilisation, padRequestAction, setMobilisationWorkPackage,
   splitMobilisation, suggestMobilisations, timesheetAction,
 } from '@/lib/api';
-import { confirmAction, promptNote } from '@/lib/confirm';
+import { confirmAction, promptNote, promptOptional } from '@/lib/confirm';
 import { localMonth, monthKey, monthRange } from '@/lib/dates';
 import { isoWeekLabel } from '@/lib/timekeeping';
 import { canReopen, reviewNoteValid, sheetStatusCls } from '@/lib/timesheets';
@@ -366,9 +366,12 @@ function PadRequestQueue({ canDecide }: { canDecide: boolean }) {
 
   const decide = async (r: AdditionalPadRequest, action: 'approve' | 'reject') => {
     if (action === 'reject' && !confirmAction(t('approvals.confirmRejectPad'))) return;
+    // Optional evidence: which customer representative approved (§14).
+    const rep = action === 'approve' ? promptOptional(t('approvals.approvedByRepPrompt')) : '';
+    if (rep === undefined) return;
     setError(null);
     try {
-      await padRequestAction(r.id, action);
+      await padRequestAction(r.id, action, rep);
       setMsg(t(action === 'approve' ? 'approvals.padApproved' : 'approvals.padRejected'));
       reload();
     } catch (e) { setError(describeError(e, t)); }
@@ -547,7 +550,17 @@ function MobilisationPanel() {
                 return (
                   <tr key={p.id} className="border-b border-slate-100 align-top">
                     <td className={tdCls}>{p.projectName}</td>
-                    <td className={tdCls}>{p.startDate} → {p.endDate}</td>
+                    <td className={tdCls}>
+                      {p.startDate} → {p.endDate}
+                      {p.visitNumber != null && (
+                        <span className={cn('ml-1.5 rounded px-1.5 py-0.5 text-[10px]',
+                          p.additionalTravel ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-800')}
+                          title={p.additionalTravel ? t('approvals.visitBeyondHelp') : undefined}>
+                          {t('approvals.visitNumber', { n: p.visitNumber, of: p.includedVisits ?? '∞' })}
+                          {p.additionalTravel && ` · ${t('visits.beyond')}`}
+                        </span>
+                      )}
+                    </td>
                     <td className={tdCls}>
                       {pkgs.length > 0 ? (
                         <select className={inputCls} value={p.workPackageId ?? ''}

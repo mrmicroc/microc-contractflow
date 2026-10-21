@@ -9,6 +9,7 @@ import {
   describeError,
   errorCode,
   getBookings,
+  getContract,
   getProjects,
   getProjectWorkPackages,
   getResources,
@@ -24,6 +25,11 @@ import {
   type BookingAction, type CalendarView,
 } from '@/lib/bookings';
 import { confirmAction } from '@/lib/confirm';
+import {
+  actualHoursBody, perProjectLine, shareProjectOptions, sharesBody, shortfallsOf, type ShareRow,
+} from '@/lib/bookingShares';
+import { representativeNames } from '@/lib/contractExtras';
+import { hhmm } from '@/lib/terms';
 import { localMonth, localTodayIso as todayIso, monthKey, shiftMonth } from '@/lib/dates';
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
@@ -44,6 +50,7 @@ const emptyForm = {
   projectId: '', resourceId: '', workPackageId: '', date: '', plannedHours: '8',
   activityRef: '', workDescription: '', customerContact: '', evidenceRef: '',
   status: 'forecast' as PreStatus,
+  instructedBy: '', startTime: '', shares: [] as ShareRow[],
 };
 
 export function Plan() {
@@ -64,11 +71,16 @@ export function Plan() {
   const [reschedDate, setReschedDate] = useState('');
   const [completeId, setCompleteId] = useState<string | null>(null);
   const [actualHours, setActualHours] = useState('');
-  const [padNeed, setPadNeed] = useState<{ bookingId: string; quantity: string; reason: string } | null>(null);
+  const [actualByProject, setActualByProject] = useState<Record<string, string>>({});
+  const [padNeed, setPadNeed] = useState<{
+    bookingId: string; projectId: string; quantity: string; reason: string; representative: string;
+  } | null>(null);
+  const [repsByContract, setRepsByContract] = useState<Record<string, string[]>>({});
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState({
     date: '', plannedHours: '', workDescription: '', activityRef: '',
     customerContact: '', evidenceRef: '', status: 'requested' as PreStatus,
+    instructedBy: '', startTime: '',
   });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useFlash(8000);
@@ -89,6 +101,20 @@ export function Plan() {
       .catch(() => {});
     return () => { live = false; };
   }, [f.projectId]);
+
+  // Authorised representatives of the form's / selected booking's contract
+  // feed the "ordered by" picker (free text stays possible).
+  const repsContractId = projects.find((p) => p.id === (f.projectId || selected?.projectId))?.contractId;
+  useEffect(() => {
+    if (!repsContractId || repsByContract[repsContractId]) return;
+    let live = true;
+    getContract(repsContractId)
+      .then((c) => { if (live) setRepsByContract((m) => ({ ...m, [repsContractId]: representativeNames(c.representatives) })); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [repsContractId, repsByContract]);
+  const reps = repsContractId ? repsByContract[repsContractId] ?? [] : [];
+  const projectNames = Object.fromEntries(projects.map((p) => [p.id, p.name]));
 
   const reload = useCallback(() => {
     getBookings({
@@ -152,6 +178,8 @@ export function Plan() {
         evidenceRef: b.evidenceRef ?? '',
         status: (['forecast', 'tentative', 'requested'] as const).includes(b.status as PreStatus)
           ? b.status as PreStatus : 'requested',
+        instructedBy: b.instructedBy ?? '',
+        startTime: hhmm(b.startTime),
       });
       setEditing(true);
       return;
@@ -170,6 +198,7 @@ export function Plan() {
         // Optional actual hours first — the panel below confirms and submits.
         setCompleteId(b.id);
         setActualHours('');
+        setActualByProject({});
         return;
       } else {
         await bookingAction(b.id, action);
@@ -181,8 +210,22 @@ export function Plan() {
       // prepare the request for exactly this booking.
       const body = errorBody(e);
       if (action === 'confirm' && errorCode(e) === 'insufficientPad') {
-        const short = additionalPadShortfall(Number(body?.neededPad ?? 1), Number(body?.freePad ?? 0));
-        setPadNeed({ bookingId: b.id, quantity: String(short || 1), reason: '' });
+        // Shared day: the project short of PAD may not be the primary one.
+        const shortfalls = shortfallsOf(body);
+        const first = shortfalls[0];
+        const short = first
+          ? first.shortfallPad
+          : additionalPadShortfall(Number(body?.neededPad ?? 1), Number(body?.freePad ?? 0));
+        setPadNeed({
+          bookingId: b.id, projectId: first?.projectId ?? b.projectId,
+          quantity: String(short || 1), reason: '', representative: '',
+        });
+        setError(shortfalls.length > 1
+          ? `${describeError(e, t)} ${t('booking.shortfalls', {
+              list: perProjectLine(shortfalls.map((x) => ({ projectId: x.projectId, amount: x.shortfallPad })), projectNames),
+            })}`
+          : describeError(e, t));
+        return;
       }
       setError(describeError(e, t));
     }
@@ -191,17 +234,24 @@ export function Plan() {
   const doComplete = async () => {
     if (!completeId) return;
     const bad = invalidNumericFields({ [t('booking.actualHours')]: actualHours });
+    const byProject = actualHoursBody(actualByProject);
+    if (byProject === null) bad.push(t('booking.actualByProject'));
     if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     if (!confirmAction(t('booking.confirmComplete'))) return;
     setError(null);
     try {
-      const res = await completeBooking(completeId, numOrNull(actualHours));
+      const res = await completeBooking(completeId, numOrNull(actualHours), byProject);
+      const perProject = (res.perProject ?? []).length > 1
+        ? ` ${t('booking.perProjectResult', {
+            list: perProjectLine((res.perProject ?? []).map((p) => ({ projectId: p.projectId, amount: p.padUtilised })), projectNames),
+          })}`
+        : '';
       const parts = overrunParts(res.overrun);
-      setNotice(parts.length
+      setNotice((parts.length
         ? t('booking.completedWithOverrun', {
             parts: parts.map((p) => `${t(`booking.overrun.${p.source}`)} ${p.amount}`).join(', '),
           }) + (res.overrun?.nextMonthConflict ? ` ${t('booking.overrun.nextMonthConflict')}` : '')
-        : t('booking.completed', { pad: res.padUtilised }));
+        : t('booking.completed', { pad: res.padUtilised })) + perProject);
       setCompleteId(null);
       setSelected(null);
       reload();
@@ -222,8 +272,9 @@ export function Plan() {
     try {
       const [year, month] = b.date.split('-').map(Number);
       await createPadRequest({
-        projectId: b.projectId, year, month, quantity,
+        projectId: padNeed.projectId, year, month, quantity,
         reason: padNeed.reason.trim() || null, bookingId: b.id,
+        reference: padNeed.representative.trim() || null,
       });
       setNotice(t('booking.padRequestCreated'));
       setPadNeed(null);
@@ -268,7 +319,9 @@ export function Plan() {
 
   const save = async () => {
     const bad = invalidNumericFields({ [t('booking.plannedHours')]: f.plannedHours });
-    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
+    const split = sharesBody(f.projectId, f.plannedHours || '8', f.shares);
+    if (!split) bad.push(t('booking.shares'));
+    if (bad.length || !split) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     setError(null);
     try {
       const created = await createBooking({
@@ -276,7 +329,11 @@ export function Plan() {
         resourceId: f.resourceId,
         workPackageId: f.workPackageId || null,
         date: f.date,
-        plannedHours: numOrNull(f.plannedHours) ?? 8,
+        plannedHours: split.plannedHours,
+        shares: split.shares,
+        startTime: f.startTime ? `${f.startTime}:00` : null,
+        instructedBy: f.instructedBy.trim() || null,
+        instructedAtUtc: f.instructedBy.trim() ? new Date().toISOString() : null,
         activityRef: f.activityRef.trim() || null,
         workDescription: f.workDescription.trim() || null,
         customerContact: f.customerContact.trim() || null,
@@ -435,7 +492,51 @@ export function Plan() {
                   <option value="requested">{t('booking.status.requested')}</option>
                 </select>
               </Field>
+              <Field label={t('booking.startTime')} help={t('booking.hStartTime')}>
+                <input type="time" className={inputCls} value={f.startTime}
+                  onChange={(e) => setF({ ...f, startTime: e.target.value })} />
+              </Field>
+              <Field label={t('booking.instructedBy')} help={t('booking.hInstructedBy')}>
+                <input className={inputCls} list="booking-reps" value={f.instructedBy}
+                  onChange={(e) => setF({ ...f, instructedBy: e.target.value })} />
+              </Field>
             </div>
+            <datalist id="booking-reps">
+              {reps.map((r) => <option key={r} value={r} />)}
+            </datalist>
+            {f.projectId && shareProjectOptions(projects, f.projectId).length > 0 && (
+              <div className="mt-2">
+                <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                  {t('booking.shares')}
+                  <span className="cursor-help rounded-full border border-slate-300 px-1 text-[10px] text-slate-500"
+                    title={t('booking.hShares')}>?</span>
+                </p>
+                {f.shares.map((sh, i) => (
+                  <div key={i} className="mb-1 flex items-center gap-2">
+                    <select className={cn(inputCls, 'w-56')} value={sh.projectId}
+                      onChange={(e) => setF({ ...f, shares: f.shares.map((x, j) => (j === i ? { ...x, projectId: e.target.value } : x)) })}>
+                      <option value="">—</option>
+                      {shareProjectOptions(projects, f.projectId).map((p) =>
+                        <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <NumInput className={cn(inputCls, 'w-28')} placeholder={t('booking.plannedHours')}
+                      value={sh.hours}
+                      onChange={(v) => setF({ ...f, shares: f.shares.map((x, j) => (j === i ? { ...x, hours: v } : x)) })} />
+                    <button className={btnSecondaryCls}
+                      onClick={() => setF({ ...f, shares: f.shares.filter((_, j) => j !== i) })}>
+                      {t('common.delete')}
+                    </button>
+                  </div>
+                ))}
+                <button className={btnSecondaryCls}
+                  onClick={() => setF({ ...f, shares: [...f.shares, { projectId: '', hours: '' }] })}>
+                  {t('booking.addShare')}
+                </button>
+                {f.shares.length > 0 && (
+                  <span className="ml-2 text-xs text-slate-500">{t('booking.sharesPrimaryHint')}</span>
+                )}
+              </div>
+            )}
             <div className="mt-3 flex gap-2">
               <button className={btnCls}
                 disabled={!f.projectId || !f.resourceId || !f.date}
@@ -523,7 +624,24 @@ export function Plan() {
             <div><span className="text-slate-500">{t('booking.workDescription')}:</span> {selected.workDescription ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.customerContact')}:</span> {selected.customerContact ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.evidenceRef')}:</span> {selected.evidenceRef ?? '—'}</div>
+            <div><span className="text-slate-500">{t('booking.instructedBy')}:</span> {selected.instructedBy
+              ? `${selected.instructedBy}${selected.instructedAtUtc ? ` (${selected.instructedAtUtc.slice(0, 10)})` : ''}`
+              : '—'}</div>
+            <div><span className="text-slate-500">{t('booking.startTime')}:</span> {hhmm(selected.startTime) || '—'}</div>
           </div>
+          {selected.effectiveStartTime && (
+            <p className="mt-1 text-xs text-slate-600">
+              {t('booking.effectiveStart', { time: hhmm(selected.effectiveStartTime) })}
+            </p>
+          )}
+          {(selected.shares ?? []).length > 0 && (
+            <div className="mt-2 text-sm">
+              <span className="text-slate-500">{t('booking.shares')}:</span>{' '}
+              {(selected.shares ?? []).map((sh) =>
+                `${sh.projectName} ${t('common.hoursValue', { value: sh.plannedHours })}`
+                + (sh.expectedPad !== null ? ` · ${sh.expectedPad} PAD` : '')).join(' | ')}
+            </div>
+          )}
           {(selected.replacesBookingId || selected.rescheduledToBookingId) && (
             <p className="mt-2 text-xs text-slate-600">
               {selected.replacesBookingId && (
@@ -589,6 +707,17 @@ export function Plan() {
                 <input className={inputCls} value={ef.evidenceRef}
                   onChange={(e) => setEf({ ...ef, evidenceRef: e.target.value })} />
               </Field>
+              <Field label={t('booking.startTime')} help={t('booking.hStartTime')}>
+                <input type="time" className={inputCls} value={ef.startTime}
+                  onChange={(e) => setEf({ ...ef, startTime: e.target.value })} />
+              </Field>
+              <Field label={t('booking.instructedBy')} help={t('booking.hInstructedBy')}>
+                <input className={inputCls} list="booking-reps-edit" value={ef.instructedBy}
+                  onChange={(e) => setEf({ ...ef, instructedBy: e.target.value })} />
+                <datalist id="booking-reps-edit">
+                  {reps.map((r) => <option key={r} value={r} />)}
+                </datalist>
+              </Field>
               <div className="col-span-2 flex gap-2 sm:col-span-4">
                 <button className={btnCls} onClick={() => void saveEdit()}>{t('common.save')}</button>
                 <button className={btnSecondaryCls} onClick={() => setEditing(false)}>{t('common.cancel')}</button>
@@ -612,10 +741,19 @@ export function Plan() {
           )}
           {completeId === selected.id && (
             <div className="mt-3 flex flex-wrap items-end gap-2 rounded border border-slate-200 bg-slate-50 p-2">
-              <Field label={t('booking.actualHours')}>
-                <NumInput className={inputCls} value={actualHours}
-                  onChange={(v) => setActualHours(v)} />
-              </Field>
+              {(selected.shares ?? []).length > 0 ? (
+                (selected.shares ?? []).map((sh) => (
+                  <Field key={sh.projectId} label={`${t('booking.actualHours')} · ${sh.projectName}`}>
+                    <NumInput className={inputCls} value={actualByProject[sh.projectId] ?? ''}
+                      onChange={(v) => setActualByProject({ ...actualByProject, [sh.projectId]: v })} />
+                  </Field>
+                ))
+              ) : (
+                <Field label={t('booking.actualHours')}>
+                  <NumInput className={inputCls} value={actualHours}
+                    onChange={(v) => setActualHours(v)} />
+                </Field>
+              )}
               <button className={btnCls} onClick={() => void doComplete()}>
                 {t('booking.action.complete')}
               </button>
@@ -627,7 +765,10 @@ export function Plan() {
           )}
           {padNeed?.bookingId === selected.id && (
             <div className="mt-3 flex flex-wrap items-end gap-2 rounded border border-amber-200 bg-amber-50 p-2">
-              <span className="w-full text-sm text-amber-900">{t('booking.padNeedIntro')}</span>
+              <span className="w-full text-sm text-amber-900">
+                {t('booking.padNeedIntro')}
+                {padNeed.projectId !== selected.projectId && ` (${projectNames[padNeed.projectId] ?? ''})`}
+              </span>
               <Field label={t('monthEnd.quantity')}>
                 <NumInput className={inputCls} value={padNeed.quantity}
                   onChange={(v) => setPadNeed({ ...padNeed, quantity: v })} />
@@ -635,6 +776,10 @@ export function Plan() {
               <Field label={t('monthEnd.reason')}>
                 <input className={inputCls} value={padNeed.reason}
                   onChange={(e) => setPadNeed({ ...padNeed, reason: e.target.value })} />
+              </Field>
+              <Field label={t('booking.requestedByRep')} help={t('booking.hRequestedByRep')}>
+                <input className={inputCls} list="booking-reps" value={padNeed.representative}
+                  onChange={(e) => setPadNeed({ ...padNeed, representative: e.target.value })} />
               </Field>
               <button className={btnCls} onClick={() => void requestAdditionalPad()}>
                 {t('booking.requestAdditionalPad')}

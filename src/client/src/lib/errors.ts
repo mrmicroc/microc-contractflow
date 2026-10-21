@@ -50,6 +50,7 @@ export const KNOWN_ERROR_CODES = [
   'closeBlocked', 'concurrentUpdate',
   'noteRequired', 'billedHistory', 'workPackageInUse', 'nothingToBill', 'invoiceFrozen',
   'concurrentGenerate', 'currencyMismatch', 'statementAlreadyMatched', 'statementFinal',
+  'sharesDifferentContracts', 'actualHoursUnknownProject',
 ] as const;
 
 /** i18n key for a known code, or null. */

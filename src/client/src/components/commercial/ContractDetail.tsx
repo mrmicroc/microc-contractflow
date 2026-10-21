@@ -7,12 +7,18 @@ import {
 import { calendarLabel, currencyName } from '@/lib/countries';
 import { localTodayIso as todayIso } from '@/lib/dates';
 import { confirmAction } from '@/lib/confirm';
-import { emptyTerms, fromTerms, termsFormToBody, type StepRow, type TermsForm } from '@/lib/terms';
+import {
+  emptyTerms, fromTerms, padRuleTags, termsFormToBody, type StepRow, type TermsForm,
+} from '@/lib/terms';
 import { resolveVersion } from '@/lib/versioned';
 import { invalidNumericFields, isInvalidDecimal, isInvalidInteger } from '@/lib/validation';
 import type {
-  ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, TimeBilling,
+  CarryOverBasis, ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, PadInvoicing,
+  SharedDayMinimum, TimeBilling,
 } from '@/lib/types';
+import { ScheduledChargesPanel } from './ScheduledChargesPanel';
+import { RepresentativesPanel } from './RepresentativesPanel';
+import { VisitsPanel } from './VisitsPanel';
 import { endClientLabel } from '@/lib/organisations';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
@@ -88,7 +94,8 @@ export function ContractDetail({
         [t('terms.holidayDayRate')]: tf.holidayDayRate,
         [t('terms.halfDayRate')]: tf.halfDayRate,
         [t('terms.halfDayMaxHours')]: tf.halfDayMaxHours,
-        [t('terms.fixedPriceAmount')]: tf.fixedPriceAmount,
+        [t('terms.additionalPadRate')]: tf.additionalPadRate,
+        [t('terms.carryOverRoundUpTo')]: tf.carryOverRoundUpTo,
         [t('terms.padHoursPerDay')]: tf.padHoursPerDay,
         [t('terms.minPadPerBookedDay')]: tf.minPadPerBookedDay,
         [t('terms.carryOverMaxPercent')]: tf.carryOverMaxPercent,
@@ -97,6 +104,9 @@ export function ContractDetail({
         [t('terms.overtimeAfterHours')]: tf.overtimeAfterHours,
         [t('terms.carryOverMonths')]: tf.carryOverMonths,
         [t('terms.cancellationDeadlineBusinessDays')]: tf.cancellationDeadlineBusinessDays,
+        [t('terms.unbookedTimeIncrementMinutes')]: tf.unbookedTimeIncrementMinutes,
+        [t('terms.startTimeNoticeBusinessDays')]: tf.startTimeNoticeBusinessDays,
+        [t('terms.includedVisits')]: tf.includedVisits,
       },
     );
     tf.cancellationSteps.forEach((s, i) => {
@@ -105,6 +115,7 @@ export function ContractDetail({
         bad.push(`${tag} · ${t('terms.stepDaysBefore')}`);
       if (isInvalidDecimal(s.chargeHours)) bad.push(`${tag} · ${t('terms.stepChargeHours')}`);
       if (isInvalidDecimal(s.chargeAmount)) bad.push(`${tag} · ${t('terms.stepChargeAmount')}`);
+      if (isInvalidDecimal(s.chargeDayFraction)) bad.push(`${tag} · ${t('terms.stepChargeDayFraction')}`);
     });
     if (!tf.effectiveFrom) bad.push(t('common.effectiveFrom'));
     if (bad.length) {
@@ -181,8 +192,7 @@ export function ContractDetail({
       tags.push(`${t('terms.dayRate')}: ${fmt(v.dayRate)} ${v.currency}`);
     if (v.padEnabled)
       tags.push(`${t('terms.padTag')}: ${fmt(v.padRate)} ${v.currency}`);
-    if (v.fixedPriceEnabled)
-      tags.push(`${t('terms.fixedPriceTag')}: ${fmt(v.fixedPriceAmount)} ${v.currency}`);
+    for (const rule of padRuleTags(v)) tags.push(t(rule.key, rule.params));
     if (tags.length === 0) tags.push(t('terms.noComponents'));
     return tags;
   };
@@ -247,13 +257,6 @@ export function ContractDetail({
                   <input type="checkbox" checked={tf.padEnabled}
                     onChange={(e) => setTf({ ...tf, padEnabled: e.target.checked })} />
                   {tf.padEnabled ? t('common.yes') : t('common.no')}
-                </span>
-              </Field>
-              <Field label={t('terms.fixedPriceEnabled')} help={t('terms.hFixedPriceEnabled')}>
-                <span className={checkCls}>
-                  <input type="checkbox" checked={tf.fixedPriceEnabled}
-                    onChange={(e) => setTf({ ...tf, fixedPriceEnabled: e.target.checked })} />
-                  {tf.fixedPriceEnabled ? t('common.yes') : t('common.no')}
                 </span>
               </Field>
             </div>
@@ -344,26 +347,48 @@ export function ContractDetail({
                     <NumInput integerOnly className={inputCls} value={tf.carryOverMonths}
                       onChange={(v) => setTf({ ...tf, carryOverMonths: v })} />
                   </Field>
-                </div>
-              </>
-            )}
-
-            {tf.fixedPriceEnabled && (
-              <>
-                <h4 className={grpCls}>{t('terms.groupFixedPrice')}</h4>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <Field label={t('terms.fixedPriceAmount')} help={t('terms.hFixedPriceAmount')}>
-                    <NumInput className={inputCls} value={tf.fixedPriceAmount}
-                      onChange={(v) => setTf({ ...tf, fixedPriceAmount: v })} />
+                  <Field label={t('terms.carryOverBasis')} help={t('terms.hCarryOverBasis')}>
+                    <select className={inputCls} value={tf.carryOverBasis}
+                      onChange={(e) => setTf({ ...tf, carryOverBasis: e.target.value as CarryOverBasis })}>
+                      <option value="unusedBaseline">{t('terms.cobUnused')}</option>
+                      <option value="baseline">{t('terms.cobBaseline')}</option>
+                    </select>
                   </Field>
-                  <Field label={t('terms.fixedPriceDate')} help={t('terms.hFixedPriceDate')}>
-                    <input type="date" className={inputCls} value={tf.fixedPriceDate}
-                      onChange={(e) => setTf({ ...tf, fixedPriceDate: e.target.value })} />
+                  <Field label={t('terms.carryOverRoundUpTo')} help={t('terms.hCarryOverRoundUpTo')}>
+                    <NumInput className={inputCls} value={tf.carryOverRoundUpTo}
+                      onChange={(v) => setTf({ ...tf, carryOverRoundUpTo: v })} />
                   </Field>
-                  <Field label={t('terms.fixedPriceNote')} help={t('terms.hFixedPriceNote')}>
-                    <input className={inputCls} value={tf.fixedPriceNote}
-                      onChange={(e) => setTf({ ...tf, fixedPriceNote: e.target.value })} />
+                  <Field label={t('terms.padInvoicing')} help={t('terms.hPadInvoicing')}>
+                    <select className={inputCls} value={tf.padInvoicing}
+                      onChange={(e) => setTf({ ...tf, padInvoicing: e.target.value as PadInvoicing })}>
+                      <option value="utilised">{t('terms.piUtilised')}</option>
+                      <option value="allocationConsumed">{t('terms.piAllocation')}</option>
+                    </select>
                   </Field>
+                  <Field label={t('terms.additionalPadRate')} help={t('terms.hAdditionalPadRate')}>
+                    <NumInput className={inputCls} value={tf.additionalPadRate}
+                      onChange={(v) => setTf({ ...tf, additionalPadRate: v })} />
+                  </Field>
+                  <Field label={t('terms.sharedDayMinimum')} help={t('terms.hSharedDayMinimum')}>
+                    <select className={inputCls} value={tf.sharedDayMinimum}
+                      onChange={(e) => setTf({ ...tf, sharedDayMinimum: e.target.value as SharedDayMinimum })}>
+                      <option value="proportional">{t('terms.sdmProportional')}</option>
+                      <option value="perProject">{t('terms.sdmPerProject')}</option>
+                    </select>
+                  </Field>
+                  <Field label={t('terms.unbookedTimeConsumesPad')} help={t('terms.hUnbookedTimeConsumesPad')}>
+                    <span className={checkCls}>
+                      <input type="checkbox" checked={tf.unbookedTimeConsumesPad}
+                        onChange={(e) => setTf({ ...tf, unbookedTimeConsumesPad: e.target.checked })} />
+                      {tf.unbookedTimeConsumesPad ? t('common.yes') : t('common.no')}
+                    </span>
+                  </Field>
+                  {tf.unbookedTimeConsumesPad && (
+                    <Field label={t('terms.unbookedTimeIncrementMinutes')} help={t('terms.hUnbookedIncrement')}>
+                      <NumInput integerOnly className={inputCls} value={tf.unbookedTimeIncrementMinutes}
+                        onChange={(v) => setTf({ ...tf, unbookedTimeIncrementMinutes: v })} />
+                    </Field>
+                  )}
                 </div>
               </>
             )}
@@ -377,6 +402,10 @@ export function ContractDetail({
               <Field label={t('terms.expenseMarkupPercent')} help={t('terms.hExpenseMarkup')}>
                 <NumInput className={inputCls} value={tf.expenseMarkupPercent}
                   onChange={(v) => setTf({ ...tf, expenseMarkupPercent: v })} />
+              </Field>
+              <Field label={t('terms.includedVisits')} help={t('terms.hIncludedVisits')}>
+                <NumInput integerOnly className={inputCls} value={tf.includedVisits}
+                  onChange={(v) => setTf({ ...tf, includedVisits: v })} />
               </Field>
             </div>
 
@@ -395,6 +424,14 @@ export function ContractDetail({
                   }))}
                   onChange={(v) => setTf({ ...tf, holidayCalendar: v || 'SE' })}
                 />
+              </Field>
+              <Field label={t('terms.defaultStartTime')} help={t('terms.hDefaultStartTime')}>
+                <input type="time" className={inputCls} value={tf.defaultStartTime}
+                  onChange={(e) => setTf({ ...tf, defaultStartTime: e.target.value })} />
+              </Field>
+              <Field label={t('terms.startTimeNoticeBusinessDays')} help={t('terms.hStartTimeNotice')}>
+                <NumInput integerOnly className={inputCls} value={tf.startTimeNoticeBusinessDays}
+                  onChange={(v) => setTf({ ...tf, startTimeNoticeBusinessDays: v })} />
               </Field>
             </div>
             <div className="mt-2">
@@ -415,6 +452,11 @@ export function ContractDetail({
                   <NumInput className={cn(inputCls, 'w-32')}
                     placeholder={t('terms.stepChargeAmount')} value={s.chargeAmount}
                     onChange={(v) => setStep(i, { chargeAmount: v })} />
+                  {tf.timeBilling === 'dailyRate' && (
+                    <NumInput className={cn(inputCls, 'w-44')}
+                      placeholder={t('terms.stepChargeDayFraction')} value={s.chargeDayFraction}
+                      onChange={(v) => setStep(i, { chargeDayFraction: v })} />
+                  )}
                   <button className={btnDangerCls}
                     onClick={() => setTf({ ...tf, cancellationSteps: tf.cancellationSteps.filter((_, j) => j !== i) })}>
                     {t('common.delete')}
@@ -425,7 +467,7 @@ export function ContractDetail({
                 onClick={() => setTf({
                   ...tf,
                   cancellationSteps: [...tf.cancellationSteps,
-                    { minBusinessDaysBefore: '', chargeHours: '', chargeAmount: '' }],
+                    { minBusinessDaysBefore: '', chargeHours: '', chargeAmount: '', chargeDayFraction: '' }],
                 })}>
                 {t('terms.addStep')}
               </button>
@@ -515,6 +557,12 @@ export function ContractDetail({
           </tbody>
         </table>
       </Panel>
+
+      <ScheduledChargesPanel contractId={contract.id} projects={contract.projects}
+        currency={inForce?.currency ?? 'SEK'} canEdit={isAdmin(me)} />
+      <RepresentativesPanel contract={contract} canEdit={isAdmin(me)}
+        onSaved={() => { void reload(); }} />
+      <VisitsPanel contractId={contract.id} />
 
       <Panel
         title={t('contracts.projects')}

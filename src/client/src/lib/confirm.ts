@@ -32,6 +32,13 @@ export function promptNote(message: string): string | null {
   return v ? v : null;
 }
 
+/** Asks for an optional value (e.g. which customer representative approved):
+ * undefined when cancelled — abort; the trimmed text, possibly empty, otherwise. */
+export function promptOptional(message: string): string | undefined {
+  const v = promptImpl(message);
+  return v === null ? undefined : v.trim();
+}
+
 /** Replaces the note prompt (tests); returns a restore function. */
 export function setPromptImpl(fn: PromptFn): () => void {
   const prev = promptImpl;

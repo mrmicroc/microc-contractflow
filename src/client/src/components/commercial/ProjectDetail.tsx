@@ -28,7 +28,7 @@ import { localTodayIso } from '@/lib/dates';
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
 import type {
-  EstimatedQuantity, WorkPackage, WorkPackageRate, ProjectAccess,
+  EstimatedQuantity, WorkPackage, WorkPackagePricing, WorkPackageRate, ProjectAccess,
   ProjectDetail as ProjectDetailDto, ProjectResource, ResourceSummary,
 } from '@/lib/types';
 import { canManage, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
@@ -37,6 +37,11 @@ import {
   SearchSelect, tdCls, thCls,
 } from '@/components/forms';
 import { cn } from '@/lib/utils';
+import { BaselineSchedulePanel } from './BaselineSchedulePanel';
+
+const EMPTY_WP = {
+  name: '', notes: '', pricingMode: 'contract' as WorkPackagePricing, countsAsVisit: false,
+};
 
 const INFO_TYPES = ['address', 'access', 'contact', 'coordinates', 'other'] as const;
 
@@ -53,13 +58,15 @@ export function ProjectDetail({
   const me = useMe();
   const [project, setProject] = useState<ProjectDetailDto | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lf, setLf] = useState({ name: '', notes: '' });
+  const [lf, setLf] = useState(EMPTY_WP);
   const [lfInfo, setLfInfo] = useState<{ type: string; description: string }[]>([]);
   // Editing an existing work package reuses the add form (wpEditId set).
   const [wpEditId, setWpEditId] = useState<string | null>(null);
   const [qf, setQf] = useState({ label: '', quantity: '', unit: '', notes: '' });
   const [qEditId, setQEditId] = useState<string | null>(null);
-  const [pf, setPf] = useState<{ name: string; code: string; description: string; isActive: boolean } | null>(null);
+  const [pf, setPf] = useState<{
+    name: string; code: string; description: string; isActive: boolean; contractedBaselinePad: string;
+  } | null>(null);
   const [ratesFor, setRatesFor] = useState<string | null>(null);
   const [access, setAccess] = useState<ProjectAccess[]>([]);
   const [resources, setResources] = useState<ResourceSummary[]>([]);
@@ -107,10 +114,12 @@ export function ProjectDetail({
       name: lf.name.trim(),
       notes: lf.notes.trim() || null,
       infoItems: rows.map((i) => ({ type: i.type.trim(), description: i.description.trim() })),
+      pricingMode: lf.pricingMode,
+      countsAsVisit: lf.countsAsVisit,
     };
     if (wpEditId) await updateWorkPackage(wpEditId, body);
     else await createWorkPackage(body);
-    setLf({ name: '', notes: '' });
+    setLf(EMPTY_WP);
     setLfInfo([]);
     setWpEditId(null);
     await reload();
@@ -118,7 +127,10 @@ export function ProjectDetail({
 
   const editWorkPackage = (w: WorkPackage) => {
     setWpEditId(w.id);
-    setLf({ name: w.name, notes: w.notes ?? '' });
+    setLf({
+      name: w.name, notes: w.notes ?? '',
+      pricingMode: w.pricingMode ?? 'contract', countsAsVisit: w.countsAsVisit ?? false,
+    });
     setLfInfo(w.infoItems.map((i) => ({ type: i.type, description: i.description })));
   };
 
@@ -150,12 +162,15 @@ export function ProjectDetail({
 
   const saveProject = async () => {
     if (!pf) return;
+    const bad = invalidNumericFields({ [t('projects.contractedBaselinePad')]: pf.contractedBaselinePad });
+    if (bad.length) { setError(t('common.invalidNumbers', { fields: bad.join(', ') })); return; }
     const ok = await guarded(() => updateProject(project.id, {
       contractId: project.contractId,
       name: pf.name.trim(),
       code: pf.code.trim() || null,
       description: pf.description.trim() || null,
       isActive: pf.isActive,
+      contractedBaselinePad: numOrNull(pf.contractedBaselinePad),
     }));
     if (!ok) return;
     setPf(null);
@@ -180,6 +195,8 @@ export function ProjectDetail({
             <button className={btnSecondaryCls} onClick={() => setPf({
               name: project.name, code: project.code ?? '',
               description: project.description ?? '', isActive: project.isActive,
+              contractedBaselinePad: project.contractedBaselinePad === null || project.contractedBaselinePad === undefined
+                ? '' : String(project.contractedBaselinePad),
             })}>
               {t('projects.editProject')}
             </button>
@@ -211,6 +228,10 @@ export function ProjectDetail({
                 {pf.isActive ? t('common.active') : t('common.inactive')}
               </span>
             </Field>
+            <Field label={t('projects.contractedBaselinePad')} help={t('projects.hContractedBaselinePad')}>
+              <NumInput className={inputCls} value={pf.contractedBaselinePad}
+                onChange={(v) => setPf({ ...pf, contractedBaselinePad: v })} />
+            </Field>
           </div>
           <div className="mt-3 flex gap-2">
             <button className={btnCls} disabled={!pf.name.trim()} onClick={() => void saveProject()}>
@@ -218,6 +239,12 @@ export function ProjectDetail({
             </button>
             <button className={btnSecondaryCls} onClick={() => setPf(null)}>{t('common.cancel')}</button>
           </div>
+        </div>
+      )}
+      {canSeeCommercial(me) && (
+        <div className="mb-4">
+          <BaselineSchedulePanel projectId={project.id}
+            contracted={project.contractedBaselinePad ?? null} canEdit={isAdmin(me)} />
         </div>
       )}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -234,7 +261,19 @@ export function ProjectDetail({
             {project.workPackages.map((l) => (
               <Fragment key={l.id}>
                 <tr className="border-b border-slate-100">
-                  <td className={tdCls}>{l.name}</td>
+                  <td className={tdCls}>
+                    {l.name}
+                    {l.pricingMode === 'outsideContract' && (
+                      <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
+                        {t('workPackages.outsideTag')}
+                      </span>
+                    )}
+                    {l.countsAsVisit && (
+                      <span className="ml-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-800">
+                        {t('workPackages.visitTag')}
+                      </span>
+                    )}
+                  </td>
                   <td className={tdCls}>
                     {l.infoItems.length === 0 ? '—' : l.infoItems
                       .map((i) => `${i.type}: ${i.description}`).join(' · ')}
@@ -254,7 +293,7 @@ export function ProjectDetail({
                             <button className={btnDangerCls}
                               onClick={() => void confirmed(async () => {
                                 await deleteWorkPackage(l.id);
-                                if (wpEditId === l.id) { setWpEditId(null); setLf({ name: '', notes: '' }); setLfInfo([]); }
+                                if (wpEditId === l.id) { setWpEditId(null); setLf(EMPTY_WP); setLfInfo([]); }
                                 await reload();
                               })}>
                               {t('common.delete')}
@@ -291,13 +330,27 @@ export function ProjectDetail({
                 <input className={inputCls} value={lf.notes}
                   onChange={(e) => setLf({ ...lf, notes: e.target.value })} />
               </Field>
+              <Field label={t('workPackages.pricingMode')} help={t('workPackages.hPricingMode')}>
+                <select className={inputCls} value={lf.pricingMode}
+                  onChange={(e) => setLf({ ...lf, pricingMode: e.target.value as WorkPackagePricing })}>
+                  <option value="contract">{t('workPackages.pmContract')}</option>
+                  <option value="outsideContract">{t('workPackages.pmOutside')}</option>
+                </select>
+              </Field>
+              <Field label={t('workPackages.countsAsVisit')} help={t('workPackages.hCountsAsVisit')}>
+                <span className="flex items-center gap-1.5 text-sm text-slate-700">
+                  <input type="checkbox" checked={lf.countsAsVisit}
+                    onChange={(e) => setLf({ ...lf, countsAsVisit: e.target.checked })} />
+                  {lf.countsAsVisit ? t('common.yes') : t('common.no')}
+                </span>
+              </Field>
               <button className={btnCls} disabled={!lf.name.trim()}
                 onClick={() => void saveWorkPackage()}>
                 {wpEditId ? t('common.save') : t('workPackages.add')}
               </button>
               {wpEditId && (
                 <button className={btnSecondaryCls}
-                  onClick={() => { setWpEditId(null); setLf({ name: '', notes: '' }); setLfInfo([]); }}>
+                  onClick={() => { setWpEditId(null); setLf(EMPTY_WP); setLfInfo([]); }}>
                   {t('common.cancel')}
                 </button>
               )}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addDays, availableActions, bookingTooltip, bookingUpdateBody, isTerminal, matchBooking,
+  addDays, availableActions, bookingTooltip, bookingUpdateBody, isTerminal, matchBooking, startTimeEdit,
   monthGrid, padEffectKey, rescheduleOutcomeKey, statusClasses, viewRange, weekDates,
 } from './bookings';
 import type { Booking, BookingStatus } from './types';
@@ -45,6 +45,7 @@ describe('bookingUpdateBody', () => {
       date: '2026-11-12', plannedHours: 7.5, activityRef: null,
       workDescription: 'New text', customerContact: 'site lead',
       evidenceRef: 'mail 2026-11-01', status: 'tentative',
+      instructedBy: null, instructedAtUtc: null,
     });
   });
 
@@ -62,6 +63,26 @@ describe('bookingUpdateBody', () => {
       date: '2026-11-10', plannedHours: null, workDescription: '', activityRef: '',
       status: 'requested',
     }).plannedHours).toBe(10);
+  });
+});
+
+describe('booking update — instructed by and start time', () => {
+  const edits = { date: '2026-11-10', plannedHours: 8, workDescription: '', activityRef: '', status: 'requested' as const };
+
+  it('carries "instructed by" through unless edited', () => {
+    const b = booking({ instructedBy: 'Sam Example', instructedAtUtc: '2026-11-01T09:00:00Z' });
+    expect(bookingUpdateBody(b, edits)).toMatchObject({ instructedBy: 'Sam Example', instructedAtUtc: '2026-11-01T09:00:00Z' });
+    expect(bookingUpdateBody(b, { ...edits, instructedBy: ' Kim Example ' }).instructedBy).toBe('Kim Example');
+    expect(bookingUpdateBody(b, { ...edits, instructedBy: '' }).instructedBy).toBeNull();
+  });
+
+  it('sends a start time only when it changed; blank clears an agreed one', () => {
+    expect(startTimeEdit('08:00:00', undefined)).toEqual({});
+    expect(startTimeEdit('08:00:00', '08:00')).toEqual({});
+    expect(startTimeEdit('08:00:00', '07:30')).toEqual({ startTime: '07:30:00' });
+    expect(startTimeEdit(null, '06:00')).toEqual({ startTime: '06:00:00' });
+    expect(startTimeEdit('08:00:00', '')).toEqual({ clearStartTime: true });
+    expect(startTimeEdit(null, '')).toEqual({});
   });
 });
 
