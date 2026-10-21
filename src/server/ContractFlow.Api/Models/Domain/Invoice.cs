@@ -28,6 +28,12 @@ public class InvoiceSpecification
     public int Revision { get; set; }
 
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
+    /// <summary>Party and end client as they stood when the spec was last
+    /// generated — an issued spec never changes when the register is edited.
+    /// Null on specs generated before the snapshot existed (read live).</summary>
+    public string? CustomerName { get; set; }
+    public string? EndClientName { get; set; }
+    public string? EndClientReference { get; set; }
     public required string Currency { get; set; }
     public decimal TotalAmount { get; set; }
     public string? Notes { get; set; }

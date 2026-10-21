@@ -18,8 +18,12 @@ namespace ContractFlow.Api.Controllers;
 public class InvoicesController(AppDbContext db, ICurrentUser currentUser, BillingService billing)
     : ReportingControllerBase(db, currentUser)
 {
+    /// <summary><c>CustomerName</c> = the contract party the spec is addressed
+    /// to; <c>EndClientName</c>/<c>EndClientReference</c> = whom the work was for
+    /// when an intermediary holds the contract (null on direct contracts).</summary>
     public record InvoiceDto(
         Guid Id, Guid ProjectId, string ProjectName, string CustomerName,
+        string? EndClientName, string? EndClientReference,
         int Year, int Month, int Revision, InvoiceStatus Status, string Currency,
         decimal TotalAmount, int LineCount, DateTime CreatedUtc,
         DateTime? IssuedUtc, Guid? IssuedByUserId, DateTime? PaidUtc, Guid? PaidByUserId,
@@ -36,7 +40,11 @@ public class InvoicesController(AppDbContext db, ICurrentUser currentUser, Billi
     public record GenerateRequest(Guid ProjectId, int Year, int Month, bool Supplement = false);
 
     private static InvoiceDto ToDto(InvoiceSpecification s) => new(
-        s.Id, s.ProjectId, s.Project.Name, s.Project.Contract.Customer.Name,
+        s.Id, s.ProjectId, s.Project.Name,
+        // Snapshot when generated with one; older specs read the register live.
+        s.CustomerName ?? s.Project.Contract.Customer.Name,
+        s.CustomerName is null ? s.Project.Contract.EndClient?.Name : s.EndClientName,
+        s.CustomerName is null ? s.Project.Contract.EndClientReference : s.EndClientReference,
         s.Year, s.Month, s.Revision, s.Status, s.Currency, s.TotalAmount, s.Lines.Count,
         s.CreatedUtc, s.IssuedUtc, s.IssuedByUserId, s.PaidUtc, s.PaidByUserId,
         BillingService.Warnings(s.WarningsJson));
@@ -53,6 +61,7 @@ public class InvoicesController(AppDbContext db, ICurrentUser currentUser, Billi
     {
         var q = Db.InvoiceSpecifications
             .Include(s => s.Project).ThenInclude(p => p.Contract).ThenInclude(c => c.Customer)
+            .Include(s => s.Project).ThenInclude(p => p.Contract).ThenInclude(c => c.EndClient)
             .Include(s => s.Lines).AsQueryable();
         if (projectId.HasValue) q = q.Where(s => s.ProjectId == projectId);
         if (year.HasValue) q = q.Where(s => s.Year == year);
@@ -196,6 +205,7 @@ public class InvoicesController(AppDbContext db, ICurrentUser currentUser, Billi
     private Task<InvoiceSpecification?> LoadAsync(Guid id, CancellationToken ct) =>
         Db.InvoiceSpecifications
             .Include(s => s.Project).ThenInclude(p => p.Contract).ThenInclude(c => c.Customer)
+            .Include(s => s.Project).ThenInclude(p => p.Contract).ThenInclude(c => c.EndClient)
             .Include(s => s.Lines)
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 }

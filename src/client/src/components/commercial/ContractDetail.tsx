@@ -13,6 +13,7 @@ import { invalidNumericFields, isInvalidDecimal, isInvalidInteger } from '@/lib/
 import type {
   ContractDetail as ContractDetailDto, ContractTerms, MetaEntry, TimeBilling,
 } from '@/lib/types';
+import { endClientLabel } from '@/lib/organisations';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -205,7 +206,8 @@ export function ContractDetail({
             </span>
           ))}
           <span>{contract.startDate} → {contract.endDate ?? '—'}</span>
-          {contract.endClientName && <span>· {t('contracts.endClient')}: {contract.endClientName}</span>}
+          <span>· {t('contracts.party')}: {contract.customerName}</span>
+          <span>· {t('contracts.endClient')}: {endClientLabel(contract.endClientName, contract.endClientReference) ?? t('contracts.directContract')}</span>
           <span>· {t('terms.immutable')}</span>
         </p>
         {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}

@@ -117,7 +117,9 @@ public class BillingService(AppDbContext db)
         bool supplement = false)
     {
         var (from, to) = MonthRange(year, month);
-        var project = await db.Projects.Include(p => p.Contract)
+        var project = await db.Projects
+            .Include(p => p.Contract).ThenInclude(c => c.Customer)
+            .Include(p => p.Contract).ThenInclude(c => c.EndClient)
             .FirstOrDefaultAsync(p => p.Id == projectId, ct)
             ?? throw new BillingException("unknownProject", "Unknown project.");
 
@@ -156,6 +158,11 @@ public class BillingService(AppDbContext db)
             await db.TimeEntries.Where(e => e.InvoiceSpecificationId == spec.Id)
                 .ExecuteUpdateAsync(s => s.SetProperty(e => e.InvoiceSpecificationId, (Guid?)null), ct);
         }
+        // Who the spec is addressed to and for whom the work was done, frozen
+        // at generation (a draft regenerated later picks up register edits).
+        spec.CustomerName = project.Contract.Customer.Name;
+        spec.EndClientName = project.Contract.EndClient?.Name;
+        spec.EndClientReference = project.Contract.EndClientReference;
         var specId = spec.Id;
         var others = specs.Where(s => s.Id != specId).ToList();
         // Any line of any other spec of this project — expense, cancellation

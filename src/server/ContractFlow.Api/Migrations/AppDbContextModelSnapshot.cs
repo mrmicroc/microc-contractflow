@@ -388,6 +388,10 @@ namespace ContractFlow.Api.Migrations
                     b.Property<Guid?>("EndClientId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("EndClientReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateOnly?>("EndDate")
                         .HasColumnType("date");
 
@@ -662,41 +666,6 @@ namespace ContractFlow.Api.Migrations
                     b.ToTable("Documents");
                 });
 
-            modelBuilder.Entity("ContractFlow.Api.Models.Domain.EndClient", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("AddressLine")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("City")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Country")
-                        .HasMaxLength(2)
-                        .HasColumnType("nvarchar(2)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("PostalCode")
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("EndClients");
-                });
-
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.EstimatedQuantity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -865,6 +834,18 @@ namespace ContractFlow.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
+
+                    b.Property<string>("CustomerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("EndClientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("EndClientReference")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<Guid?>("IssuedByUserId")
                         .HasColumnType("uniqueidentifier");
@@ -1893,10 +1874,10 @@ namespace ContractFlow.Api.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ContractFlow.Api.Models.Domain.EndClient", "EndClient")
-                        .WithMany("Contracts")
+                    b.HasOne("ContractFlow.Api.Models.Domain.Customer", "EndClient")
+                        .WithMany("EndClientContracts")
                         .HasForeignKey("EndClientId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Customer");
 
@@ -2395,11 +2376,8 @@ namespace ContractFlow.Api.Migrations
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Customer", b =>
                 {
                     b.Navigation("Contracts");
-                });
 
-            modelBuilder.Entity("ContractFlow.Api.Models.Domain.EndClient", b =>
-                {
-                    b.Navigation("Contracts");
+                    b.Navigation("EndClientContracts");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.InvoiceSpecification", b =>

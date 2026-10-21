@@ -5,9 +5,12 @@ namespace ContractFlow.Api.Models.Dto;
 
 // ── Customers ───────────────────────────────────────────────────────────────
 
+/// <summary>One organisation of the shared register — <c>ContractCount</c> =
+/// contracts where it is the party, <c>EndClientContractCount</c> = contracts
+/// an intermediary holds on its behalf.</summary>
 public record CustomerSummaryDto(
     Guid Id, string Name, string? ExternalReference, string? VatNumber,
-    string? Country, bool IsActive, int ContractCount);
+    string? Country, bool IsActive, int ContractCount, int EndClientContractCount = 0);
 
 public record ContactPersonDto(string Name, string? Role, string? Email, string? Phone);
 
@@ -15,7 +18,14 @@ public record CustomerDetailDto(
     Guid Id, string Name, string? ExternalReference, string? VatNumber,
     string? AddressLine, string? PostalCode, string? City, string? Country,
     List<ContactPersonDto> Contacts, string? Notes, bool IsActive,
-    List<ContractSummaryDto> Contracts);
+    List<ContractSummaryDto> Contracts,
+    List<EndClientContractDto> EndClientContracts);
+
+/// <summary>A contract where the organisation is the end client — named
+/// with the intermediary that holds it.</summary>
+public record EndClientContractDto(
+    Guid Id, string Name, Guid CustomerId, string CustomerName,
+    string? EndClientReference, DateOnly StartDate, DateOnly? EndDate, bool IsActive);
 
 public class CustomerRequest
 {
@@ -38,27 +48,6 @@ public class CustomerRequest
     public bool IsActive { get; set; } = true;
 }
 
-// ── End clients ─────────────────────────────────────────────────────────────
-
-public record EndClientDto(
-    Guid Id, string Name, string? Country, string? AddressLine,
-    string? PostalCode, string? City, string? Notes);
-
-public class EndClientRequest
-{
-    [Required, StringLength(200, MinimumLength = 1)]
-    public required string Name { get; set; }
-    [StringLength(2)]
-    public string? Country { get; set; }
-    [StringLength(200)]
-    public string? AddressLine { get; set; }
-    [StringLength(20)]
-    public string? PostalCode { get; set; }
-    [StringLength(100)]
-    public string? City { get; set; }
-    public string? Notes { get; set; }
-}
-
 // ── Contracts & terms ───────────────────────────────────────────────────────
 
 public record ContractSummaryDto(
@@ -68,6 +57,7 @@ public record ContractSummaryDto(
 
 public record ContractDetailDto(
     Guid Id, Guid CustomerId, string CustomerName, Guid? EndClientId, string? EndClientName,
+    string? EndClientReference,
     string Name, string? ExternalReference,
     List<string> Components,
     DateOnly StartDate, DateOnly? EndDate, bool IsActive,
@@ -75,9 +65,14 @@ public record ContractDetailDto(
 
 public class ContractRequest
 {
+    /// <summary>The contract party — who signs and pays.</summary>
     [Required]
     public Guid CustomerId { get; set; }
+    /// <summary>End client from the same register; null (or the party
+    /// itself) = direct contract.</summary>
     public Guid? EndClientId { get; set; }
+    [StringLength(100)]
+    public string? EndClientReference { get; set; }
     [Required, StringLength(200, MinimumLength = 1)]
     public required string Name { get; set; }
     [StringLength(100)]

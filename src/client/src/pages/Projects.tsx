@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getCustomer, getEndClients } from '@/lib/api';
-import type { CustomerDetail, EndClient } from '@/lib/types';
+import { getCustomer, getCustomers } from '@/lib/api';
+import type { CustomerDetail, CustomerSummary } from '@/lib/types';
 import { canSeeCommercial, useMe } from '@/lib/useMe';
 import { CustomerSection } from '@/components/commercial/CustomerSection';
 import { ContractSection } from '@/components/commercial/ContractSection';
 import { ContractDetail } from '@/components/commercial/ContractDetail';
 import { ProjectDetail } from '@/components/commercial/ProjectDetail';
-import { EndClientSection } from '@/components/commercial/EndClientSection';
 
 export function Projects() {
   const { t } = useTranslation();
@@ -17,13 +16,15 @@ export function Projects() {
   const [contractId, setContractId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [contractKey, setContractKey] = useState(0);
-  const [endClients, setEndClients] = useState<EndClient[]>([]);
+  // The whole organisation register — party and end-client pickers draw
+  // from the same list.
+  const [organisations, setOrganisations] = useState<CustomerSummary[]>([]);
 
-  const reloadEndClients = useCallback(
-    () => getEndClients().then(setEndClients).catch(() => setEndClients([])),
+  const reloadOrganisations = useCallback(
+    () => getCustomers().then(setOrganisations).catch(() => setOrganisations([])),
     [],
   );
-  useEffect(() => { void reloadEndClients(); }, [reloadEndClients]);
+  useEffect(() => { void reloadOrganisations(); }, [reloadOrganisations]);
 
   const reloadCustomer = useCallback(() => {
     if (!customerId) return;
@@ -67,6 +68,7 @@ export function Projects() {
       <CustomerSection
         selectedId={customerId}
         onSelect={selectCustomer}
+        onChanged={() => void reloadOrganisations()}
         onDeleted={(id) => {
           if (id === customerId) {
             setCustomerId(null);
@@ -80,10 +82,10 @@ export function Projects() {
       {customer && (
         <ContractSection
           customer={customer}
-          endClients={endClients}
+          organisations={organisations}
           selectedId={contractId}
           onSelect={selectContract}
-          onChanged={reloadCustomer}
+          onChanged={() => { reloadCustomer(); void reloadOrganisations(); }}
           onDeleted={(id) => {
             if (id === contractId) {
               setContractId(null);
@@ -115,7 +117,6 @@ export function Projects() {
         />
       )}
 
-      <EndClientSection onChanged={reloadEndClients} />
     </div>
   );
 }

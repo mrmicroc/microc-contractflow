@@ -43,7 +43,7 @@ public static class DevSeed
         if (await db.Customers.AnyAsync()) return;
 
         var customer = new Customer { Name = "Example Org", ExternalReference = "EX-100" };
-        var endClient = new EndClient { Name = "North Link" };
+        var endClient = new Customer { Name = "North Link" };
 
         var contract = new Contract
         {
@@ -131,7 +131,7 @@ public static class DevSeed
         });
 
         db.Customers.Add(customer);
-        db.EndClients.Add(endClient);
+        db.Customers.Add(endClient);
         db.Contracts.Add(contract);
         db.Projects.Add(project);
         db.Resources.AddRange(consultant, employee);

@@ -65,6 +65,7 @@ describe('parseSupplierLines', () => {
 
 const spec = (over: Partial<InvoiceSpecification>): InvoiceSpecification => ({
   id: 'i', projectId: 'p1', projectName: 'North Link', customerName: 'Example Org',
+  endClientName: null, endClientReference: null,
   year: 2026, month: 10, revision: 0, status: 'draft', currency: 'SEK', totalAmount: 0,
   lineCount: 0, createdUtc: '', issuedUtc: null, issuedByUserId: null, paidUtc: null,
   paidByUserId: null, warnings: [], ...over,
@@ -101,6 +102,7 @@ describe('canBackToDraft', () => {
 
 const margin = (currency: string, billed: number, cost: number): MarginRow => ({
   projectId: `p-${currency}-${billed}`, projectName: 'North Link', customerName: 'Example Org',
+  endClientId: 'o1', endClientName: 'Example Org',
   currency, billed, cost, margin: billed - cost, marginPercent: null, costBreakdown: null,
 });
 

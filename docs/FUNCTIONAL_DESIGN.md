@@ -100,8 +100,14 @@ can produce several time reports; one journey can span several Booked Days.
 Grouped, not yet a database schema — but close.
 
 **Commercial structure**
-- `Customer`, optional `EndClient` (distinguish who pays MICROC from the end
-  client in multi-layer chains)
+- `Customer` = one organisation register for both roles. A contract names its
+  **party** (who signs and pays MICROC) and optionally an **end client** from
+  the same register — the organisation the work is ultimately for when an
+  intermediary (e.g. a larger consultancy) holds the contract. No end client =
+  direct contract. One organisation can be the party on one contract and the
+  end client on another; reports group by the *effective* end client (end
+  client, else the party), and invoice specifications carry the end client
+  and its reference, frozen at generation.
 - `Contract` → versioned `ContractTerms` (rates, PAD rules, cancellation rules,
   travel/expense policy, currency, indexation — effective-dated, never
   rewritten)

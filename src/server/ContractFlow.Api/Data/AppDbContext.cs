@@ -11,7 +11,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
 {
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Customer> Customers => Set<Customer>();
-    public DbSet<EndClient> EndClients => Set<EndClient>();
     public DbSet<Contract> Contracts => Set<Contract>();
     public DbSet<ContractTerms> ContractTerms => Set<ContractTerms>();
     public DbSet<Project> Projects => Set<Project>();
@@ -106,23 +105,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             });
         });
 
-        builder.Entity<EndClient>(e =>
-        {
-            e.Property(c => c.Name).HasMaxLength(200);
-            e.Property(c => c.Country).HasMaxLength(2);
-            e.Property(c => c.AddressLine).HasMaxLength(200);
-            e.Property(c => c.PostalCode).HasMaxLength(20);
-            e.Property(c => c.City).HasMaxLength(100);
-        });
-
         builder.Entity<Contract>(e =>
         {
             e.Property(c => c.Name).HasMaxLength(200);
             e.Property(c => c.ExternalReference).HasMaxLength(100);
+            e.Property(c => c.EndClientReference).HasMaxLength(100);
             e.HasOne(c => c.Customer).WithMany(cu => cu.Contracts)
                 .HasForeignKey(c => c.CustomerId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(c => c.EndClient).WithMany(ec => ec.Contracts)
-                .HasForeignKey(c => c.EndClientId).OnDelete(DeleteBehavior.SetNull);
+            // Same register as the party; an organisation in use as an end
+            // client can't be deleted (Restrict — no second cascade path).
+            e.HasOne(c => c.EndClient).WithMany(cu => cu.EndClientContracts)
+                .HasForeignKey(c => c.EndClientId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<ContractTerms>(e =>
@@ -483,6 +476,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.TotalAmount).HasPrecision(18, 2);
             e.Property(x => x.Notes).HasMaxLength(500);
             e.Property(x => x.WarningsJson).HasMaxLength(4000);
+            e.Property(x => x.CustomerName).HasMaxLength(200);
+            e.Property(x => x.EndClientName).HasMaxLength(200);
+            e.Property(x => x.EndClientReference).HasMaxLength(100);
             e.HasIndex(x => new { x.ProjectId, x.Year, x.Month, x.Revision }).IsUnique();
             e.HasOne(x => x.Project).WithMany()
                 .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);

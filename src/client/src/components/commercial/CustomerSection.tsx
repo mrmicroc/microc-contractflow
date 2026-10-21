@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  createCustomer, deleteCustomer, errorMessage, getCustomer, getCustomers, updateCustomer,
+  createCustomer, deleteCustomer, errorCode, errorMessage, getCustomer, getCustomers, updateCustomer,
 } from '@/lib/api';
 import { confirmAction } from '@/lib/confirm';
 import { countryName } from '@/lib/countries';
@@ -31,10 +31,13 @@ const emptyForm: CustomerForm = {
 export function CustomerSection({
   selectedId,
   onSelect,
+  onChanged,
   onDeleted,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** The register changed (create/edit/delete) — party pickers reload. */
+  onChanged?: () => void;
   onDeleted?: (id: string) => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -117,6 +120,7 @@ export function CustomerSection({
     }
     setFormOpen(false);
     await reload();
+    onChanged?.();
   };
 
   const remove = async (id: string) => {
@@ -126,8 +130,10 @@ export function CustomerSection({
       await deleteCustomer(id);
       onDeleted?.(id);
       await reload();
+      onChanged?.();
     } catch (e) {
-      setError(errorMessage(e));
+      // In use as contract party or end client — say which register rule bit.
+      setError(errorCode(e) === 'hasDependents' ? t('errors.organisationInUse') : errorMessage(e));
     }
   };
 
@@ -231,6 +237,7 @@ export function CustomerSection({
             <th className={thCls}>{t('customers.country')}</th>
             <th className={thCls}>{t('customers.externalRef')}</th>
             <th className={thCls}>{t('customers.contractCount')}</th>
+            <th className={thCls}>{t('customers.endClientContractCount')}</th>
             <th className={thCls}>{t('common.active')}</th>
             {isAdmin(me) && <th className={thCls}>{t('common.actions')}</th>}
           </tr>
@@ -253,6 +260,7 @@ export function CustomerSection({
               <td className={tdCls}>{countryName(c.country, i18n.language)}</td>
               <td className={tdCls}>{c.externalReference ?? '—'}</td>
               <td className={tdCls}>{c.contractCount}</td>
+              <td className={tdCls}>{c.endClientContractCount}</td>
               <td className={tdCls}>{c.isActive ? t('common.active') : t('common.inactive')}</td>
               {isAdmin(me) && (
                 <td className={tdCls}>
@@ -275,7 +283,7 @@ export function CustomerSection({
             </tr>
           ))}
           {customers.length === 0 && (
-            <tr><td className={tdCls} colSpan={8}>{t('common.none')}</td></tr>
+            <tr><td className={tdCls} colSpan={9}>{t('common.none')}</td></tr>
           )}
         </tbody>
       </table>

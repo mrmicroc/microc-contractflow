@@ -18,9 +18,13 @@ public class ReportsController(AppDbContext db, BillingService billing) : Contro
 {
     /// <summary>One project × currency. Amounts in different currencies are
     /// never added together — a project billed in one currency and costed in
-    /// another yields two rows.</summary>
+    /// another yields two rows. <c>EndClientId</c>/<c>EndClientName</c> = the
+    /// effective end client: the contract's end client, or the party itself
+    /// on a direct contract — so work for one organisation lines up whether
+    /// it came direct or through an intermediary.</summary>
     public record MarginRow(
-        Guid ProjectId, string ProjectName, string CustomerName, string Currency,
+        Guid ProjectId, string ProjectName, string CustomerName,
+        Guid EndClientId, string EndClientName, string Currency,
         decimal Billed, decimal Cost, decimal Margin, decimal? MarginPercent,
         BillingService.CostBreakdown? CostBreakdown);
 
@@ -30,7 +34,8 @@ public class ReportsController(AppDbContext db, BillingService billing) : Contro
     [HttpGet("margins")]
     [RequireRole(AppRole.Administrator, AppRole.Finance)]
     public async Task<IActionResult> Margins(
-        [FromQuery] int year, [FromQuery] int month, CancellationToken ct)
+        [FromQuery] int year, [FromQuery] int month,
+        [FromQuery] Guid? endClientId, CancellationToken ct)
     {
         if (month is < 1 or > 12 || year is < 2000 or > 2100)
             return BadRequest(new { error = "month must be 1–12." });
@@ -61,7 +66,10 @@ public class ReportsController(AppDbContext db, BillingService billing) : Contro
         var projectIds = billed.Select(b => b.ProjectId).Union(withCost).ToList();
         var projects = await db.Projects
             .Include(p => p.Contract).ThenInclude(c => c.Customer)
+            .Include(p => p.Contract).ThenInclude(c => c.EndClient)
             .Where(p => projectIds.Contains(p.Id))
+            .Where(p => endClientId == null
+                || (p.Contract.EndClientId ?? p.Contract.CustomerId) == endClientId)
             .ToListAsync(ct);
 
         var rows = new List<MarginRow>();
@@ -76,7 +84,9 @@ public class ReportsController(AppDbContext db, BillingService billing) : Contro
                 var cost = costs.FirstOrDefault(c => c.Currency == currency);
                 var margin = rev - (cost?.Total ?? 0m);
                 rows.Add(new MarginRow(
-                    p.Id, p.Name, p.Contract.Customer.Name, currency,
+                    p.Id, p.Name, p.Contract.Customer.Name,
+                    p.Contract.EndClientId ?? p.Contract.CustomerId,
+                    (p.Contract.EndClient ?? p.Contract.Customer).Name, currency,
                     rev, cost?.Total ?? 0m, margin,
                     rev != 0 ? Math.Round(margin / rev * 100m, 1) : null,
                     cost));

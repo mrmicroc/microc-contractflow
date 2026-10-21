@@ -37,7 +37,7 @@ public static class AuditTrail
 
     private static readonly HashSet<Type> Audited =
     [
-        typeof(Contract), typeof(ContractTerms), typeof(Customer), typeof(EndClient),
+        typeof(Contract), typeof(ContractTerms), typeof(Customer),
         typeof(Project), typeof(WorkPackage), typeof(WorkPackageRate), typeof(Resource),
         typeof(CompensationAgreement), typeof(ProjectResource), typeof(ProjectAccess),
         typeof(Booking), typeof(Timesheet), typeof(InvoiceSpecification),

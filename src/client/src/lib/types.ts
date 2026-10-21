@@ -22,7 +22,23 @@ export interface CustomerSummary {
   vatNumber: string | null;
   country: string | null;
   isActive: boolean;
+  /** Contracts where the organisation is the contract party. */
   contractCount: number;
+  /** Contracts an intermediary holds where the organisation is the end client. */
+  endClientContractCount: number;
+}
+
+/** A contract where the organisation is the end client, named with the
+ * intermediary (contract party) that holds it. */
+export interface EndClientContract {
+  id: string;
+  name: string;
+  customerId: string;
+  customerName: string;
+  endClientReference: string | null;
+  startDate: string;
+  endDate: string | null;
+  isActive: boolean;
 }
 
 export interface CustomerDetail {
@@ -38,6 +54,7 @@ export interface CustomerDetail {
   notes: string | null;
   isActive: boolean;
   contracts: ContractSummary[];
+  endClientContracts: EndClientContract[];
 }
 
 export interface CustomerRequestBody {
@@ -51,25 +68,6 @@ export interface CustomerRequestBody {
   contacts: ContactPerson[];
   notes: string | null;
   isActive: boolean;
-}
-
-export interface EndClient {
-  id: string;
-  name: string;
-  country: string | null;
-  addressLine: string | null;
-  postalCode: string | null;
-  city: string | null;
-  notes: string | null;
-}
-
-export interface EndClientRequestBody {
-  name: string;
-  country: string | null;
-  addressLine: string | null;
-  postalCode: string | null;
-  city: string | null;
-  notes: string | null;
 }
 
 /** GET /api/meta/{calendars,countries,currencies} row — code + English name. */
@@ -101,8 +99,10 @@ export interface ContractDetail {
   id: string;
   customerId: string;
   customerName: string;
+  /** End client from the same register; null = direct contract. */
   endClientId: string | null;
   endClientName: string | null;
+  endClientReference: string | null;
   name: string;
   externalReference: string | null;
   components: ContractComponent[];
@@ -116,6 +116,7 @@ export interface ContractDetail {
 export interface ContractRequestBody {
   customerId: string;
   endClientId: string | null;
+  endClientReference: string | null;
   name: string;
   externalReference: string | null;
   startDate: string;
@@ -748,7 +749,11 @@ export interface InvoiceSpecification {
   id: string;
   projectId: string;
   projectName: string;
+  /** The contract party the spec is addressed to. */
   customerName: string;
+  /** Whom the work was for when an intermediary holds the contract. */
+  endClientName: string | null;
+  endClientReference: string | null;
   year: number;
   month: number;
   /** 0 = the month's first spec; supplements count up. */
@@ -866,6 +871,10 @@ export interface MarginRow {
   projectId: string;
   projectName: string;
   customerName: string;
+  /** Effective end client — the contract's end client, or the party itself
+   * on a direct contract. */
+  endClientId: string;
+  endClientName: string;
   currency: string;
   billed: number;
   cost: number;

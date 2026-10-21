@@ -19,7 +19,7 @@ export interface AuditEntry {
 
 /** Entity types the server audits (its CLR type names) — the filter list. */
 export const AUDITED_ENTITY_TYPES = [
-  'Contract', 'ContractTerms', 'Customer', 'EndClient', 'Project', 'WorkPackage',
+  'Contract', 'ContractTerms', 'Customer', 'Project', 'WorkPackage',
   'WorkPackageRate', 'Resource', 'CompensationAgreement', 'ProjectResource',
   'ProjectAccess', 'Booking', 'Timesheet', 'InvoiceSpecification',
   'SubcontractorStatement', 'SupplierInvoice', 'AdditionalPadRequest',

@@ -44,7 +44,7 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
 
         return Ok(new ContractDetailDto(
             contract.Id, contract.CustomerId, contract.Customer.Name,
-            contract.EndClientId, contract.EndClient?.Name,
+            contract.EndClientId, contract.EndClient?.Name, contract.EndClientReference,
             contract.Name, contract.ExternalReference,
             ComponentsOf(contract, DateOnly.FromDateTime(DateTime.UtcNow)),
             contract.StartDate, contract.EndDate, contract.IsActive,
@@ -76,18 +76,13 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
     [RequireRole(AppRole.Administrator)]
     public async Task<IActionResult> Create(ContractRequest req, CancellationToken ct)
     {
-        if (!await db.Customers.AnyAsync(c => c.Id == req.CustomerId, ct))
-            return BadRequest(new { error = "Unknown customer." });
-        if (req.EndClientId.HasValue &&
-            !await db.EndClients.AnyAsync(e => e.Id == req.EndClientId.Value, ct))
-            return BadRequest(new { error = "Unknown end client." });
-        if (req.EndDate.HasValue && req.EndDate.Value < req.StartDate)
-            return BadRequest(new { error = "End date cannot precede start date." });
+        if (await ValidatePartiesAsync(req, ct) is { } invalid) return invalid;
 
         var contract = new Contract
         {
             CustomerId = req.CustomerId,
-            EndClientId = req.EndClientId,
+            EndClientId = EndClientOf(req),
+            EndClientReference = EndClientOf(req) is null ? null : req.EndClientReference,
             Name = req.Name.Trim(),
             ExternalReference = req.ExternalReference,
             StartDate = req.StartDate,
@@ -109,16 +104,11 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
     {
         var contract = await db.Contracts.FindAsync([id], ct);
         if (contract is null) return NotFound();
-        if (!await db.Customers.AnyAsync(c => c.Id == req.CustomerId, ct))
-            return BadRequest(new { error = "Unknown customer." });
-        if (req.EndClientId.HasValue &&
-            !await db.EndClients.AnyAsync(e => e.Id == req.EndClientId.Value, ct))
-            return BadRequest(new { error = "Unknown end client." });
-        if (req.EndDate.HasValue && req.EndDate.Value < req.StartDate)
-            return BadRequest(new { error = "End date cannot precede start date." });
+        if (await ValidatePartiesAsync(req, ct) is { } invalid) return invalid;
 
         contract.CustomerId = req.CustomerId;
-        contract.EndClientId = req.EndClientId;
+        contract.EndClientId = EndClientOf(req);
+        contract.EndClientReference = EndClientOf(req) is null ? null : req.EndClientReference;
         contract.Name = req.Name.Trim();
         contract.ExternalReference = req.ExternalReference;
         contract.StartDate = req.StartDate;
@@ -286,6 +276,25 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    /// <summary>Party and end client both come from the organisation
+    /// register; an end client equal to the party means a direct contract.</summary>
+    private async Task<IActionResult?> ValidatePartiesAsync(ContractRequest req, CancellationToken ct)
+    {
+        if (!await db.Customers.AnyAsync(c => c.Id == req.CustomerId, ct))
+            return BadRequest(new { error = "Unknown customer." });
+        if (EndClientOf(req) is { } endClientId &&
+            !await db.Customers.AnyAsync(c => c.Id == endClientId, ct))
+            return BadRequest(new { error = "Unknown end client." });
+        if (req.EndDate.HasValue && req.EndDate.Value < req.StartDate)
+            return BadRequest(new { error = "End date cannot precede start date." });
+        return null;
+    }
+
+    /// <summary>Stored end client — null on a direct contract (none given, or
+    /// the party itself picked).</summary>
+    private static Guid? EndClientOf(ContractRequest req) =>
+        req.EndClientId == req.CustomerId ? null : req.EndClientId;
 
     /// <summary>Billing-component keys active on the terms version in force on
     /// <paramref name="date"/> — "hourly" / "dailyRate" / "pad" / "fixedPrice".

@@ -23,8 +23,6 @@ import type {
   CustomerDetail,
   CustomerRequestBody,
   CustomerSummary,
-  EndClient,
-  EndClientRequestBody,
   EstimatedQuantity,
   EstimatedQuantityRequestBody,
   MetaEntry,
@@ -127,11 +125,6 @@ export const updateCustomer = (id: string, b: CustomerRequestBody) =>
   apiPut<CustomerSummary>(`/api/customers/${id}`, b);
 export const deleteCustomer = (id: string) => apiDelete(`/api/customers/${id}`);
 
-export const getEndClients = () => apiGet<EndClient[]>('/api/endclients');
-export const createEndClient = (b: EndClientRequestBody) => apiPost<EndClient>('/api/endclients', b);
-export const updateEndClient = (id: string, b: EndClientRequestBody) =>
-  apiPut<EndClient>(`/api/endclients/${id}`, b);
-export const deleteEndClient = (id: string) => apiDelete(`/api/endclients/${id}`);
 
 export const getContracts = (customerId?: string) =>
   apiGet<ContractSummary[]>(`/api/contracts${customerId ? `?customerId=${customerId}` : ''}`);
@@ -510,5 +503,8 @@ export const supplierInvoiceAction = (id: string, action: 'approve' | 'pay', not
     action === 'approve' ? { note } : undefined);
 export const deleteSupplierInvoice = (id: string) => apiDelete(`/api/supplier-invoices/${id}`);
 
-export const getMargins = (year: number, month: number) =>
-  apiGet<MarginRow[]>(`/api/reports/margins?year=${year}&month=${month}`);
+/** `endClientId` narrows to one effective end client — its direct contracts
+ * and those an intermediary holds on its behalf. */
+export const getMargins = (year: number, month: number, endClientId?: string | null) =>
+  apiGet<MarginRow[]>(`/api/reports/margins?year=${year}&month=${month}`
+    + (endClientId ? `&endClientId=${endClientId}` : ''));

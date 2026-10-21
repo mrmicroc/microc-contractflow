@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   deleteInvoice, deleteStatement, deleteSupplierInvoice, describeError,
   generateInvoice, generateStatement,
-  getInvoice, getInvoices, getMargins, getProjects, getResources, getStatement,
+  getCustomers, getInvoice, getInvoices, getMargins, getProjects, getResources, getStatement,
   getStatements, getSupplierInvoice, getSupplierInvoices, getUnbilled,
   invoiceAction, matchSupplierInvoice, registerSupplierInvoice,
   statementAction, supplierInvoiceAction,
@@ -15,10 +15,11 @@ import {
   nextInvoiceStep, nextStatementStep, parseSupplierLines,
   type InvoiceStep, type StatementStep,
 } from '@/lib/economy';
+import { endClientLabel } from '@/lib/organisations';
 import { canHandleMoney, useDevUserReload, useMe } from '@/lib/useMe';
 import { numOrNull } from '@/lib/versioned';
 import type {
-  BillingLine, CostBreakdown, InvoiceDetail, InvoiceSpecification, InvoiceStatus, MarginRow,
+  BillingLine, CostBreakdown, CustomerSummary, InvoiceDetail, InvoiceSpecification, InvoiceStatus, MarginRow,
   ProjectSummary, ResourceSummary, StatementDetail, StatementStatus,
   SubcontractorStatement, SupplierInvoice, SupplierInvoiceDetail, SupplierInvoiceStatus,
   UnbilledRow,
@@ -217,6 +218,12 @@ function InvoiceRow({ s, expanded, open, step, canGenerate, onToggle, onAct, onD
           {s.warnings.length > 0 && (
             <span className="ml-1 text-amber-600" title={s.warnings.join('\n')}>⚠ {s.warnings.length}</span>
           )}
+          <span className="block text-xs text-slate-500">
+            {t('economy.addressedTo', { name: s.customerName })}
+            {endClientLabel(s.endClientName, s.endClientReference) && (
+              <> · {t('economy.forEndClient', { label: endClientLabel(s.endClientName, s.endClientReference) })}</>
+            )}
+          </span>
         </td>
         <td className={tdCls}>
           {monthKey(s.year, s.month)}
@@ -709,26 +716,41 @@ function MarginsPanel() {
   const [month, setMonth] = useState(currentMonth());
   const [rows, setRows] = useState<MarginRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Filter by effective end client — any organisation of the register.
+  const [organisations, setOrganisations] = useState<CustomerSummary[]>([]);
+  const [endClientId, setEndClientId] = useState('');
+  useEffect(() => { getCustomers().then(setOrganisations).catch(() => setOrganisations([])); }, []);
 
   const reload = useCallback(() => {
     if (!validMonth(month)) return;
     const { year, month: m } = ymOf(month);
     setError(null);
-    getMargins(year, m).then(setRows).catch((e) => { setRows([]); setError(describeError(e, t)); });
-  }, [month, t]);
+    getMargins(year, m, endClientId || null).then(setRows)
+      .catch((e) => { setRows([]); setError(describeError(e, t)); });
+  }, [month, endClientId, t]);
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
 
   return (
     <Panel title={t('economy.margins')}
       help={t('economy.marginsHelp')}
-      actions={<input className={inputCls} type="month" value={month}
-        onChange={(e) => setMonth(e.target.value)} />}>
+      actions={
+        <span className="flex gap-2">
+          <select className={cn(inputCls, 'w-56')} value={endClientId} title={t('economy.hEndClientFilter')}
+            onChange={(e) => setEndClientId(e.target.value)}>
+            <option value="">{t('economy.allEndClients')}</option>
+            {organisations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <input className={inputCls} type="month" value={month}
+            onChange={(e) => setMonth(e.target.value)} />
+        </span>
+      }>
       <ErrorBox message={error} />
       <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-slate-200">
             <th className={thCls}>{t('economy.project')}</th>
             <th className={thCls}>{t('economy.customer')}</th>
+            <th className={thCls}>{t('economy.endClient')}</th>
             <th className={cn(thCls, 'text-right')}>{t('economy.billed')}</th>
             <th className={cn(thCls, 'text-right')}>{t('economy.cost')}</th>
             <th className={cn(thCls, 'text-right')}>{t('economy.margin')}</th>
@@ -740,6 +762,7 @@ function MarginsPanel() {
             <tr key={`${r.projectId}-${r.currency}`} className="border-b border-slate-100">
               <td className={tdCls}>{r.projectName}</td>
               <td className={tdCls}>{r.customerName}</td>
+              <td className={tdCls}>{r.endClientName}</td>
               <td className={cn(tdCls, 'text-right')}>{money(r.billed, r.currency)}</td>
               <td className={cn(tdCls, 'text-right')} title={costTitle(r.costBreakdown, t)}>
                 {money(r.cost, r.currency)}
@@ -749,13 +772,13 @@ function MarginsPanel() {
               <td className={cn(tdCls, 'text-right')}>{r.marginPercent != null ? `${r.marginPercent}%` : '—'}</td>
             </tr>
           ))}
-          {rows.length === 0 && <tr><td className={tdCls} colSpan={6}>{t('economy.noneMargins')}</td></tr>}
+          {rows.length === 0 && <tr><td className={tdCls} colSpan={7}>{t('economy.noneMargins')}</td></tr>}
         </tbody>
         {rows.length > 0 && (
           <tfoot>
             {marginTotalsByCurrency(rows).map((tot) => (
               <tr key={tot.currency} className="border-t border-slate-200 font-medium">
-                <td className={tdCls} colSpan={2}>{t('economy.totalIn', { currency: tot.currency })}</td>
+                <td className={tdCls} colSpan={3}>{t('economy.totalIn', { currency: tot.currency })}</td>
                 <td className={cn(tdCls, 'text-right')}>{money(tot.billed, tot.currency)}</td>
                 <td className={cn(tdCls, 'text-right')}>{money(tot.cost, tot.currency)}</td>
                 <td className={cn(tdCls, 'text-right',
