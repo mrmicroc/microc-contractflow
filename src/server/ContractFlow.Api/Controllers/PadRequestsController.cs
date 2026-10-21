@@ -76,7 +76,8 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
     /// </summary>
     [HttpPost("{id:guid}/approve")]
     [RequireRole(AppRole.Administrator)]
-    public async Task<IActionResult> Approve(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Approve(
+        Guid id, [FromBody] AdditionalPadApproveRequest? req, CancellationToken ct)
     {
         var request = await db.AdditionalPadRequests.FindAsync([id], ct);
         if (request is null) return NotFound();
@@ -92,6 +93,7 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
             {
                 request.Status = AdditionalPadStatus.Approved;
                 request.DecidedUtc = DateTime.UtcNow;
+                request.ApprovedByRepresentative = req?.ApprovedByRepresentative?.Trim();
                 await pad.AppendAsync(
                     request.ProjectId, new DateOnly(request.Year, request.Month, 1),
                     PadTransactionType.AdditionalApproved, request.Quantity, me?.Id, ct,
@@ -169,5 +171,6 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
 
     private static AdditionalPadRequestDto ToDto(AdditionalPadRequest r) => new(
         r.Id, r.ProjectId, r.Year, r.Month, r.Quantity, r.Rate, r.Reason,
-        r.Reference, r.Status, r.CreatedUtc, r.DecidedUtc, r.BookingId);
+        r.Reference, r.Status, r.CreatedUtc, r.DecidedUtc, r.BookingId,
+        r.ApprovedByRepresentative);
 }

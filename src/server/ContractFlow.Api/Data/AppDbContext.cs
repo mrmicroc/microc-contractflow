@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Contract> Contracts => Set<Contract>();
+    public DbSet<ScheduledCharge> ScheduledCharges => Set<ScheduledCharge>();
     public DbSet<ContractTerms> ContractTerms => Set<ContractTerms>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<WorkPackage> WorkPackages => Set<WorkPackage>();
@@ -116,6 +117,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             // client can't be deleted (Restrict — no second cascade path).
             e.HasOne(c => c.EndClient).WithMany(cu => cu.EndClientContracts)
                 .HasForeignKey(c => c.EndClientId).OnDelete(DeleteBehavior.Restrict);
+            e.OwnsMany(c => c.Representatives, r =>
+            {
+                r.ToJson();
+                r.Property(x => x.Name).HasMaxLength(200);
+                r.Property(x => x.Email).HasMaxLength(320);
+                r.Property(x => x.Phone).HasMaxLength(50);
+                r.Property(x => x.Authority).HasMaxLength(300);
+            });
+        });
+
+        builder.Entity<ScheduledCharge>(e =>
+        {
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.Description).HasMaxLength(300);
+            e.HasIndex(x => new { x.ContractId, x.Date });
+            e.HasOne(x => x.Contract).WithMany(c => c.ScheduledCharges)
+                .HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Cascade);
+            // A project with charges can't silently orphan them (no second cascade path).
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<ContractTerms>(e =>
@@ -141,8 +162,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
                 s.ToJson();
                 s.Property(x => x.ChargeHours).HasPrecision(9, 2);
                 s.Property(x => x.ChargeAmount).HasPrecision(18, 2);
+                s.Property(x => x.ChargeDayFraction).HasPrecision(9, 4);
             });
-            e.Property(t => t.FixedPriceAmount).HasPrecision(18, 2);
             e.Property(t => t.HourlyRate).HasPrecision(18, 2);
             e.Property(t => t.SaturdayRate).HasPrecision(18, 2);
             e.Property(t => t.SundayRate).HasPrecision(18, 2);
@@ -160,6 +181,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
         {
             e.Property(p => p.Name).HasMaxLength(200);
             e.Property(p => p.Code).HasMaxLength(50);
+            e.Property(p => p.ContractedBaselinePad).HasPrecision(18, 4);
             e.HasOne(p => p.Contract).WithMany(c => c.Projects)
                 .HasForeignKey(p => p.ContractId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -175,6 +197,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
         builder.Entity<WorkPackage>(e =>
         {
             e.Property(l => l.Name).HasMaxLength(200);
+            e.Property(l => l.PricingMode).HasConversion<string>().HasMaxLength(20);
             e.HasOne(l => l.Project).WithMany(p => p.WorkPackages)
                 .HasForeignKey(l => l.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -287,6 +310,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(b => b.PlannedHours).HasPrecision(9, 4);
             e.Property(b => b.CancellationChargeHours).HasPrecision(9, 4);
             e.Property(b => b.CancellationChargeAmount).HasPrecision(18, 2);
+            e.Property(b => b.CancellationChargeDayFraction).HasPrecision(9, 4);
+            e.Property(b => b.InstructedBy).HasMaxLength(200);
             e.Property(b => b.ActivityRef).HasMaxLength(100);
             e.Property(b => b.EvidenceRef).HasMaxLength(200);
             e.Property(b => b.CustomerContact).HasMaxLength(200);
@@ -326,6 +351,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(r => r.Quantity).HasPrecision(9, 4);
             e.Property(r => r.Rate).HasPrecision(18, 2);
             e.Property(r => r.Reference).HasMaxLength(200);
+            e.Property(r => r.ApprovedByRepresentative).HasMaxLength(200);
             e.HasOne(r => r.Project).WithMany()
                 .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(r => r.Booking).WithMany()

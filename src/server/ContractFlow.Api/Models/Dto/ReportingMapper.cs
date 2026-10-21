@@ -1,3 +1,4 @@
+using ContractFlow.Api.Services;
 using ContractFlow.Api.Models.Domain;
 
 namespace ContractFlow.Api.Models.Dto;
@@ -40,7 +41,8 @@ public static class ReportingMapper
         t.Entries.Where(e => e.Category != TimeEntryCategory.Break)
             .Sum(e => e.ActualHours));
 
-    public static MobilisationPeriodDto Mobilisation(MobilisationPeriod p) => new(
+    public static MobilisationPeriodDto Mobilisation(MobilisationPeriod p, VisitInfo? visit = null) => new(
         p.Id, p.ProjectId, p.Project.Name, p.ResourceId, p.Resource.DisplayName,
-        p.StartDate, p.EndDate, p.ConfirmedUtc, p.WorkPackageId, p.WorkPackage?.Name);
+        p.StartDate, p.EndDate, p.ConfirmedUtc, p.WorkPackageId, p.WorkPackage?.Name,
+        visit?.Number, visit?.Included, WorkPackageRules.TravelBillable(p, visit));
 }

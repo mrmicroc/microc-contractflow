@@ -39,4 +39,7 @@ public class AdditionalPadRequest
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
     public DateTime? DecidedUtc { get; set; }
+    /// <summary>The customer's authorised representative who approved the
+    /// Additional PAD and its remuneration (free text, evidence).</summary>
+    public string? ApprovedByRepresentative { get; set; }
 }

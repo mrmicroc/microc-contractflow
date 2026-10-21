@@ -5,10 +5,13 @@ namespace ContractFlow.Api.Services;
 
 /// <summary>One approved, counted time row of a resource's day as the two
 /// calculators see it. <paramref name="WorkPackageId"/> is the effective
-/// package — the booking's for booked rows, the row's own otherwise.</summary>
+/// package — the booking's for booked rows, the row's own otherwise.
+/// <paramref name="Outside"/>: that package lies outside the contract's scope
+/// (<see cref="WorkPackagePricing.OutsideContract"/>) — billed by time even
+/// under PAD, in its own pool.</summary>
 public record DayRow(
     Guid EntryId, Guid ProjectId, Guid ContractId, Guid? WorkPackageId,
-    EntryBilling Billing, bool Booked, decimal Hours);
+    EntryBilling Billing, bool Booked, decimal Hours, bool Outside = false);
 
 /// <summary>An entry's frozen share of its part: hours incl. its slice of the
 /// minimum adjustment, and that slice alone.</summary>
@@ -31,7 +34,7 @@ public record BillPart(
     BillPartKind Kind, ContractTerms? Terms, DayLine? Line, DayKind DayKind,
     decimal UnitPrice, string Explanation,
     WorkPackageRate? PackageRate, WorkPackageRate? ResourceRate,
-    IReadOnlyList<EntryShare> Entries);
+    IReadOnlyList<EntryShare> Entries, bool Outside = false);
 
 /// <summary>The compensation result for one (project, package) part of a day.</summary>
 public record PayPart(
@@ -118,30 +121,37 @@ public static class DayBilling
             var calendar = t?.HolidayCalendar ?? "SE";
             var kind = TimeMath.KindOf(date, calendar);
 
-            foreach (var g in byContract.Where(r => padOn && r.Booked)
+            // Work at a package outside the contract's scope is never PAD-covered.
+            foreach (var g in byContract.Where(r => padOn && r.Booked && !r.Outside)
                          .GroupBy(r => (r.ProjectId, r.WorkPackageId)).OrderBy(x => x.Key.ProjectId))
                 parts.Add(Unpriced(g.Key.ProjectId, byContract.Key, g.Key.WorkPackageId,
                     BillPartKind.PadCovered, t, kind, "Covered by the PAD line", g));
 
-            var reportable = byContract.Where(r => !(padOn && r.Booked)).ToList();
+            var reportable = byContract.Where(r => !(padOn && r.Booked && !r.Outside)).ToList();
             if (reportable.Count == 0) continue;
             if (mode == TimeBilling.None)
             {
-                foreach (var g in reportable.GroupBy(r => (r.ProjectId, r.WorkPackageId))
+                foreach (var g in reportable.Where(r => !r.Outside)
+                             .GroupBy(r => (r.ProjectId, r.WorkPackageId))
                              .OrderBy(x => x.Key.ProjectId))
                     parts.Add(Unpriced(g.Key.ProjectId, byContract.Key, g.Key.WorkPackageId,
                         BillPartKind.NotBilled, t, kind, "Terms bill no time", g, zero: true));
-                continue;
+                reportable = reportable.Where(r => r.Outside).ToList();
+                if (reportable.Count == 0) continue;
             }
 
             // Pools: contract-mode rows on a day-rate contract share the day
             // price; everything else prices as hours. Within a pool the minimum
-            // and OT threshold are shared by all partitions.
-            var pools = reportable.GroupBy(r =>
-                mode == TimeBilling.DailyRate && r.Billing == EntryBilling.Contract);
-            foreach (var pool in pools.OrderBy(p => p.Key))
+            // and OT threshold are shared by all partitions. Out-of-scope work
+            // is additional — its own pool, by time (hours when the terms bill
+            // no time at all).
+            var pools = reportable.GroupBy(r => (
+                Outside: r.Outside,
+                Daily: mode == TimeBilling.DailyRate && r.Billing == EntryBilling.Contract));
+            foreach (var pool in pools.OrderBy(p => p.Key.Outside).ThenBy(p => p.Key.Daily))
             {
-                var daily = pool.Key;
+                var daily = pool.Key.Daily;
+                var outside = pool.Key.Outside;
                 var partitions = pool
                     .GroupBy(r => (r.ProjectId, r.WorkPackageId, HoursMode: r.Billing == EntryBilling.Hours))
                     .OrderBy(x => x.Key.ProjectId).ThenBy(x => x.Key.WorkPackageId)
@@ -167,8 +177,9 @@ public static class DayBilling
                         : PartExplanation(day, line, rates, daily, poolHours);
                     parts.Add(new BillPart(
                         p.Key.ProjectId, byContract.Key, p.Key.WorkPackageId, p.Key.HoursMode, daily,
-                        BillPartKind.Priced, t, line, day.Kind, unit, explanation, gen, res,
-                        Distribute(p.ToList(), line.EffectiveHours)));
+                        BillPartKind.Priced, t, line, day.Kind, unit,
+                        explanation + (outside ? " · additional work outside the contract scope" : ""),
+                        gen, res, Distribute(p.ToList(), line.EffectiveHours), outside));
                 }
             }
         }

@@ -42,7 +42,7 @@ public static class AuditTrail
         typeof(CompensationAgreement), typeof(ProjectResource), typeof(ProjectAccess),
         typeof(Booking), typeof(Timesheet), typeof(InvoiceSpecification),
         typeof(SubcontractorStatement), typeof(SupplierInvoice), typeof(AdditionalPadRequest),
-        typeof(ProjectMonthClose), typeof(EstimatedQuantity),
+        typeof(ProjectMonthClose), typeof(EstimatedQuantity), typeof(ScheduledCharge),
     ];
 
     /// <summary>Audited only when Status changes.</summary>

@@ -12,7 +12,9 @@ public record BookingDto(
     /// <summary>Resolved cancellation charge (hours / fixed amount) — set when
     /// a non-PAD booking is cancelled under a charging step.</summary>
     decimal? CancellationChargeHours, decimal? CancellationChargeAmount,
-    Guid? ReplacesBookingId, Guid? RescheduledToBookingId, string[] Warnings);
+    Guid? ReplacesBookingId, Guid? RescheduledToBookingId, string[] Warnings,
+    string? InstructedBy = null, DateTime? InstructedAtUtc = null,
+    decimal? CancellationChargeDayFraction = null);
 
 public class BookingRequest
 {
@@ -32,6 +34,10 @@ public class BookingRequest
     public string? CustomerContact { get; set; }
     [StringLength(200)]
     public string? EvidenceRef { get; set; }
+    /// <summary>Who at the customer requested/instructed the day, and when.</summary>
+    [StringLength(200)]
+    public string? InstructedBy { get; set; }
+    public DateTime? InstructedAtUtc { get; set; }
     /// <summary>Initial status — only pre-commitment statuses are allowed here.</summary>
     public BookingStatus Status { get; set; } = BookingStatus.Forecast;
 }
@@ -49,6 +55,10 @@ public class BookingUpdateRequest
     public string? CustomerContact { get; set; }
     [StringLength(200)]
     public string? EvidenceRef { get; set; }
+    /// <summary>Who at the customer requested/instructed the day, and when.</summary>
+    [StringLength(200)]
+    public string? InstructedBy { get; set; }
+    public DateTime? InstructedAtUtc { get; set; }
     public BookingStatus? Status { get; set; }
     public DateOnly? Date { get; set; }
     public Guid? ResourceId { get; set; }
@@ -126,7 +136,16 @@ public record ClosePreviewDto(
 public record AdditionalPadRequestDto(
     Guid Id, Guid ProjectId, int Year, int Month, decimal Quantity, decimal? Rate,
     string? Reason, string? Reference, AdditionalPadStatus Status,
-    DateTime CreatedUtc, DateTime? DecidedUtc, Guid? BookingId);
+    DateTime CreatedUtc, DateTime? DecidedUtc, Guid? BookingId,
+    string? ApprovedByRepresentative = null);
+
+/// <summary>Optional approval evidence — the customer's authorised
+/// representative who approved the Additional PAD and its remuneration.</summary>
+public class AdditionalPadApproveRequest
+{
+    [StringLength(200)]
+    public string? ApprovedByRepresentative { get; set; }
+}
 
 public class AdditionalPadRequestCreate
 {

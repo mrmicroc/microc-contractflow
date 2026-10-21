@@ -113,7 +113,11 @@ public class AllowanceClaimRequest
 public record MobilisationPeriodDto(
     Guid Id, Guid ProjectId, string ProjectName, Guid ResourceId, string ResourceName,
     DateOnly StartDate, DateOnly EndDate, DateTime ConfirmedUtc,
-    Guid? WorkPackageId, string? WorkPackageName);
+    Guid? WorkPackageId, string? WorkPackageName,
+    int? VisitNumber = null, int? IncludedVisits = null, bool AdditionalTravel = false);
+// VisitNumber: the period's place in the contract's visit count (null = not a
+// visit); AdditionalTravel: its travel time bills and travel costs recharge
+// (beyond the included visits, or to a package outside the contract scope).
 
 public record MobilisationSuggestionDto(
     Guid ProjectId, string ProjectName, DateOnly StartDate, DateOnly EndDate);

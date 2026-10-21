@@ -29,12 +29,19 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
     {
         var scoped = await ScopedResourceIdAsync(ct);
         var query = Db.MobilisationPeriods
-            .Include(x => x.Project).Include(x => x.Resource).AsQueryable();
+            .Include(x => x.Project).Include(x => x.Resource).Include(x => x.WorkPackage)
+            .AsQueryable();
         if (scoped.HasValue) query = query.Where(x => x.ResourceId == scoped.Value);
         else if (resourceId.HasValue) query = query.Where(x => x.ResourceId == resourceId.Value);
         if (projectId.HasValue) query = query.Where(x => x.ProjectId == projectId.Value);
-        return Ok((await query.OrderBy(x => x.StartDate).ToListAsync(ct))
-            .Select(ReportingMapper.Mobilisation));
+        var periods = await query.OrderBy(x => x.StartDate).ToListAsync(ct);
+
+        // Visit numbering runs over each whole contract, not just this page.
+        var visits = new Dictionary<Guid, VisitInfo>();
+        foreach (var contractId in periods.Select(p => p.Project.ContractId).Distinct())
+            foreach (var (k, v) in await WorkPackageRules.NumberVisitsAsync(Db, contractId, ct))
+                visits[k] = v;
+        return Ok(periods.Select(p => ReportingMapper.Mobilisation(p, visits.GetValueOrDefault(p.Id))));
     }
 
     /// <summary>Suggested periods from attendance evidence — consecutive-day

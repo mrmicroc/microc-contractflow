@@ -61,10 +61,21 @@ public record ContractDetailDto(
     string Name, string? ExternalReference,
     List<string> Components,
     DateOnly StartDate, DateOnly? EndDate, bool IsActive,
-    List<ContractTermsDto> TermsVersions, List<ProjectSummaryDto> Projects);
+    List<ContractTermsDto> TermsVersions, List<ProjectSummaryDto> Projects,
+    List<AuthorisedRepresentativeDto> Representatives);
+
+/// <summary>Authorised customer representative (see
+/// <see cref="AuthorisedRepresentative"/>).</summary>
+public record AuthorisedRepresentativeDto(
+    [Required, StringLength(200, MinimumLength = 1)] string Name,
+    [StringLength(320)] string? Email,
+    [StringLength(50)] string? Phone,
+    [StringLength(300)] string? Authority);
 
 public class ContractRequest
 {
+    /// <summary>Authorised representatives — replace-all on update.</summary>
+    public List<AuthorisedRepresentativeDto> Representatives { get; set; } = [];
     /// <summary>The contract party — who signs and pays.</summary>
     [Required]
     public Guid CustomerId { get; set; }
@@ -84,24 +95,25 @@ public class ContractRequest
 
 public record ContractTermsDto(
     Guid Id, Guid ContractId, int Version, DateOnly EffectiveFrom, DateTime CreatedUtc,
-    string Currency, TimeBilling TimeBilling, bool PadEnabled, bool FixedPriceEnabled,
+    string Currency, TimeBilling TimeBilling, bool PadEnabled,
     decimal? PadRate, decimal? HourlyRate, decimal? SaturdayRate,
     decimal? SundayRate, decimal? HolidayRate, int OvertimeAfterHours,
     decimal OvertimePercent, decimal? MobilisationFee, decimal ExpenseMarkupPercent,
     decimal? DayRate, decimal? SaturdayDayRate, decimal? SundayDayRate,
     decimal? HolidayDayRate, decimal? HalfDayRate, decimal? HalfDayMaxHours,
-    decimal? FixedPriceAmount, DateOnly? FixedPriceDate, string? FixedPriceNote,
     decimal PadHoursPerDay, decimal MinPadPerBookedDay, decimal CarryOverMaxPercent,
     int CarryOverMonths,
     int CancellationDeadlineBusinessDays, List<CancellationStepDto> CancellationSteps,
     string HolidayCalendar,
     decimal? MinBillableHoursPerDay,
-    string? TravelExpensePolicy, string? Indexation, string? Notes);
+    string? TravelExpensePolicy, string? Indexation, string? Notes,
+    int? IncludedVisits = null);
 
 /// <summary>One rung of the cancellation ladder — see
 /// <see cref="CancellationStep"/>.</summary>
 public record CancellationStepDto(
-    int MinBusinessDaysBefore, decimal? ChargeHours, decimal? ChargeAmount);
+    int MinBusinessDaysBefore, decimal? ChargeHours, decimal? ChargeAmount,
+    decimal? ChargeDayFraction = null);
 
 /// <summary>Creates a new terms version — server assigns Version = max + 1.</summary>
 public class ContractTermsRequest
@@ -119,20 +131,19 @@ public class ContractTermsRequest
     public decimal OvertimePercent { get; set; } = 150m;
     public decimal? MobilisationFee { get; set; }
     public decimal ExpenseMarkupPercent { get; set; }
+    /// <summary>Included visits over the contract (null = not limited).</summary>
+    [Range(0, 100_000)]
+    public int? IncludedVisits { get; set; }
 
     // ── Billing components (which models apply — may combine) ───────────────
     public TimeBilling TimeBilling { get; set; } = TimeBilling.Hourly;
     public bool PadEnabled { get; set; }
-    public bool FixedPriceEnabled { get; set; }
     public decimal? DayRate { get; set; }
     public decimal? SaturdayDayRate { get; set; }
     public decimal? SundayDayRate { get; set; }
     public decimal? HolidayDayRate { get; set; }
     public decimal? HalfDayRate { get; set; }
     public decimal? HalfDayMaxHours { get; set; }
-    public decimal? FixedPriceAmount { get; set; }
-    public DateOnly? FixedPriceDate { get; set; }
-    public string? FixedPriceNote { get; set; }
 
     public decimal PadHoursPerDay { get; set; } = 8m;
     public decimal MinPadPerBookedDay { get; set; } = 1m;
@@ -162,7 +173,8 @@ public record ProjectSummaryDto(
 public record ProjectDetailDto(
     Guid Id, Guid ContractId, string ContractName, string CustomerName,
     string Name, string? Code, string? Description, bool IsActive,
-    List<WorkPackageDto> WorkPackages, List<EstimatedQuantityDto> EstimatedQuantities);
+    List<WorkPackageDto> WorkPackages, List<EstimatedQuantityDto> EstimatedQuantities,
+    decimal? ContractedBaselinePad = null);
 
 public class ProjectRequest
 {
@@ -174,11 +186,15 @@ public class ProjectRequest
     public string? Code { get; set; }
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>The project's contracted total baseline in PAD (null = not tracked).</summary>
+    [Range(0, 1_000_000)]
+    public decimal? ContractedBaselinePad { get; set; }
 }
 
 public record WorkPackageDto(
     Guid Id, Guid ProjectId, string Name, string? Notes,
-    List<WorkPackageInfoDto> InfoItems);
+    List<WorkPackageInfoDto> InfoItems,
+    WorkPackagePricing PricingMode = WorkPackagePricing.Contract, bool CountsAsVisit = false);
 
 public record WorkPackageInfoDto(Guid Id, string Type, string Description);
 
@@ -246,6 +262,10 @@ public class WorkPackageRequest
     public string? Notes { get; set; }
     /// <summary>Typed info fields — replace-all semantics on update.</summary>
     public List<WorkPackageInfoItem>? InfoItems { get; set; }
+    /// <summary>Inside the contract scope (default) or additional work.</summary>
+    public WorkPackagePricing PricingMode { get; set; } = WorkPackagePricing.Contract;
+    /// <summary>Mobilisations here count against the included visits.</summary>
+    public bool CountsAsVisit { get; set; }
 }
 
 public class WorkPackageInfoItem

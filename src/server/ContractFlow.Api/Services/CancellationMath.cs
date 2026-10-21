@@ -31,7 +31,7 @@ public static class CancellationMath
                 .LastOrDefault();
             if (hit is null) // less notice than the lowest rung → full charge
                 return new CancellationCharge(plannedHours, null, Full: true);
-            return new CancellationCharge(hit.ChargeHours, hit.ChargeAmount);
+            return new CancellationCharge(hit.ChargeHours, hit.ChargeAmount, DayFraction: hit.ChargeDayFraction);
         }
 
         var timely = businessDaysBefore >= fallbackDeadlineDays;
@@ -45,9 +45,13 @@ public static class CancellationMath
     /// <param name="Amount">Fixed cancellation fee (null = none).</param>
     /// <param name="Full">The whole booking is charged (missed deadline / below
     /// the lowest rung) — on PAD contracts the full commitment is consumed,
-    /// never less than the 1.00 PAD minimum (§4.3, §6.3).</param>
-    public record CancellationCharge(decimal? Hours, decimal? Amount, bool Full = false)
+    /// never less than the 1.00 PAD minimum (§4.3, §6.3); on hourly contracts
+    /// the daily minimum applies; on day-rate contracts a full (or half) day.</param>
+    /// <param name="DayFraction">Day-rate contracts: the rung's share of the
+    /// day rate (0–1).</param>
+    public record CancellationCharge(
+        decimal? Hours, decimal? Amount, bool Full = false, decimal? DayFraction = null)
     {
-        public bool IsFree => Hours is not > 0m && Amount is not > 0m;
+        public bool IsFree => Hours is not > 0m && Amount is not > 0m && DayFraction is not > 0m;
     }
 }
