@@ -25,6 +25,7 @@ import { isAdmin, useMe } from '@/lib/useMe';
 import {
   btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, SearchSelect, tdCls, thCls,
 } from '@/components/forms';
+import { showPad, useFeatures } from '@/lib/features';
 
 const grpCls =
   'mb-1.5 mt-3 border-b border-slate-200 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500';
@@ -42,6 +43,7 @@ export function ContractDetail({
   onChanged?: () => void;
 }) {
   const { t, i18n } = useTranslation();
+  const features = useFeatures();
   const me = useMe();
   const [contract, setContract] = useState<ContractDetailDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +119,7 @@ export function ContractDetail({
       if (isInvalidDecimal(s.chargeHours)) bad.push(`${tag} · ${t('terms.stepChargeHours')}`);
       if (isInvalidDecimal(s.chargeAmount)) bad.push(`${tag} · ${t('terms.stepChargeAmount')}`);
       if (isInvalidDecimal(s.chargeDayFraction)) bad.push(`${tag} · ${t('terms.stepChargeDayFraction')}`);
+      if (isInvalidDecimal(s.chargePercent)) bad.push(`${tag} · ${t('terms.stepChargePercent')}`);
     });
     if (!tf.effectiveFrom) bad.push(t('common.effectiveFrom'));
     if (bad.length) {
@@ -253,6 +256,7 @@ export function ContractDetail({
                   <option value="dailyRate">{t('terms.tbDaily')}</option>
                 </select>
               </Field>
+              {showPad(features, tf.padEnabled) && (
               <Field label={t('terms.padEnabled')} help={t('terms.hPadEnabled')}>
                 <span className={checkCls}>
                   <input type="checkbox" checked={tf.padEnabled}
@@ -260,6 +264,7 @@ export function ContractDetail({
                   {tf.padEnabled ? t('common.yes') : t('common.no')}
                 </span>
               </Field>
+              )}
             </div>
 
             {tf.timeBilling === 'hourly' && (
@@ -466,6 +471,9 @@ export function ContractDetail({
                     placeholder={t('terms.stepDaysBefore')}
                     value={s.minBusinessDaysBefore}
                     onChange={(v) => setStep(i, { minBusinessDaysBefore: v })} />
+                  <NumInput className={cn(inputCls, 'w-36')}
+                    placeholder={t('terms.stepChargePercent')} value={s.chargePercent}
+                    onChange={(v) => setStep(i, { chargePercent: v })} />
                   <NumInput className={cn(inputCls, 'w-32')}
                     placeholder={t('terms.stepChargeHours')} value={s.chargeHours}
                     onChange={(v) => setStep(i, { chargeHours: v })} />
@@ -487,7 +495,7 @@ export function ContractDetail({
                 onClick={() => setTf({
                   ...tf,
                   cancellationSteps: [...tf.cancellationSteps,
-                    { minBusinessDaysBefore: '', chargeHours: '', chargeAmount: '', chargeDayFraction: '' }],
+                    { minBusinessDaysBefore: '', chargeHours: '', chargeAmount: '', chargeDayFraction: '', chargePercent: '' }],
                 })}>
                 {t('terms.addStep')}
               </button>

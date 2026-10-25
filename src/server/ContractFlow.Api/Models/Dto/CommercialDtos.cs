@@ -114,7 +114,7 @@ public record ContractTermsDto(
 /// <see cref="CancellationStep"/>.</summary>
 public record CancellationStepDto(
     int MinBusinessDaysBefore, decimal? ChargeHours, decimal? ChargeAmount,
-    decimal? ChargeDayFraction = null);
+    decimal? ChargeDayFraction = null, decimal? ChargePercent = null);
 
 /// <summary>Creates a new terms version — server assigns Version = max + 1.</summary>
 public partial class ContractTermsRequest

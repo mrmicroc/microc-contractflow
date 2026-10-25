@@ -22,12 +22,14 @@ import {
 import { Attachments } from '@/components/reporting/Attachments';
 import { ReviewHistory } from '@/components/reporting/ReviewHistory';
 import { cn } from '@/lib/utils';
+import { useFeatures } from '@/lib/features';
 
 /** PM/admin review queue — submitted timesheets, Additional PAD requests
  * and mobilisation confirmations (design §2.2.6). */
 export function Approvals() {
   const { t } = useTranslation();
   const me = useMe();
+  const pad = useFeatures().pad;
 
   if (me && !canManage(me))
     return <div className="mx-auto max-w-4xl px-4 py-6 text-sm text-slate-500">{t('common.noAccess')}</div>;
@@ -37,7 +39,7 @@ export function Approvals() {
     <div className="mx-auto max-w-5xl space-y-4 px-4 py-6">
       <TimesheetQueue />
       {isAdmin(me) && <ApprovedWeeks />}
-      <PadRequestQueue canDecide={isAdmin(me)} />
+      {pad && <PadRequestQueue canDecide={isAdmin(me)} />}
       <MobilisationPanel />
     </div>
   );

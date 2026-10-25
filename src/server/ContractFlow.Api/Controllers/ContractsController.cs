@@ -205,6 +205,8 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
             return BadRequest(new { error = "Currency must be a three-letter code." });
         if (req.CancellationSteps.Any(s => s.ChargeDayFraction is < 0m or > 1m))
             return BadRequest(new { error = "A cancellation day fraction must lie between 0 and 1." });
+        if (req.CancellationSteps.Any(s => s.ChargePercent is < 0m or > 100m))
+            return BadRequest(new { error = "A cancellation percentage must lie between 0 and 100." });
         // Effective-dated, never rewritten (§3): a version may not reach back
         // into a month a non-draft specification already billed.
         if (await billing.TermsChangeBlockedAsync(id, req.EffectiveFrom, null, ct) is { } why)
@@ -248,6 +250,7 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
                     ChargeHours = s.ChargeHours,
                     ChargeAmount = s.ChargeAmount,
                     ChargeDayFraction = s.ChargeDayFraction,
+                    ChargePercent = s.ChargePercent,
                 })
                 .OrderByDescending(s => s.MinBusinessDaysBefore)
                 .ToList(),
@@ -343,7 +346,7 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
         t.CancellationDeadlineBusinessDays,
         t.CancellationSteps
             .Select(s => new CancellationStepDto(
-                s.MinBusinessDaysBefore, s.ChargeHours, s.ChargeAmount, s.ChargeDayFraction))
+                s.MinBusinessDaysBefore, s.ChargeHours, s.ChargeAmount, s.ChargeDayFraction, s.ChargePercent))
             .ToList(),
         t.HolidayCalendar, t.MinBillableHoursPerDay,
         t.TravelExpensePolicy, t.Indexation, t.Notes, t.IncludedVisits,

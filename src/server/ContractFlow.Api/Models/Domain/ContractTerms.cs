@@ -143,4 +143,10 @@ public class CancellationStep
     /// 0.5). Takes precedence over <see cref="ChargeHours"/> there; ignored on
     /// other contracts.</summary>
     public decimal? ChargeDayFraction { get; set; }
+    /// <summary>Share of the booking's full charge (0–100 %) — a stepped
+    /// policy such as "10–5 days: 50 %, under 5 days: 100 %". Converts to
+    /// planned hours × % on hourly and PAD contracts and to a day fraction on
+    /// day-rate contracts; explicit <see cref="ChargeHours"/> /
+    /// <see cref="ChargeDayFraction"/> on the same rung take precedence.</summary>
+    public decimal? ChargePercent { get; set; }
 }

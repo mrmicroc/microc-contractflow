@@ -59,8 +59,14 @@ public static class DevSeed
             EffectiveFrom = new DateOnly(2026, 1, 1),
             Currency = "SEK",
             TimeBilling = TimeBilling.Hourly,
-            PadEnabled = true,
-            PadRate = 100m,
+            PadEnabled = false,
+            // Example stepped policy: ≥ 10 business days free, 5–9 days 50 %,
+            // fewer than 5 days the full booking.
+            CancellationSteps =
+            [
+                new CancellationStep { MinBusinessDaysBefore = 10 },
+                new CancellationStep { MinBusinessDaysBefore = 5, ChargePercent = 50m },
+            ],
             HourlyRate = 10m,
             SaturdayRate = 12m,
             SundayRate = 14m,

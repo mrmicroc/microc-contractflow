@@ -38,6 +38,7 @@ import {
 } from '@/components/forms';
 import { cn } from '@/lib/utils';
 import { BaselineSchedulePanel } from './BaselineSchedulePanel';
+import { useFeatures } from '@/lib/features';
 
 const EMPTY_WP = {
   name: '', notes: '', pricingMode: 'contract' as WorkPackagePricing, countsAsVisit: false,
@@ -56,6 +57,7 @@ export function ProjectDetail({
 }) {
   const { t } = useTranslation();
   const me = useMe();
+  const pad = useFeatures().pad;
   const [project, setProject] = useState<ProjectDetailDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lf, setLf] = useState(EMPTY_WP);
@@ -228,10 +230,10 @@ export function ProjectDetail({
                 {pf.isActive ? t('common.active') : t('common.inactive')}
               </span>
             </Field>
-            <Field label={t('projects.contractedBaselinePad')} help={t('projects.hContractedBaselinePad')}>
+            {pad && <Field label={t('projects.contractedBaselinePad')} help={t('projects.hContractedBaselinePad')}>
               <NumInput className={inputCls} value={pf.contractedBaselinePad}
                 onChange={(v) => setPf({ ...pf, contractedBaselinePad: v })} />
-            </Field>
+            </Field>}
           </div>
           <div className="mt-3 flex gap-2">
             <button className={btnCls} disabled={!pf.name.trim()} onClick={() => void saveProject()}>
@@ -241,7 +243,7 @@ export function ProjectDetail({
           </div>
         </div>
       )}
-      {canSeeCommercial(me) && (
+      {pad && canSeeCommercial(me) && (
         <div className="mb-4">
           <BaselineSchedulePanel projectId={project.id}
             contracted={project.contractedBaselinePad ?? null} canEdit={isAdmin(me)} />

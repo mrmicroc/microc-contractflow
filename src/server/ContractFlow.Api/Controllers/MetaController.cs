@@ -23,4 +23,12 @@ public class MetaController : ControllerBase
     /// <summary>ISO 4217 currencies: code + English display name.</summary>
     [HttpGet("currencies")]
     public IActionResult Currencies() => Ok(RegionCatalog.Currencies);
+
+    /// <summary>Product features switched on for this installation —
+    /// <c>pad</c>: the PAD (pre-allocated day) model. Off hides PAD in the
+    /// client; the server logic stays and only acts on terms with PAD
+    /// enabled. Configured under <c>Features</c> in appsettings.</summary>
+    [HttpGet("features")]
+    public IActionResult Features([FromServices] IConfiguration config) =>
+        Ok(new { pad = config.GetValue("Features:Pad", false) });
 }

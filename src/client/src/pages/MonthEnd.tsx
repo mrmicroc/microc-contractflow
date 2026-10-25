@@ -24,6 +24,7 @@ import { viewRange } from '@/lib/bookings';
 import { blockedPreview, canSubmitForce, closeView, type ClosePreview } from '@/lib/monthClose';
 import { cn } from '@/lib/utils';
 import { confirmAction, promptOptional } from '@/lib/confirm';
+import { useFeatures } from '@/lib/features';
 import { localMonth, monthKey, shiftMonth as shiftYm } from '@/lib/dates';
 import { canManage as canManageRole, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -97,6 +98,8 @@ export function MonthEnd() {
 function MonthEndBody({ projectId, year, month }: { projectId: string; year: number; month: number }) {
   const { t } = useTranslation();
   const me = useMe();
+  // Without the PAD feature the page is the month lock: checklist + close.
+  const pad = useFeatures().pad;
   const [dash, setDash] = useState<PadDashboard | null>(null);
   const [requests, setRequests] = useState<AdditionalPadRequest[]>([]);
   const [baselineAmt, setBaselineAmt] = useState('');
@@ -224,7 +227,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                 {t('monthEnd.closed')}
               </span>
             )}
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
+            {pad && (<div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
               {cards.map(([key, value, cls]) => (
                 <div key={key} className="rounded border border-slate-200 bg-slate-50 p-2 text-center">
                   <div className={cn('text-lg', cls)}>{fmt(value)}</div>
@@ -233,8 +236,8 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                   </div>
                 </div>
               ))}
-            </div>
-            {minorCards.length > 0 && (
+            </div>)}
+            {pad && minorCards.length > 0 && (
               <p className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
                 {minorCards.map(([key, value]) => (
                   <span key={key}>{t(`monthEnd.${key}`)}: <span className="font-medium text-slate-700">{fmt(value)}</span></span>
@@ -254,7 +257,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
         )}
       </Panel>
 
-      {dash && isAdmin(me) && !dash.closed && (
+      {pad && dash && isAdmin(me) && !dash.closed && (
         <Panel title={t('monthEnd.setBaseline')} help={t('monthEnd.baselineHelp')}>
           <div className="flex flex-wrap items-end gap-2">
             <Field label={t('monthEnd.baselineAmount')}>
@@ -357,7 +360,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
         </Panel>
       )}
 
-      {dash && (
+      {pad && dash && (
         <Panel
           title={t('monthEnd.padRequests')}
           help={t('monthEnd.requestsHelp')}
@@ -444,7 +447,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
         </Panel>
       )}
 
-      {dash && (
+      {pad && dash && (
         <Panel title={t('monthEnd.transactions')} help={t('monthEnd.txHelp')}>
           <table className="w-full border-collapse">
             <thead>

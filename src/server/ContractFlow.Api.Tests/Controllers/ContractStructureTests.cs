@@ -249,6 +249,51 @@ public class ContractStructureTests(ContractFlowWebApplicationFactory factory)
         Assert.False(lines.ContainsKey("2031-09-29"));
     }
 
+
+    [Fact]
+    public async Task SteppedPercentPolicy_HourlyAndDayRate()
+    {
+        object Ladder() => new object[]
+        {
+            new { minBusinessDaysBefore = 10 },                       // ≥ 10 days: free
+            new { minBusinessDaysBefore = 5, chargePercent = 50m },   // 5–9 days: 50 %
+        };                                                            // < 5 days: full
+        var hourly = await GraphAsync("cxl-pct-h", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "hourly", hourlyRate = 1000m, cancellationSteps = Ladder(),
+        });
+        var daily = await GraphAsync("cxl-pct-d", new
+        {
+            effectiveFrom = "2026-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "dailyRate", dayRate = 8000m, cancellationSteps = Ladder(),
+        });
+        var today = new DateOnly(2031, 10, 1); // Wednesday
+        var hHalf = await ConfirmedBookingAsync(hourly, "2031-10-09", 8m); // 6 business days → 50 %
+        var hFull = await ConfirmedBookingAsync(hourly, "2031-10-03", 6m); // 2 days → full
+        var dHalf = await ConfirmedBookingAsync(daily, "2031-10-09", 8m);
+        foreach (var b in new[] { hHalf, hFull, dHalf }) await CancelOnAsync(b, today);
+
+        var h = Lines(await InvoiceAsync(hourly.ProjectId, 2031, 10), "cancellation")
+            .ToDictionary(l => l.GetProperty("date").GetString()!, l => l.GetProperty("amount").GetDecimal());
+        Assert.Equal(4000m, h["2031-10-09"]); // 50 % of 8 h × 1 000
+        Assert.Equal(6000m, h["2031-10-03"]); // full 6 h
+        var d = Assert.Single(Lines(await InvoiceAsync(daily.ProjectId, 2031, 10), "cancellation"));
+        Assert.Equal(4000m, d.GetProperty("amount").GetDecimal()); // 50 % of the day rate
+    }
+
+    [Fact]
+    public async Task CancellationPercent_OutOfRange_BadRequest()
+    {
+        var ids = await Scaffold.CommercialGraphAsync(Admin, "cxl-pct-bad");
+        var res = await Admin.PostAsJsonAsync($"/api/contracts/{ids.ContractId}/terms", new
+        {
+            effectiveFrom = "2027-01-01", currency = "SEK", holidayCalendar = "SE",
+            timeBilling = "hourly", hourlyRate = 1000m,
+            cancellationSteps = new[] { new { minBusinessDaysBefore = 2, chargePercent = 150m } },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
     [Fact]
     public async Task CancellationDayFraction_OutOfRange_BadRequest()
     {

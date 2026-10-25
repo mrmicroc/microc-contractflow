@@ -41,6 +41,7 @@ import {
   btnCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, OkBox, Panel, tdCls, thCls,
 } from '@/components/forms';
 import { Attachments } from '@/components/reporting/Attachments';
+import { useFeatures } from '@/lib/features';
 
 type LaneBy = 'resource' | 'project';
 type PreStatus = BookingRequestBody['status'];
@@ -56,6 +57,7 @@ const emptyForm = {
 export function Plan() {
   const { t } = useTranslation();
   const me = useMe();
+  const pad = useFeatures().pad;
   const [view, setView] = useState<CalendarView>('month');
   const [laneBy, setLaneBy] = useState<LaneBy>('resource');
   const [anchor, setAnchor] = useState(todayIso());
@@ -504,7 +506,7 @@ export function Plan() {
             <datalist id="booking-reps">
               {reps.map((r) => <option key={r} value={r} />)}
             </datalist>
-            {f.projectId && shareProjectOptions(projects, f.projectId).length > 0 && (
+            {pad && f.projectId && shareProjectOptions(projects, f.projectId).length > 0 && (
               <div className="mt-2">
                 <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-slate-600">
                   {t('booking.shares')}
@@ -618,7 +620,7 @@ export function Plan() {
             <div><span className="text-slate-500">{t('booking.customer')}:</span> {selected.customerName}</div>
             <div><span className="text-slate-500">{t('booking.statusLabel')}:</span> {t(`booking.status.${selected.status}`)}</div>
             <div><span className="text-slate-500">{t('booking.plannedHours')}:</span> {t('common.hoursValue', { value: selected.plannedHours })}</div>
-            <div><span className="text-slate-500">{t('booking.expectedPad')}:</span> {selected.expectedPad ?? '—'}</div>
+            {pad && <div><span className="text-slate-500">{t('booking.expectedPad')}:</span> {selected.expectedPad ?? '—'}</div>}
             <div><span className="text-slate-500">{t('booking.workPackage')}:</span> {selected.workPackageName ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.activityRef')}:</span> {selected.activityRef ?? '—'}</div>
             <div><span className="text-slate-500">{t('booking.workDescription')}:</span> {selected.workDescription ?? '—'}</div>

@@ -69,7 +69,9 @@ export function managerTiles(d: DashboardData): DashboardTile[] {
   const preCommit = (d.bookings ?? []).filter((b) => b.status === 'requested' && inHorizon(b, d.today)).length;
   return [
     { key: 'sheetsToApprove', count: submitted, to: '/approvals', tone: tone(submitted) },
-    { key: 'padRequestsPending', count: padPending, to: '/approvals', tone: tone(padPending) },
+    // Only when PAD requests were loaded (PAD feature on).
+    ...(d.padRequests === undefined ? []
+      : [{ key: 'padRequestsPending', count: padPending, to: '/approvals', tone: tone(padPending) } as DashboardTile]),
     { key: 'unacknowledged', count: unacked, to: '/plan', tone: tone(unacked) },
     { key: 'requestedToConfirm', count: preCommit, to: '/plan', tone: tone(preCommit) },
   ];

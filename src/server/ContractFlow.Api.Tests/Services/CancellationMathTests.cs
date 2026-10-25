@@ -80,4 +80,42 @@ public class CancellationMathTests
         Assert.True(CancellationMath.Resolve([], 6, 8m, 4).IsFree);
         Assert.Equal(8m, CancellationMath.Resolve(null, 2, 8m, 4).Hours);
     }
+
+    /// <summary>A stepped policy: ≥ 10 business days free, 5–9 days 50 %,
+    /// 2–4 days 100 % (explicit), under 2 days below the ladder → full.</summary>
+    private static readonly List<CancellationStep> PercentLadder =
+    [
+        new() { MinBusinessDaysBefore = 10 },
+        new() { MinBusinessDaysBefore = 5, ChargePercent = 50m },
+        new() { MinBusinessDaysBefore = 2, ChargePercent = 100m },
+    ];
+
+    [Fact]
+    public void PercentRung_ChargesShareOfPlannedHours_AndOfTheDay()
+    {
+        var half = CancellationMath.Resolve(PercentLadder, 6, 8m, 4);
+        Assert.Equal(4m, half.Hours);           // hourly / PAD: 50 % of 8 h
+        Assert.Equal(0.5m, half.DayFraction);   // day rate: half the day
+        Assert.False(half.Full);
+        Assert.True(CancellationMath.Resolve(PercentLadder, 12, 8m, 4).IsFree);
+    }
+
+    [Fact]
+    public void PercentRung_100_IsAFullCharge_LikeBelowTheLadder()
+    {
+        var full = CancellationMath.Resolve(PercentLadder, 3, 6m, 4);
+        Assert.True(full.Full);
+        Assert.Equal(6m, full.Hours);
+        Assert.True(CancellationMath.Resolve(PercentLadder, 1, 6m, 4).Full);
+    }
+
+    [Fact]
+    public void PercentRung_ExplicitHoursOrFractionWin()
+    {
+        List<CancellationStep> ladder =
+            [new() { MinBusinessDaysBefore = 3, ChargePercent = 50m, ChargeHours = 2m, ChargeDayFraction = 0.25m }];
+        var c = CancellationMath.Resolve(ladder, 4, 8m, 4);
+        Assert.Equal(2m, c.Hours);
+        Assert.Equal(0.25m, c.DayFraction);
+    }
 }

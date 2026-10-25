@@ -47,4 +47,12 @@ public class MetaTests(ContractFlowWebApplicationFactory factory)
         Assert.DoesNotContain(list, e => e.Code == "XXX"); // no-currency pseudo-code
         Assert.All(list!, e => Assert.Equal(3, e.Code.Length));
     }
+
+    [Fact]
+    public async Task Features_PadOffByDefault()
+    {
+        var client = factory.CreateUserClient(DevSeed.ResourceId);
+        var features = await client.GetFromJsonAsync<System.Text.Json.JsonElement>("/api/meta/features");
+        Assert.False(features.GetProperty("pad").GetBoolean());
+    }
 }

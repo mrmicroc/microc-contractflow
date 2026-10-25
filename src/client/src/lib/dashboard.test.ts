@@ -96,3 +96,10 @@ describe('dashboardTiles', () => {
     expect(tiles.find((x) => x.key === 'sheetsToApprove')?.tone).toBe('attention');
   });
 });
+
+describe('PAD tile follows the PAD feature', () => {
+  it('omits the PAD request tile when requests were not loaded', () => {
+    const tiles = dashboardTiles('ProjectManager', { today: '2026-10-25', timesheets: [], bookings: [] } as DashboardData);
+    expect(tiles.map((x) => x.key)).not.toContain('padRequestsPending');
+  });
+});

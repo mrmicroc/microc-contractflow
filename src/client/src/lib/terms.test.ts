@@ -5,8 +5,7 @@ import {
 import type { ContractTerms, ContractTermsRequestBody, PadRules } from './types';
 
 const base = { ...emptyTerms, effectiveFrom: '2026-01-01' };
-const step = (min: string, hours = '', amount = '', fraction = '') =>
-  ({ minBusinessDaysBefore: min, chargeHours: hours, chargeAmount: amount, chargeDayFraction: fraction });
+const step = (min: string, hours = '', amount = '', fraction = '', percent = '') =>  ({ minBusinessDaysBefore: min, chargeHours: hours, chargeAmount: amount, chargeDayFraction: fraction, chargePercent: percent });
 
 /** A stored version as the API returns it: PAD rules nested, not top-level. */
 function asStored(body: ContractTermsRequestBody, version = 3): ContractTerms {
@@ -102,8 +101,8 @@ describe('termsFormToBody', () => {
     });
     expect(body.carryOverMonths).toBe(1);
     expect(body.cancellationSteps).toEqual([
-      { minBusinessDaysBefore: 4, chargeHours: null, chargeAmount: null, chargeDayFraction: null },
-      { minBusinessDaysBefore: 2, chargeHours: 4, chargeAmount: null, chargeDayFraction: null },
+      { minBusinessDaysBefore: 4, chargeHours: null, chargeAmount: null, chargeDayFraction: null, chargePercent: null },
+      { minBusinessDaysBefore: 2, chargeHours: 4, chargeAmount: null, chargeDayFraction: null, chargePercent: null },
     ]);
   });
 
@@ -205,5 +204,18 @@ describe('carry-over settings', () => {
     expect(body.carryOverRounding).toBe('up');
     expect(body.carryOverRoundingStep).toBe(1);
     expect(body.carryOverConsumption).toBe('carryOverFirst');
+  });
+});
+
+describe('cancellation percent rungs', () => {
+  it('keeps the percentage and clamps it to 0–100', () => {
+    const body = termsFormToBody({
+      ...emptyTerms, effectiveFrom: '2026-01-01',
+      cancellationSteps: [
+        { minBusinessDaysBefore: '5', chargeHours: '', chargeAmount: '', chargeDayFraction: '', chargePercent: '50' },
+        { minBusinessDaysBefore: '2', chargeHours: '', chargeAmount: '', chargeDayFraction: '', chargePercent: '150' },
+      ],
+    });
+    expect(body.cancellationSteps.map((s) => s.chargePercent)).toEqual([50, 100]);
   });
 });

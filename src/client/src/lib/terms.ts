@@ -14,6 +14,8 @@ export type StepRow = {
   chargeAmount: string;
   /** Share of the day rate (0–1) — day-rate contracts. */
   chargeDayFraction: string;
+  /** Share of the full booking charge, 0–100 %. */
+  chargePercent: string;
 };
 
 /** "08:00:00" / "08:00" → "08:00" for a time input; '' stays ''. */
@@ -31,6 +33,10 @@ export const toTimeOnly = (v: string, fallback = '08:00'): string => {
 /** A share of the day rate must lie within 0–1 (null = not set). */
 export const clampFraction = (v: number | null): number | null =>
   v === null ? null : Math.min(1, Math.max(0, v));
+
+/** A cancellation percentage must lie within 0–100 (null = not set). */
+export const clampPercent = (v: number | null): number | null =>
+  v === null ? null : Math.min(100, Math.max(0, v));
 
 export type TermsForm = {
   effectiveFrom: string;
@@ -131,6 +137,7 @@ export const fromTerms = (v: ContractTerms, effectiveFrom: string): TermsForm =>
     chargeHours: s(st.chargeHours),
     chargeAmount: s(st.chargeAmount),
     chargeDayFraction: s(st.chargeDayFraction ?? null),
+    chargePercent: s(st.chargePercent ?? null),
   })),
   holidayCalendar: v.holidayCalendar,
   travelExpensePolicy: v.travelExpensePolicy ?? '', indexation: v.indexation ?? '',
@@ -194,6 +201,7 @@ export function termsFormToBody(tf: TermsForm): ContractTermsRequestBody {
         chargeHours: numOrNull(st.chargeHours),
         chargeAmount: numOrNull(st.chargeAmount),
         chargeDayFraction: isDaily ? clampFraction(numOrNull(st.chargeDayFraction)) : null,
+        chargePercent: clampPercent(numOrNull(st.chargePercent)),
       }))
       .filter((st) => st.minBusinessDaysBefore > 0),
     holidayCalendar: tf.holidayCalendar,

@@ -250,6 +250,7 @@ export interface CancellationStep {
   chargeAmount: number | null;
   /** Share of the day rate charged (0–1) — day-rate contracts. */
   chargeDayFraction?: number | null;
+  chargePercent?: number | null;
 }
 
 export interface ContractTermsRequestBody {

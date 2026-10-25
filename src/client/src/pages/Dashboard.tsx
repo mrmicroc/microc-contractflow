@@ -12,13 +12,14 @@ import { canHandleMoney, canManage, canSeeCommercial } from '@/lib/roles';
 import { useMe } from '@/lib/useMe';
 import { cn } from '@/lib/utils';
 import type { UserDto } from '@/lib/api';
+import { useFeatures } from '@/lib/features';
 
 /** Look-back for unfinished/own work on the dashboard. */
 const PAST_DAYS = 30;
 
 /** Fetches what the caller's role needs; failures leave that list empty —
  * a dashboard tile must never take the whole page down. */
-async function loadDashboard(me: UserDto): Promise<DashboardData> {
+async function loadDashboard(me: UserDto, pad: boolean): Promise<DashboardData> {
   const today = localTodayIso();
   const safe = <T,>(p: Promise<T[]>) => p.catch(() => [] as T[]);
   const data: DashboardData = { today };
@@ -37,7 +38,7 @@ async function loadDashboard(me: UserDto): Promise<DashboardData> {
     jobs.push(safe(getBookings({ from: today, to: addDays(today, UPCOMING_DAYS) }))
       .then((b) => { data.bookings = b; }));
     jobs.push(safe(getTimesheets({ status: 'submitted' })).then((s) => { data.timesheets = s; }));
-    jobs.push(safe(getProjects()).then((ps) => Promise.all(ps.filter((p) => p.isActive)
+    if (pad) jobs.push(safe(getProjects()).then((ps) => Promise.all(ps.filter((p) => p.isActive)
       .map((p) => safe(getPadRequests(p.id))))).then((rs) => { data.padRequests = rs.flat(); }));
   }
   if (canSeeCommercial(me)) jobs.push(safe(getInvoices()).then((i) => { data.invoices = i; }));
@@ -52,12 +53,13 @@ async function loadDashboard(me: UserDto): Promise<DashboardData> {
 export function Dashboard() {
   const { t } = useTranslation();
   const me = useMe();
+  const pad = useFeatures().pad;
   const [tiles, setTiles] = useState<DashboardTile[] | null>(null);
 
   const reload = useCallback(() => {
     if (!me) return;
-    loadDashboard(me).then((d) => setTiles(dashboardTiles(me.role, d))).catch(() => setTiles([]));
-  }, [me]);
+    loadDashboard(me, pad).then((d) => setTiles(dashboardTiles(me.role, d))).catch(() => setTiles([]));
+  }, [me, pad]);
   // `me` re-resolves on a dev-user switch, which re-runs this effect.
   useEffect(() => { void Promise.resolve().then(reload); }, [reload]);
 

@@ -31,7 +31,15 @@ public static class CancellationMath
                 .LastOrDefault();
             if (hit is null) // less notice than the lowest rung → full charge
                 return new CancellationCharge(plannedHours, null, Full: true);
-            return new CancellationCharge(hit.ChargeHours, hit.ChargeAmount, DayFraction: hit.ChargeDayFraction);
+            // A percentage rung charges that share of the full booking: of the
+            // planned hours (hourly / PAD) or of the day (day rate).
+            var share = hit.ChargePercent is > 0m ? hit.ChargePercent.Value / 100m : (decimal?)null;
+            if (share >= 1m && hit.ChargeHours is null && hit.ChargeDayFraction is null)
+                return new CancellationCharge(plannedHours, hit.ChargeAmount, Full: true);
+            return new CancellationCharge(
+                hit.ChargeHours ?? (share is { } s ? Math.Round(plannedHours * s, 2, MidpointRounding.AwayFromZero) : null),
+                hit.ChargeAmount,
+                DayFraction: hit.ChargeDayFraction ?? share);
         }
 
         var timely = businessDaysBefore >= fallbackDeadlineDays;
