@@ -16,10 +16,12 @@ import {
   type InvoiceStep, type StatementStep,
 } from '@/lib/economy';
 import { endClientLabel } from '@/lib/organisations';
+import { isMissingRateWarning, originalLabel } from '@/lib/currency';
+import { ExchangeRatesPanel } from '@/components/economy/ExchangeRatesPanel';
 import { canHandleMoney, useDevUserReload, useMe } from '@/lib/useMe';
 import { numOrNull } from '@/lib/versioned';
 import type {
-  BillingLine, CostBreakdown, CustomerSummary, InvoiceDetail, InvoiceSpecification, InvoiceStatus, MarginRow,
+  BillingLine, CostBreakdown, CurrencySummary, CustomerSummary, InvoiceDetail, InvoiceSpecification, InvoiceStatus, MarginRow,
   ProjectSummary, ResourceSummary, StatementDetail, StatementStatus,
   SubcontractorStatement, SupplierInvoice, SupplierInvoiceDetail, SupplierInvoiceStatus,
   UnbilledRow,
@@ -68,6 +70,7 @@ export function Economy() {
       {(handlesMoney || isResource) && <StatementPanel canGenerate={handlesMoney} isResource={isResource} />}
       {(handlesMoney || isResource) && <SupplierInvoicePanel canGenerate={handlesMoney} isResource={isResource} />}
       {handlesMoney && <MarginsPanel />}
+      {handlesMoney && <ExchangeRatesPanel />}
     </div>
   );
 }
@@ -263,6 +266,7 @@ function InvoiceRow({ s, expanded, open, step, canGenerate, onToggle, onAct, onD
         <tr className="border-b border-slate-200 bg-slate-50">
           <td colSpan={6} className="px-3 py-2">
             <Warnings items={open.invoice.warnings} />
+            <CurrencySummaryTable rows={open.invoice.currencySummary} currency={s.currency} />
             <LineTable lines={open.lines} currency={s.currency} />
           </td>
         </tr>
@@ -406,6 +410,7 @@ function StatementRow({ s, expanded, open, step, canGenerate, isResource, onTogg
         <tr className="border-b border-slate-200 bg-slate-50">
           <td colSpan={isResource ? 5 : 6} className="px-3 py-2">
             <Warnings items={open.statement.warnings} />
+            <CurrencySummaryTable rows={open.statement.currencySummary} currency={s.currency} />
             <LineTable lines={open.lines} currency={s.currency} />
           </td>
         </tr>
@@ -812,7 +817,47 @@ function Warnings({ items }: { items: string[] }) {
   return (
     <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
       <p className="font-medium">{t('economy.warnings')}</p>
-      <ul className="list-disc pl-4">{items.map((w, i) => <li key={i}>{w}</li>)}</ul>
+      <ul className="list-disc pl-4">
+        {items.map((w, i) => (
+          <li key={i}>
+            {w}
+            {isMissingRateWarning(w) && (
+              <a href="#exchange-rates" className="ml-1 font-medium text-blue-700 hover:underline">
+                {t('fx.missingLink')}
+              </a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Month-end sums per source currency and their conversion (before mark-up). */
+function CurrencySummaryTable({ rows, currency }: { rows?: CurrencySummary[] | null; currency: string }) {
+  const { t } = useTranslation();
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div className="mb-2 rounded border border-slate-200 bg-white px-3 py-1.5 text-xs">
+      <p className="font-medium text-slate-600">{t('fx.summary')}</p>
+      <table className="mt-1">
+        <thead>
+          <tr className="text-slate-500">
+            <th className="pr-4 text-left font-normal">{t('fx.original')}</th>
+            <th className="pr-4 text-right font-normal">{t('fx.rate')}</th>
+            <th className="text-right font-normal">{t('fx.converted')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.currency}>
+              <td className="pr-4">{money(r.originalTotal, r.currency)}</td>
+              <td className="pr-4 text-right">{r.rate}</td>
+              <td className="text-right">{money(r.convertedTotal, currency)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -839,6 +884,9 @@ function LineTable({ lines, currency }: { lines: BillingLine[]; currency: string
               {l.description}
               {l.explanation && (
                 <div className="text-xs text-slate-400">{l.explanation}</div>
+              )}
+              {originalLabel(l) && (
+                <div className="text-xs text-slate-500">{t('fx.original')}: {originalLabel(l)}</div>
               )}
             </td>
             <td className={cn(tdCls, 'text-xs text-slate-500')}>{t(`economy.kind.${l.kind}`)}</td>

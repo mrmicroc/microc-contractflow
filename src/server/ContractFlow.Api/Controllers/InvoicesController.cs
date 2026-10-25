@@ -1,5 +1,6 @@
 using ContractFlow.Api.Data;
 using ContractFlow.Api.Models.Domain;
+using ContractFlow.Api.Models.Dto;
 using ContractFlow.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -27,12 +28,15 @@ public class InvoicesController(AppDbContext db, ICurrentUser currentUser, Billi
         int Year, int Month, int Revision, InvoiceStatus Status, string Currency,
         decimal TotalAmount, int LineCount, DateTime CreatedUtc,
         DateTime? IssuedUtc, Guid? IssuedByUserId, DateTime? PaidUtc, Guid? PaidByUserId,
-        List<string> Warnings);
+        List<string> Warnings,
+        bool MissingExchangeRate = false,
+        List<CurrencySummaryDto>? CurrencySummary = null);
 
     public record InvoiceDetailDto(InvoiceDto Invoice, List<LineDto> Lines);
     public record LineDto(
         Guid Id, InvoiceLineKind Kind, DateOnly? Date, string Description,
-        string? Explanation, decimal Quantity, decimal UnitPrice, decimal Amount);
+        string? Explanation, decimal Quantity, decimal UnitPrice, decimal Amount,
+        decimal? OriginalAmount = null, string? OriginalCurrency = null, decimal? ExchangeRate = null);
 
     /// <summary><paramref name="Supplement"/>: when the month's latest
     /// revision has left draft, create the next revision with what is still
@@ -47,11 +51,15 @@ public class InvoicesController(AppDbContext db, ICurrentUser currentUser, Billi
         s.CustomerName is null ? s.Project.Contract.EndClientReference : s.EndClientReference,
         s.Year, s.Month, s.Revision, s.Status, s.Currency, s.TotalAmount, s.Lines.Count,
         s.CreatedUtc, s.IssuedUtc, s.IssuedByUserId, s.PaidUtc, s.PaidByUserId,
-        BillingService.Warnings(s.WarningsJson));
+        BillingService.Warnings(s.WarningsJson),
+        s.MissingExchangeRate,
+        CurrencySummaryDto.Of(s.Lines.Where(l => l.OriginalCurrency != null)
+            .Select(l => (l.OriginalCurrency!, l.OriginalAmount ?? 0m, l.ExchangeRate ?? 0m, l.Amount))));
 
     private static LineDto ToDto(InvoiceLine l) => new(
         l.Id, l.Kind, l.Date, l.Description, l.Explanation,
-        l.Quantity, l.UnitPrice, l.Amount);
+        l.Quantity, l.UnitPrice, l.Amount,
+        l.OriginalAmount, l.OriginalCurrency, l.ExchangeRate);
 
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
@@ -196,6 +204,12 @@ public class InvoicesController(AppDbContext db, ICurrentUser currentUser, Billi
         if (s is null) return NotFound();
         if (s.Status != from)
             return BadRequest(new { error = $"Specification must be {from} first (is {s.Status})." });
+        if (to is InvoiceStatus.Final or InvoiceStatus.Issued && s.MissingExchangeRate)
+            return Conflict(new
+            {
+                error = "missingExchangeRate",
+                message = "Foreign-currency rows lack a month rate — enter it and regenerate the draft.",
+            });
         s.Status = to;
         apply?.Invoke(s);
         await Db.SaveChangesAsync(ct);

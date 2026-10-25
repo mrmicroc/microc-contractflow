@@ -464,7 +464,15 @@ From the Devin doc's list plus what the spec leaves open:
    Decided per contract (`PadInvoicing`): lump-sum PAD contracts bill expired
    PAD in the month it expires (consumed allocation = opening carry + baseline
    − carry-out); other contracts bill utilised PAD only.
-4. **Currencies**: how many, and which date governs the conversion rate?
+4. ~~**Currencies**: how many, and which date governs the conversion rate?~~
+   Decided: any ISO currency per row (expenses, per diem). At month end the
+   rows are summed per currency and converted to the document currency
+   (contract terms for the invoice specification, compensation agreement for
+   the statement) at the rate of the document's month, from a per-month rate
+   table entered by finance. Original amount, currency and rate stay on every
+   converted line; a missing rate keeps the rows out and blocks finalizing; a
+   rate that priced a document beyond draft is locked. Automated import from a
+   central bank is a later option.
 5. **Offline reporting** on sites without coverage — needed or out of scope?
 6. **Per diem**: follow Skatteverket payroll rules, or internal policy per
    subcontractor agreement?

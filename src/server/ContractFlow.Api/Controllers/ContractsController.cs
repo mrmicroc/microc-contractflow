@@ -207,6 +207,8 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
             return BadRequest(new { error = "A cancellation day fraction must lie between 0 and 1." });
         if (req.CancellationSteps.Any(s => s.ChargePercent is < 0m or > 100m))
             return BadRequest(new { error = "A cancellation percentage must lie between 0 and 100." });
+        if (req.ExpenseMarkupError() is { } markupError)
+            return BadRequest(new { error = markupError });
         // Effective-dated, never rewritten (§3): a version may not reach back
         // into a month a non-draft specification already billed.
         if (await billing.TermsChangeBlockedAsync(id, req.EffectiveFrom, null, ct) is { } why)
@@ -264,6 +266,7 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
             Notes = req.Notes,
         };
         req.ApplyPadRules(terms);
+        req.ApplyExpenseMarkups(terms);
         db.ContractTerms.Add(terms);
         await db.SaveChangesAsync(ct);
 
@@ -350,5 +353,6 @@ public class ContractsController(AppDbContext db, BillingService billing) : Cont
             .ToList(),
         t.HolidayCalendar, t.MinBillableHoursPerDay,
         t.TravelExpensePolicy, t.Indexation, t.Notes, t.IncludedVisits,
-        PadRulesDto.From(t));
+        PadRulesDto.From(t),
+        t.ExpenseMarkups.Select(m => new ExpenseMarkupDto(m.Category, m.Percent)).ToList());
 }

@@ -20,6 +20,8 @@ import { ScheduledChargesPanel } from './ScheduledChargesPanel';
 import { RepresentativesPanel } from './RepresentativesPanel';
 import { VisitsPanel } from './VisitsPanel';
 import { endClientLabel } from '@/lib/organisations';
+import { EXPENSE_CATEGORIES, markupRowsToBody, nextFreeCategory } from '@/lib/currency';
+import type { ExpenseCategory } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -124,6 +126,11 @@ export function ContractDetail({
     if (!tf.effectiveFrom) bad.push(t('common.effectiveFrom'));
     if (bad.length) {
       setError(t('common.invalidNumbers', { fields: bad.join(', ') }));
+      return;
+    }
+    const markupCheck = markupRowsToBody(tf.expenseMarkups);
+    if (markupCheck.error) {
+      setError(t(markupCheck.error));
       return;
     }
     try {
@@ -427,6 +434,41 @@ export function ContractDetail({
               <Field label={t('terms.expenseMarkupPercent')} help={t('terms.hExpenseMarkup')}>
                 <NumInput className={inputCls} value={tf.expenseMarkupPercent}
                   onChange={(v) => setTf({ ...tf, expenseMarkupPercent: v })} />
+              </Field>
+              <Field label={t('terms.expenseMarkups')} help={t('terms.hExpenseMarkups')}>
+                <div className="space-y-1">
+                  {tf.expenseMarkups.map((row, i) => (
+                    <div key={i} className="flex items-center gap-1">
+                      <select className={inputCls} value={row.category}
+                        onChange={(e) => setTf({
+                          ...tf,
+                          expenseMarkups: tf.expenseMarkups.map((r, j) =>
+                            j === i ? { ...r, category: e.target.value as ExpenseCategory } : r),
+                        })}>
+                        {EXPENSE_CATEGORIES.map((c) => (
+                          <option key={c} value={c}>{t(`myWork.expenseCategory.${c}`)}</option>
+                        ))}
+                      </select>
+                      <NumInput className={cn(inputCls, 'w-20')} value={row.percent}
+                        onChange={(v) => setTf({
+                          ...tf,
+                          expenseMarkups: tf.expenseMarkups.map((r, j) => (j === i ? { ...r, percent: v } : r)),
+                        })} />
+                      <span className="text-xs text-slate-500">%</span>
+                      <button type="button" className="text-xs text-red-600 hover:underline"
+                        onClick={() => setTf({ ...tf, expenseMarkups: tf.expenseMarkups.filter((_, j) => j !== i) })}>
+                        {t('common.delete')}
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" className="text-xs text-blue-700 hover:underline"
+                    onClick={() => setTf({
+                      ...tf,
+                      expenseMarkups: [...tf.expenseMarkups, { category: nextFreeCategory(tf.expenseMarkups), percent: '' }],
+                    })}>
+                    + {t('terms.addMarkup')}
+                  </button>
+                </div>
               </Field>
               <Field label={t('terms.includedVisits')} help={t('terms.hIncludedVisits')}>
                 <NumInput integerOnly className={inputCls} value={tf.includedVisits}

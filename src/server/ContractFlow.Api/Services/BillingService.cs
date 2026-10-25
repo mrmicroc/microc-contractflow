@@ -186,6 +186,8 @@ public partial class BillingService(AppDbContext db)
         ContractTerms? TermsAt(DateOnly d) => DayBilling.TermsAt(terms, project.ContractId, d);
         var endTerms = TermsAt(to);
         spec.Currency = endTerms?.Currency ?? spec.Currency;
+        spec.MissingExchangeRate = false;
+        var fx = await CurrencyConverter.ForMonthAsync(db, year, month, ct);
         bool CurrencyOk(string? currency, string what)
         {
             if (currency is null || currency == spec.Currency) return true;
@@ -476,18 +478,34 @@ public partial class BillingService(AppDbContext db)
             }
             var viaTravel = Billable(period);
             if (!x.RechargeableToCustomer && !viaTravel) continue;
-            if (!CurrencyOk(x.Currency, string.Create(Inv, $"Expense {x.Date:yyyy-MM-dd} ({x.Amount:0.##})")))
+            // Foreign currency converts at the spec month's rate; the mark-up
+            // (per category, else the default) applies to the converted amount.
+            var foreign = x.Currency != spec.Currency;
+            var rate = fx.RateFor(x.Currency, spec.Currency);
+            if (rate is null)
+            {
+                Warn(fx.MissingRateWarning(x.Currency, spec.Currency));
+                spec.MissingExchangeRate = true;
                 continue;
-            var markup = TermsAt(x.Date)?.ExpenseMarkupPercent ?? 0m;
-            var amount = TimeMath.Recharge(x.Amount, markup);
+            }
+            var converted = foreign ? TimeMath.Round2(x.Amount * rate.Value) : x.Amount;
+            var markup = TermsAt(x.Date)?.MarkupFor(x.Category) ?? 0m;
+            var amount = TimeMath.Recharge(converted, markup);
             spec.Lines.Add(new InvoiceLine
             {
                 InvoiceSpecificationId = specId,
                 Kind = InvoiceLineKind.Expense, Date = x.Date, SourceId = x.Id,
                 Description = x.Description ?? $"Expense {x.Category}",
-                Explanation = string.Create(Inv, $"{x.Amount:0.##} {x.Currency} + {markup:0.##}% mark-up")
+                Explanation = (foreign
+                        ? string.Create(Inv,
+                            $"{x.Amount:0.##} {x.Currency} × {rate.Value:0.######} = {converted:0.##} {spec.Currency}")
+                        : string.Create(Inv, $"{x.Amount:0.##} {x.Currency}"))
+                    + string.Create(Inv, $" + {markup:0.##}% mark-up ({x.Category})")
                     + (viaTravel ? " · " + TravelReason(period!) : ""),
                 Quantity = 1m, UnitPrice = amount, Amount = amount,
+                OriginalAmount = foreign ? x.Amount : null,
+                OriginalCurrency = foreign ? x.Currency : null,
+                ExchangeRate = foreign ? rate : null,
             });
         }
 
@@ -762,11 +780,40 @@ public partial class BillingService(AppDbContext db)
             .ThenByDescending(a => a.EffectiveFrom).ThenByDescending(a => a.Version)
             .FirstOrDefault();
         st.Currency = currencyAgreement?.Currency ?? st.Currency;
+        st.MissingExchangeRate = false;
+        var fx = await CurrencyConverter.ForMonthAsync(db, year, month, ct);
         bool CurrencyOk(string? currency, string what)
         {
             if (currency is null || currency == st.Currency) return true;
             Warn($"{what} is in {currency}, not {st.Currency} — left out of the total.");
             return false;
+        }
+        // A row reported in its own currency (expense paid abroad, per diem in
+        // EUR) converts at the month rate; the original stays on the line.
+        StatementLine? Converted(StatementLineKind kind, DateOnly date, Guid sourceId,
+            string description, string explanation, decimal amount, string currency)
+        {
+            var rate = fx.RateFor(currency, st.Currency);
+            if (rate is null)
+            {
+                Warn(fx.MissingRateWarning(currency, st.Currency));
+                st.MissingExchangeRate = true;
+                return null;
+            }
+            var foreign = currency != st.Currency;
+            var value = foreign ? TimeMath.Round2(amount * rate.Value) : amount;
+            return new StatementLine
+            {
+                StatementId = st.Id, Kind = kind, Date = date, SourceId = sourceId,
+                Description = description,
+                Explanation = foreign
+                    ? string.Create(Inv, $"{explanation} · {amount:0.##} {currency} × {rate.Value:0.######}")
+                    : explanation,
+                Quantity = 1m, UnitPrice = value, Amount = value,
+                OriginalAmount = foreign ? amount : null,
+                OriginalCurrency = foreign ? currency : null,
+                ExchangeRate = foreign ? rate : null,
+            };
         }
 
         var rows = await MonthRowsAsync([resourceId], from, to, ct);
@@ -817,16 +864,10 @@ public partial class BillingService(AppDbContext db)
             .ToListAsync(ct);
         foreach (var x in expenses.OrderBy(x => x.Date))
         {
-            if (!CurrencyOk(x.Currency, string.Create(Inv, $"Expense {x.Date:yyyy-MM-dd} ({x.Amount:0.##})")))
-                continue;
-            st.Lines.Add(new StatementLine
-            {
-                StatementId = st.Id,
-                Kind = StatementLineKind.Expense, Date = x.Date, SourceId = x.Id,
-                Description = x.Description ?? $"Expense {x.Category}",
-                Explanation = "Reimbursed at cost",
-                Quantity = 1m, UnitPrice = x.Amount, Amount = x.Amount,
-            });
+            if (Converted(StatementLineKind.Expense, x.Date, x.Id,
+                    x.Description ?? $"Expense {x.Category}", "Reimbursed at cost",
+                    x.Amount, x.Currency) is { } line)
+                st.Lines.Add(line);
         }
 
         // ── Per diem claims at their claimed amounts.
@@ -838,15 +879,9 @@ public partial class BillingService(AppDbContext db)
             .ToListAsync(ct);
         foreach (var x in allowances.OrderBy(x => x.Date))
         {
-            if (!CurrencyOk(x.Currency, string.Create(Inv, $"Per diem {x.Date:yyyy-MM-dd}"))) continue;
-            st.Lines.Add(new StatementLine
-            {
-                StatementId = st.Id,
-                Kind = StatementLineKind.Allowance, Date = x.Date, SourceId = x.Id,
-                Description = x.Notes ?? "Per diem",
-                Explanation = "Per diem claim",
-                Quantity = 1m, UnitPrice = x.Amount, Amount = x.Amount,
-            });
+            if (Converted(StatementLineKind.Allowance, x.Date, x.Id,
+                    x.Notes ?? "Per diem", "Per diem claim", x.Amount, x.Currency) is { } line)
+                st.Lines.Add(line);
         }
 
         // ── Mileage + paid travel time per the resource's agreement.

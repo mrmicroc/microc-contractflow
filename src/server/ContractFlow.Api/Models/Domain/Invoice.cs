@@ -50,6 +50,10 @@ public class InvoiceSpecification
     /// unreviewed rate cells, PAD without rate…) — rows behind a warning are
     /// left out of the total, never silently summed.</summary>
     public string? WarningsJson { get; set; }
+    /// <summary>Set when a foreign-currency row had no month rate — it stays
+    /// out of the total and the spec can't be finalized or issued until the
+    /// rate is entered and the draft regenerated.</summary>
+    public bool MissingExchangeRate { get; set; }
 }
 
 public enum InvoiceLineKind
@@ -107,4 +111,10 @@ public class InvoiceLine
     /// MobilisationPeriod or cancelled Booking id (hours lines → null; their
     /// entries point back via TimeEntry.InvoiceSpecificationId).</summary>
     public Guid? SourceId { get; set; }
+    /// <summary>Foreign-currency source: the amount and currency as reported,
+    /// and the month rate used — null when the source was already in the
+    /// spec currency (design §9.3: originals kept beside the conversion).</summary>
+    public decimal? OriginalAmount { get; set; }
+    public string? OriginalCurrency { get; set; }
+    public decimal? ExchangeRate { get; set; }
 }

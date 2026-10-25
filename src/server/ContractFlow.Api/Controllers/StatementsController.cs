@@ -1,5 +1,6 @@
 using ContractFlow.Api.Data;
 using ContractFlow.Api.Models.Domain;
+using ContractFlow.Api.Models.Dto;
 using ContractFlow.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -23,23 +24,30 @@ public class StatementsController(AppDbContext db, ICurrentUser currentUser, Bil
         Guid Id, Guid ResourceId, string ResourceName, int Year, int Month,
         StatementStatus Status, string Currency, decimal TotalAmount,
         int LineCount, DateTime CreatedUtc, DateTime? PaidUtc, Guid? PaidByUserId,
-        List<string> Warnings);
+        List<string> Warnings,
+        bool MissingExchangeRate = false,
+        List<CurrencySummaryDto>? CurrencySummary = null);
 
     public record StatementDetailDto(StatementDto Statement, List<LineDto> Lines);
     public record LineDto(
         Guid Id, StatementLineKind Kind, DateOnly? Date, string Description,
-        string? Explanation, decimal Quantity, decimal UnitPrice, decimal Amount);
+        string? Explanation, decimal Quantity, decimal UnitPrice, decimal Amount,
+        decimal? OriginalAmount = null, string? OriginalCurrency = null, decimal? ExchangeRate = null);
 
     public record GenerateRequest(Guid ResourceId, int Year, int Month);
 
     private static StatementDto ToDto(SubcontractorStatement s) => new(
         s.Id, s.ResourceId, s.Resource.DisplayName, s.Year, s.Month, s.Status,
         s.Currency, s.TotalAmount, s.Lines.Count, s.CreatedUtc, s.PaidUtc, s.PaidByUserId,
-        BillingService.Warnings(s.WarningsJson));
+        BillingService.Warnings(s.WarningsJson),
+        s.MissingExchangeRate,
+        CurrencySummaryDto.Of(s.Lines.Where(l => l.OriginalCurrency != null)
+            .Select(l => (l.OriginalCurrency!, l.OriginalAmount ?? 0m, l.ExchangeRate ?? 0m, l.Amount))));
 
     private static LineDto ToDto(StatementLine l) => new(
         l.Id, l.Kind, l.Date, l.Description, l.Explanation,
-        l.Quantity, l.UnitPrice, l.Amount);
+        l.Quantity, l.UnitPrice, l.Amount,
+        l.OriginalAmount, l.OriginalCurrency, l.ExchangeRate);
 
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.Finance, AppRole.Resource)]
@@ -129,6 +137,12 @@ public class StatementsController(AppDbContext db, ICurrentUser currentUser, Bil
         if (s is null) return NotFound();
         if (s.Status != from)
             return BadRequest(new { error = $"Statement must be {from} first (is {s.Status})." });
+        if (to == StatementStatus.Final && s.MissingExchangeRate)
+            return Conflict(new
+            {
+                error = "missingExchangeRate",
+                message = "Foreign-currency rows lack a month rate — enter it and regenerate the draft.",
+            });
         s.Status = to;
         apply?.Invoke(s);
         await Db.SaveChangesAsync(ct);
