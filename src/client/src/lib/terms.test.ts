@@ -207,3 +207,20 @@ describe('carry-over settings', () => {
     expect(body.carryOverConsumption).toBe('carryOverFirst');
   });
 });
+
+describe('per-category expense mark-up', () => {
+  it('sends filled rows and reads them back as editable rows', () => {
+    const body = termsFormToBody({
+      ...emptyTerms, effectiveFrom: '2026-01-01', expenseMarkupPercent: '5',
+      expenseMarkups: [{ category: 'material', percent: '10' }, { category: 'travel', percent: '0' },
+        { category: 'meal', percent: '' }],
+    });
+    expect(body.expenseMarkupPercent).toBe(5);
+    expect(body.expenseMarkups).toEqual([{ category: 'material', percent: 10 }, { category: 'travel', percent: 0 }]);
+    const form = fromTerms(
+      { ...body, padRules: null, id: 't', contractId: 'c', version: 1, createdUtc: '2026-01-01T00:00:00Z' },
+      '2026-02-01');
+    expect(form.expenseMarkups).toEqual([
+      { category: 'material', percent: '10' }, { category: 'travel', percent: '0' }]);
+  });
+});

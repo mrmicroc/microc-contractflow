@@ -46,6 +46,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
     public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
     public DbSet<SupplierInvoiceLine> SupplierInvoiceLines => Set<SupplierInvoiceLine>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     /// <summary>Optional justification stamped on the audit rows of the next
     /// save — set by an endpoint that takes a reason; cleared after saving.</summary>
@@ -165,6 +166,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
                 s.Property(x => x.ChargeHours).HasPrecision(9, 2);
                 s.Property(x => x.ChargeAmount).HasPrecision(18, 2);
                 s.Property(x => x.ChargeDayFraction).HasPrecision(9, 4);
+            });
+            e.OwnsMany(t => t.ExpenseMarkups, m =>
+            {
+                m.ToJson();
+                m.Property(x => x.Category).HasConversion<string>();
+                m.Property(x => x.Percent).HasPrecision(9, 4);
             });
             e.Property(t => t.HourlyRate).HasPrecision(18, 2);
             e.Property(t => t.SaturdayRate).HasPrecision(18, 2);
@@ -394,6 +401,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
                 .HasForeignKey(r => r.BookingId).OnDelete(DeleteBehavior.SetNull);
         });
 
+        builder.Entity<ExchangeRate>(e =>
+        {
+            e.Property(x => x.FromCurrency).HasMaxLength(3);
+            e.Property(x => x.ToCurrency).HasMaxLength(3);
+            e.Property(x => x.Rate).HasPrecision(18, 6);
+            e.Property(x => x.Note).HasMaxLength(200);
+            e.HasIndex(x => new { x.Year, x.Month, x.FromCurrency, x.ToCurrency }).IsUnique();
+        });
+
         builder.Entity<AuditEntry>(e =>
         {
             e.Property(x => x.EntityType).HasMaxLength(100);
@@ -555,6 +571,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.Quantity).HasPrecision(18, 4);
             e.Property(x => x.UnitPrice).HasPrecision(18, 2);
             e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalAmount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalCurrency).HasMaxLength(3);
+            e.Property(x => x.ExchangeRate).HasPrecision(18, 6);
             e.HasOne(x => x.Invoice).WithMany(x => x.Lines)
                 .HasForeignKey(x => x.InvoiceSpecificationId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -579,6 +598,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? a
             e.Property(x => x.Quantity).HasPrecision(18, 2);
             e.Property(x => x.UnitPrice).HasPrecision(18, 2);
             e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalAmount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalCurrency).HasMaxLength(3);
+            e.Property(x => x.ExchangeRate).HasPrecision(18, 6);
             e.HasOne(x => x.Statement).WithMany(x => x.Lines)
                 .HasForeignKey(x => x.StatementId).OnDelete(DeleteBehavior.Cascade);
         });

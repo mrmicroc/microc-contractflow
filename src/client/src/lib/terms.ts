@@ -2,6 +2,7 @@
 // survives, comma decimals, only the chosen components persist) are covered
 // by Vitest (AGENTS.md testing discipline).
 import { numOr, numOrNull } from './versioned';
+import { markupRowsFrom, markupRowsToBody, type MarkupFormRow } from './currency';
 import type {
   CarryOverBasis, CarryOverConsumption, CarryOverRounding, ContractTerms, ContractTermsRequestBody, PadInvoicing,
   SharedDayMinimum, TimeBilling,
@@ -46,6 +47,8 @@ export type TermsForm = {
   overtimePercent: string;
   mobilisationFee: string;
   expenseMarkupPercent: string;
+  /** Per-category overrides of expenseMarkupPercent, as edited. */
+  expenseMarkups: MarkupFormRow[];
   minBillableHoursPerDay: string;
   dayRate: string;
   saturdayDayRate: string;
@@ -84,7 +87,7 @@ export const emptyTerms: TermsForm = {
   timeBilling: 'hourly', padEnabled: false,
   padRate: '', hourlyRate: '', saturdayRate: '', sundayRate: '', holidayRate: '',
   overtimeAfterHours: '8', overtimePercent: '150',
-  mobilisationFee: '', expenseMarkupPercent: '0', minBillableHoursPerDay: '',
+  mobilisationFee: '', expenseMarkupPercent: '0', expenseMarkups: [], minBillableHoursPerDay: '',
   dayRate: '', saturdayDayRate: '', sundayDayRate: '', holidayDayRate: '',
   halfDayRate: '', halfDayMaxHours: '',
   padHoursPerDay: '8', minPadPerBookedDay: '1', carryOverMaxPercent: '20',
@@ -114,6 +117,7 @@ export const fromTerms = (v: ContractTerms, effectiveFrom: string): TermsForm =>
   overtimePercent: String(v.overtimePercent),
   mobilisationFee: s(v.mobilisationFee),
   expenseMarkupPercent: String(v.expenseMarkupPercent),
+  expenseMarkups: markupRowsFrom(v.expenseMarkups),
   minBillableHoursPerDay: s(v.minBillableHoursPerDay),
   dayRate: s(v.dayRate),
   saturdayDayRate: s(v.saturdayDayRate),
@@ -176,6 +180,9 @@ export function termsFormToBody(tf: TermsForm): ContractTermsRequestBody {
     overtimePercent: numOr(tf.overtimePercent, 150),
     mobilisationFee: numOrNull(tf.mobilisationFee),
     expenseMarkupPercent: numOr(tf.expenseMarkupPercent, 0),
+    // Invalid rows are caught before save (markupRowsToBody error) — here an
+    // invalid set degrades to none rather than half a list.
+    expenseMarkups: markupRowsToBody(tf.expenseMarkups).rows ?? [],
     minBillableHoursPerDay: isHourly ? numOrNull(tf.minBillableHoursPerDay) : null,
     dayRate: isDaily ? numOrNull(tf.dayRate) : null,
     saturdayDayRate: isDaily ? numOrNull(tf.saturdayDayRate) : null,

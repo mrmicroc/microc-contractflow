@@ -20,10 +20,10 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
     {
         var me = await currentUser.GetAsync(ct);
         if (me!.Role != AppRole.Resource)
-            return Ok(await db.Projects.Where(p => p.IsActive)
+            return Ok(await WithCurrencyAsync(await db.Projects.Where(p => p.IsActive)
                 .OrderBy(p => p.Name)
-                .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive))
-                .ToListAsync(ct));
+                .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive, null))
+                .ToListAsync(ct), ct));
 
         var resourceId = await db.Resources
             .Where(r => r.UserId == me.Id).Select(r => (Guid?)r.Id).FirstOrDefaultAsync(ct);
@@ -37,11 +37,28 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             .Select(b => b.ProjectId).Distinct().ToListAsync(ct);
         var ids = accessible.Concat(booked).Distinct().ToList();
 
-        return Ok(await db.Projects
+        return Ok(await WithCurrencyAsync(await db.Projects
             .Where(p => ids.Contains(p.Id) && p.IsActive)
             .OrderBy(p => p.Name)
-            .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive))
-            .ToListAsync(ct));
+            .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive, null))
+            .ToListAsync(ct), ct));
+    }
+
+    /// <summary>Adds the currency of each project's contract terms in force
+    /// today (latest version if none has started yet).</summary>
+    private async Task<List<ProjectSummaryDto>> WithCurrencyAsync(
+        List<ProjectSummaryDto> projects, CancellationToken ct)
+    {
+        var contractIds = projects.Select(p => p.ContractId).Distinct().ToList();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var terms = await db.ContractTerms.Where(t => contractIds.Contains(t.ContractId))
+            .Select(t => new { t.ContractId, t.EffectiveFrom, t.Version, t.Currency })
+            .ToListAsync(ct);
+        var currency = terms.GroupBy(t => t.ContractId).ToDictionary(g => g.Key, g =>
+            (g.Where(t => t.EffectiveFrom <= today).OrderByDescending(t => t.EffectiveFrom)
+                 .ThenByDescending(t => t.Version).FirstOrDefault()
+             ?? g.OrderByDescending(t => t.Version).First()).Currency);
+        return projects.Select(p => p with { Currency = currency.GetValueOrDefault(p.ContractId) }).ToList();
     }
 
     [HttpGet]

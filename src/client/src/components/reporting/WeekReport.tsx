@@ -9,6 +9,7 @@ import {
 } from '@/lib/api';
 import { addDays as shiftIso, matchBooking } from '@/lib/bookings';
 import { confirmAction } from '@/lib/confirm';
+import { defaultCurrencyFor, SYSTEM_DEFAULT_CURRENCY } from '@/lib/currency';
 import { localTodayIso as today } from '@/lib/dates';
 import { expenseRuleErrors, saveExpenseConfirmingDuplicates } from '@/lib/expenses';
 import { isoWeekDates, isoWeekLabel, isoWeekMonday, isoWeekOf } from '@/lib/timekeeping';
@@ -102,7 +103,9 @@ export function WeekReport({ bookings }: { bookings: Booking[] }) {
     } catch (e) { fail(e); }
   };
 
-  const sectionProps = { days, range, projectOptions, locked, onChanged: reload, onError: fail };
+  const sectionProps = {
+    days, range, projectOptions, projects: myProjects, locked, onChanged: reload, onError: fail,
+  };
 
   return (
     <Panel
@@ -172,6 +175,8 @@ type SectionProps = {
   days: string[];
   range: { from: string; to: string };
   projectOptions: [string, string][];
+  /** Reporting projects incl. their contract currency (expense defaults). */
+  projects: ProjectSummary[];
   locked: boolean;
   onChanged: () => void;
   onError: (e: unknown) => void;
@@ -524,11 +529,11 @@ function TravelSection({ days, range, projectOptions, rows, locked, onChanged, o
 
 // ── Expenses ────────────────────────────────────────────────────────────────
 
-function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, onError }:
+function ExpenseSection({ days, range, projectOptions, projects, rows, locked, onChanged, onError }:
   SectionProps & { rows: Expense[] }) {
   const { t } = useTranslation();
   const empty = {
-    date: range.from, projectId: '', category: 'other', amount: '', currency: 'SEK',
+    date: range.from, projectId: '', category: 'other', amount: '', currency: SYSTEM_DEFAULT_CURRENCY,
     description: '', receiptRef: '', reimbursable: true, rechargeable: false, inRate: false,
   };
   const [form, setForm] = useState(empty);
@@ -646,7 +651,9 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
           </Field>
           <Field label={t('myWork.project')}>
             <ProjectPicker options={projectOptions} value={form.projectId}
-              onChange={(v) => setForm({ ...form, projectId: v })} label="—" />
+              onChange={(v) => setForm({
+                ...form, projectId: v, currency: defaultCurrencyFor(v, projects, form.currency),
+              })} label="—" />
           </Field>
           <Field label={t('myWork.category')}>
             <select className={selectCls} value={form.category}
@@ -708,10 +715,10 @@ function ExpenseSection({ days, range, projectOptions, rows, locked, onChanged, 
 
 // ── Per diem ────────────────────────────────────────────────────────────────
 
-function AllowanceSection({ days, range, projectOptions, rows, locked, onChanged, onError }:
+function AllowanceSection({ days, range, projectOptions, projects, rows, locked, onChanged, onError }:
   SectionProps & { rows: AllowanceClaim[] }) {
   const { t } = useTranslation();
-  const empty = { date: range.from, projectId: '', amount: '', currency: 'SEK', notes: '' };
+  const empty = { date: range.from, projectId: '', amount: '', currency: SYSTEM_DEFAULT_CURRENCY, notes: '' };
   const [form, setForm] = useState(empty);
   const [editId, setEditId] = useState<string | null>(null);
   const confirmDelete = useConfirmDelete(onChanged, onError);
@@ -784,7 +791,9 @@ function AllowanceSection({ days, range, projectOptions, rows, locked, onChanged
           </Field>
           <Field label={t('myWork.project')}>
             <ProjectPicker options={projectOptions} value={form.projectId}
-              onChange={(v) => setForm({ ...form, projectId: v })} label="—" />
+              onChange={(v) => setForm({
+                ...form, projectId: v, currency: defaultCurrencyFor(v, projects, form.currency),
+              })} label="—" />
           </Field>
           <Field label={t('myWork.amount')}>
             <span className="flex gap-1">

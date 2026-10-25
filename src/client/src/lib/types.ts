@@ -222,6 +222,8 @@ export interface ContractTerms {
   overtimePercent: number;
   mobilisationFee: number | null;
   expenseMarkupPercent: number;
+  /** Per-category overrides of expenseMarkupPercent. */
+  expenseMarkups?: ExpenseMarkupRow[] | null;
   minBillableHoursPerDay: number | null;
   dayRate: number | null;
   saturdayDayRate: number | null;
@@ -266,6 +268,8 @@ export interface ContractTermsRequestBody {
   overtimePercent: number;
   mobilisationFee: number | null;
   expenseMarkupPercent: number;
+  /** Per-category overrides of expenseMarkupPercent. */
+  expenseMarkups?: ExpenseMarkupRow[] | null;
   minBillableHoursPerDay: number | null;
   dayRate: number | null;
   saturdayDayRate: number | null;
@@ -306,6 +310,36 @@ export interface ProjectSummary {
   name: string;
   code: string | null;
   isActive: boolean;
+  /** Contract currency in force — set on /api/projects/mine only. */
+  currency?: string | null;
+}
+
+/** Per-category expense mark-up override on a terms version. */
+export interface ExpenseMarkupRow {
+  category: ExpenseCategory;
+  percent: number;
+}
+
+/** Month rate: units of toCurrency per 1 fromCurrency. */
+export interface ExchangeRate {
+  id: string;
+  year: number;
+  month: number;
+  fromCurrency: string;
+  toCurrency: string;
+  rate: number;
+  note: string | null;
+  createdUtc: string;
+  /** Priced a document beyond draft — locked. */
+  inUse: boolean;
+}
+
+/** One source currency summed at month end on a document. */
+export interface CurrencySummary {
+  currency: string;
+  originalTotal: number;
+  rate: number;
+  convertedTotal: number;
 }
 
 export interface ProjectDetail {
@@ -904,6 +938,9 @@ export interface InvoiceSpecification {
   paidUtc: string | null;
   paidByUserId: string | null;
   warnings: string[];
+  /** A foreign-currency row had no month rate — finalize/issue blocked. */
+  missingExchangeRate?: boolean;
+  currencySummary?: CurrencySummary[] | null;
 }
 
 /** Approved rows of a month no specification billed yet (/api/invoices/unbilled). */
@@ -927,6 +964,10 @@ export interface BillingLine {
   quantity: number;
   unitPrice: number;
   amount: number;
+  /** Set when converted from another currency at the month rate. */
+  originalAmount?: number | null;
+  originalCurrency?: string | null;
+  exchangeRate?: number | null;
 }
 
 export interface InvoiceDetail {
@@ -948,6 +989,8 @@ export interface SubcontractorStatement {
   paidUtc: string | null;
   paidByUserId: string | null;
   warnings: string[];
+  missingExchangeRate?: boolean;
+  currencySummary?: CurrencySummary[] | null;
 }
 
 export interface StatementDetail {

@@ -108,7 +108,8 @@ public record ContractTermsDto(
     decimal? MinBillableHoursPerDay,
     string? TravelExpensePolicy, string? Indexation, string? Notes,
     int? IncludedVisits = null,
-    PadRulesDto? PadRules = null);
+    PadRulesDto? PadRules = null,
+    List<ExpenseMarkupDto>? ExpenseMarkups = null);
 
 /// <summary>One rung of the cancellation ladder — see
 /// <see cref="CancellationStep"/>.</summary>
@@ -168,8 +169,11 @@ public partial class ContractTermsRequest
 
 // ── Projects, workPackages, quantities ─────────────────────────────────────────
 
+/// <summary><c>Currency</c>: the contract currency in force today — filled
+/// on the reporting picker (/api/projects/mine) so expense forms can default
+/// to it; null elsewhere.</summary>
 public record ProjectSummaryDto(
-    Guid Id, Guid ContractId, string Name, string? Code, bool IsActive);
+    Guid Id, Guid ContractId, string Name, string? Code, bool IsActive, string? Currency = null);
 
 public record ProjectDetailDto(
     Guid Id, Guid ContractId, string ContractName, string CustomerName,

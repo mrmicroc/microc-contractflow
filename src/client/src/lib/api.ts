@@ -2,7 +2,9 @@ import { DEV_USER_HEADER, getDevUserId } from './currentUser';
 import { auditQuery, type AuditEntry, type AuditFilters } from './audit';
 import type { OverrunSplit } from './bookings';
 import type { ClosePreview } from './monthClose';
+import type { RateBody } from './currency';
 import type {
+  ExchangeRate,
   AdditionalPadRequest,
   AllowanceClaim,
   AllowanceRequestBody,
@@ -544,3 +546,17 @@ export const deleteSupplierInvoice = (id: string) => apiDelete(`/api/supplier-in
 export const getMargins = (year: number, month: number, endClientId?: string | null) =>
   apiGet<MarginRow[]>(`/api/reports/margins?year=${year}&month=${month}`
     + (endClientId ? `&endClientId=${endClientId}` : ''));
+
+// ── Exchange rates (month rate table) ──────────────────────────────────────
+
+export const getExchangeRates = (year?: number, month?: number) => {
+  const q = new URLSearchParams();
+  if (year) q.set('year', String(year));
+  if (month) q.set('month', String(month));
+  const qs = q.toString();
+  return apiGet<ExchangeRate[]>(`/api/exchange-rates${qs ? `?${qs}` : ''}`);
+};
+export const createExchangeRate = (body: RateBody) => apiPost<ExchangeRate>('/api/exchange-rates', body);
+export const updateExchangeRate = (id: string, body: RateBody) =>
+  apiPut<ExchangeRate>(`/api/exchange-rates/${id}`, body);
+export const deleteExchangeRate = (id: string) => apiDelete(`/api/exchange-rates/${id}`);
