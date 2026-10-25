@@ -813,6 +813,50 @@ namespace ContractFlow.Api.Migrations
                     b.ToTable("EstimatedQuantities");
                 });
 
+            modelBuilder.Entity("ContractFlow.Api.Models.Domain.ExchangeRate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FromCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("ToCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Year", "Month", "FromCurrency", "ToCurrency")
+                        .IsUnique();
+
+                    b.ToTable("ExchangeRates");
+                });
+
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Expense", b =>
                 {
                     b.Property<Guid>("Id")
@@ -902,6 +946,10 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<decimal?>("ExchangeRate")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<string>("Explanation")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -913,6 +961,14 @@ namespace ContractFlow.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal?>("OriginalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("OriginalCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
 
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 4)
@@ -966,6 +1022,9 @@ namespace ContractFlow.Api.Migrations
 
                     b.Property<DateTime?>("IssuedUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<bool>("MissingExchangeRate")
+                        .HasColumnType("bit");
 
                     b.Property<int>("Month")
                         .HasColumnType("int");
@@ -1396,6 +1455,10 @@ namespace ContractFlow.Api.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<decimal?>("ExchangeRate")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<string>("Explanation")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -1404,6 +1467,14 @@ namespace ContractFlow.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal?>("OriginalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("OriginalCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
 
                     b.Property<decimal>("Quantity")
                         .HasPrecision(18, 2)
@@ -1442,6 +1513,9 @@ namespace ContractFlow.Api.Migrations
                         .IsRequired()
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
+
+                    b.Property<bool>("MissingExchangeRate")
+                        .HasColumnType("bit");
 
                     b.Property<int>("Month")
                         .HasColumnType("int");
@@ -2151,6 +2225,9 @@ namespace ContractFlow.Api.Migrations
                                 .HasPrecision(9, 2)
                                 .HasColumnType("decimal(9,2)");
 
+                            b1.Property<decimal?>("ChargePercent")
+                                .HasColumnType("decimal(18,2)");
+
                             b1.Property<int>("MinBusinessDaysBefore")
                                 .HasColumnType("int");
 
@@ -2164,9 +2241,38 @@ namespace ContractFlow.Api.Migrations
                                 .HasForeignKey("ContractTermsId");
                         });
 
+                    b.OwnsMany("ContractFlow.Api.Models.Domain.ExpenseMarkup", "ExpenseMarkups", b1 =>
+                        {
+                            b1.Property<Guid>("ContractTermsId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("int");
+
+                            b1.Property<string>("Category")
+                                .IsRequired()
+                                .HasColumnType("nvarchar(max)");
+
+                            b1.Property<decimal>("Percent")
+                                .HasPrecision(9, 4)
+                                .HasColumnType("decimal(9,4)");
+
+                            b1.HasKey("ContractTermsId", "__synthesizedOrdinal");
+
+                            b1.ToTable("ContractTerms");
+
+                            b1.ToJson("ExpenseMarkups");
+
+                            b1.WithOwner()
+                                .HasForeignKey("ContractTermsId");
+                        });
+
                     b.Navigation("CancellationSteps");
 
                     b.Navigation("Contract");
+
+                    b.Navigation("ExpenseMarkups");
                 });
 
             modelBuilder.Entity("ContractFlow.Api.Models.Domain.Customer", b =>
