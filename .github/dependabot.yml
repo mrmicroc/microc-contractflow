@@ -1,0 +1,23 @@
+# Weekly, grouped dependency updates — one PR per ecosystem instead of one
+# per package. Security updates still arrive as soon as they are published.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /src/client
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-tooling:
+        dependency-type: development
+      runtime:
+        dependency-type: production
+
+  - package-ecosystem: nuget
+    directory: /src/server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      nuget:
+        patterns: ["*"]
