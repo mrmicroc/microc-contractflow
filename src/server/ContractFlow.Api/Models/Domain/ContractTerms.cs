@@ -21,7 +21,7 @@ public enum TimeBilling
 /// <see cref="Version"/>, so historical months reconcile against the terms of
 /// their time (design §3, §9.3).
 /// </summary>
-public class ContractTerms
+public partial class ContractTerms
 {
     public Guid Id { get; set; }
     public Guid ContractId { get; set; }
@@ -41,13 +41,8 @@ public class ContractTerms
     /// <summary>PAD component on — bookings commit PAD per the PAD rules below,
     /// and the month bills utilised PAD × <see cref="PadRate"/>.</summary>
     public bool PadEnabled { get; set; }
-    /// <summary>Fixed-price component — a one-off amount billed in the month
-    /// containing <see cref="FixedPriceDate"/>.</summary>
-    public bool FixedPriceEnabled { get; set; }
-    public decimal? FixedPriceAmount { get; set; }
-    /// <summary>The date the fixed price lands on an invoice specification.</summary>
-    public DateOnly? FixedPriceDate { get; set; }
-    public string? FixedPriceNote { get; set; }
+    // One-off dated amounts are ScheduledCharge rows on the contract — events,
+    // not versioned rules.
 
     // ── Currency & customer rates ───────────────────────────────────────────
     /// <summary>ISO 4217 currency code, e.g. "SEK".</summary>
@@ -82,6 +77,12 @@ public class ContractTerms
     public decimal OvertimePercent { get; set; } = 150m;
     /// <summary>Fixed customer fee per mobilisation period, regardless of cost.</summary>
     public decimal? MobilisationFee { get; set; }
+    /// <summary>Visits (confirmed mobilisations of one resource to a package
+    /// marked CountsAsVisit) whose travel time and travel costs the contract
+    /// includes, counted over the whole contract. Beyond it a visit's travel
+    /// time bills at the hourly rate and its travel expenses recharge. Null =
+    /// visits are not limited.</summary>
+    public int? IncludedVisits { get; set; }
     /// <summary>Mark-up percent on recharged expenses (spec example: 10 %).</summary>
     public decimal ExpenseMarkupPercent { get; set; }
     /// <summary>Minimum billable hours per attendance day (design §5 step 4 —
@@ -138,4 +139,14 @@ public class CancellationStep
     /// <summary>Fixed cancellation fee in the contract currency. Null = no
     /// fixed fee.</summary>
     public decimal? ChargeAmount { get; set; }
+    /// <summary>Day-rate contracts: share of the day rate charged (0–1, e.g.
+    /// 0.5). Takes precedence over <see cref="ChargeHours"/> there; ignored on
+    /// other contracts.</summary>
+    public decimal? ChargeDayFraction { get; set; }
+    /// <summary>Share of the booking's full charge (0–100 %) — a stepped
+    /// policy such as "10–5 days: 50 %, under 5 days: 100 %". Converts to
+    /// planned hours × % on hourly and PAD contracts and to a day fraction on
+    /// day-rate contracts; explicit <see cref="ChargeHours"/> /
+    /// <see cref="ChargeDayFraction"/> on the same rung take precedence.</summary>
+    public decimal? ChargePercent { get; set; }
 }

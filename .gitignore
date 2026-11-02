@@ -13,3 +13,4 @@ dist/
 # OS / editor
 Thumbs.db
 .DS_Store
+.claude/worktrees/

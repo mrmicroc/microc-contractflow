@@ -82,11 +82,21 @@ Items are marked ✅ only when implemented **and** tested. See
       the resource list
 - [x] Work-package info fields — typed free-form fields (Address, Access,
       Contact…) replacing the single Address column
+- [x] Timesheet → Invoiced leg — issuing a spec marks fully billed weeks
+      Invoiced; specs carry revisions, so approved-but-unbilled rows (weeks
+      crossing a month end) go on a supplement; `GET /api/invoices/unbilled`
+- [x] One shared day-pricing pipeline (DayBilling) for approval, invoice,
+      statement and cost — frozen billable == invoiced; one minimum and one OT
+      threshold per contract-day across work packages
+- [x] Billed history protected — terms/agreement/package-rate versions that
+      priced a non-draft document can't be deleted or back-dated
 - [ ] Self-reporting access at work-package level (currently project-level —
       review when the access model is revisited)
-- [ ] Multi-currency, rate indexation
+- [ ] Multi-currency, rate indexation (until then: rows in another currency
+      are left out of a document's total and listed as warnings)
 - [ ] Excel/PDF/CSV exports
-- [ ] Timesheet → Invoiced leg once an invoice covers the period
+- [ ] Separate invoice lines for OT and minimum-hours adjustment (today in
+      the line explanation only)
 
 ## Phase 4 — Go live
 - [ ] Azure deploy (SWA + App Service + SQL + Blob)
@@ -98,8 +108,42 @@ Items are marked ✅ only when implemented **and** tested. See
 - [ ] Backup strategy (optionally UNAS Pro via SMB)
 - [ ] Retention/GDPR review
 
+## Review & hardening (2026-10)
+- [x] Month close: pre-close checklist + step-by-step preview, force with
+      reason, strict ordering (previous closed, month ended), one transaction
+- [x] Carry-over consumed before baseline (§4.3); late cancel ≥ 1 PAD;
+      continuation overrun ①–④ on completion with actual hours
+- [x] Additional PAD request can name the waiting booking — approval commits it
+- [x] Reporting guards: no rows into submitted/approved weeks, none out of a
+      closed month, ≤ 24 h/day, expense duplicate warning, one per-diem/day
+- [x] Timesheet review history, required note on return/reject, admin reopen
+- [x] Audit log — AuditEntry on every commercial save, `GET /api/audit`,
+      Settings viewer (Admin/Finance)
+- [x] Dev identity only in Development/Testing (401 elsewhere); no exception
+      text in non-dev 500s
+- [x] Role-aware navigation and dashboard; Swedish decimal comma everywhere
+
+## Contract-document rules (2026-10) — all per-contract terms settings
+- [x] One organisation register: party + optional end client (+ reference)
+- [x] Carry-over basis (unused baseline default | whole baseline), round-up step
+- [x] PAD invoicing: utilised only | lump sum (utilised + expired, carried PAD
+      billed when it lands); Additional / auto-incurred PAD on separate lines
+- [x] Shared booked day across projects of one contract (minimum split
+      proportionally or per project; utilisation by actual hours)
+- [x] Unbooked services consume PAD (15-min increments; shortfall needs
+      Additional PAD approval before close)
+- [x] Booking start time with notice rule (default 08:00, 4 business days)
+- [x] Work packages outside the contract (billed by time, no PAD) and
+      included-visit limit (travel billed beyond it)
+- [x] Cancellation charges as share of the day rate on day-rate contracts
+- [x] One-off scheduled charges replace the "fixed price" terms component
+- [x] Baseline schedule grid vs contracted total; authorised representatives
+
 ## Backlog
-- Audit log (admin-visible change history, like Mitrandir)
+- PM ↔ project assignment (§2.1 "assigned projects" — PMs currently see all)
+- Standalone hourly activities consuming actual/8 PAD (§4.3)
+- Roster snapshot cells freeze contract rates (later terms/indexation don't
+  reach them) — decide whether cells should inherit by default
 - Customer reviewer portal
 - Forecasting/scenario UI
 - Mitrandir read-API link (service identity, customer consent)

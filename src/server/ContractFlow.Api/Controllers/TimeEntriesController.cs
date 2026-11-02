@@ -41,7 +41,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         if (timesheetId.HasValue) query = query.Where(x => x.TimesheetId == timesheetId.Value);
 
         var rows = await query.OrderBy(x => x.Date).ThenBy(x => x.CreatedUtc).ToListAsync(ct);
-        return Ok(rows.Select(ToDto));
+        return Ok(rows.Select(r => ForCaller(ToDto(r), scoped.HasValue)));
     }
 
     [HttpGet("{id:guid}")]
@@ -55,7 +55,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         if (entry is null) return NotFound();
         var scoped = await ScopedResourceIdAsync(ct);
         if (scoped.HasValue && scoped.Value != entry.ResourceId) return ForbidResult();
-        return Ok(ToDto(entry));
+        return Ok(ForCaller(ToDto(entry), scoped.HasValue));
     }
 
     [HttpPost]
@@ -76,9 +76,12 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
                 w => w.Id == req.WorkPackageId.Value && w.ProjectId == req.ProjectId, ct))
             return BadRequest(new { error = "Work package does not belong to this project." });
         if (await pad.MonthIsClosedAsync(req.ProjectId, req.Date.Year, req.Date.Month, ct))
-            return Conflict(new { error = "monthClosed", message = "The project month is closed." });
+            return MonthClosedError();
+        if (await WeekLockedAsync(resourceId!.Value, req.Date, ct)) return WeekLockedError();
         if (await AccessDeniedAsync(req.ProjectId, resourceId!.Value, ct) is { } denied)
             return denied;
+        if (await DayOverflowAsync(resourceId!.Value, req.Date, req.ActualHours, null, ct))
+            return DayOverflowError();
 
         var me = await Me(ct);
         var entry = new TimeEntry
@@ -118,9 +121,15 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         if (req.WorkPackageId.HasValue && !await Db.WorkPackages.AnyAsync(
                 w => w.Id == req.WorkPackageId.Value && w.ProjectId == req.ProjectId, ct))
             return BadRequest(new { error = "Work package does not belong to this project." });
-        if (await pad.MonthIsClosedAsync(req.ProjectId, req.Date.Year, req.Date.Month, ct))
-            return Conflict(new { error = "monthClosed", message = "The project month is closed." });
+        // Both the row's current and target project-month must be open — a
+        // row can neither move into nor out of a closed month.
+        if (await pad.MonthIsClosedAsync(req.ProjectId, req.Date.Year, req.Date.Month, ct)
+            || await pad.MonthIsClosedAsync(entry.ProjectId, entry.Date.Year, entry.Date.Month, ct))
+            return MonthClosedError();
+        if (await WeekLockedAsync(entry.ResourceId, req.Date, ct)) return WeekLockedError();
         if (await AccessDeniedAsync(req.ProjectId, entry.ResourceId, ct) is { } err) return err;
+        if (await DayOverflowAsync(entry.ResourceId, req.Date, req.ActualHours, entry.Id, ct))
+            return DayOverflowError();
 
         entry.ProjectId = req.ProjectId;
         entry.BookingId = req.BookingId;
@@ -132,6 +141,7 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         entry.Description = req.Description;
         // Moving a draft row invalidates previously computed quantities.
         entry.PayableHours = entry.BillableHours = entry.MinimumAdjustmentHours = null;
+        entry.BillableMinimumAdjustmentHours = null;
         await Db.SaveChangesAsync(ct);
         return Ok(await DtoAsync(id, ct));
     }
@@ -144,6 +154,8 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         if (entry is null) return NotFound();
         if (!await OwnsAsync(entry.ResourceId, ct)) return ForbidResult();
         if (await LockedAsync(entry.TimesheetId, ct)) return LockedError();
+        if (await pad.MonthIsClosedAsync(entry.ProjectId, entry.Date.Year, entry.Date.Month, ct))
+            return MonthClosedError();
 
         Db.TimeEntries.Remove(entry);
         await Db.SaveChangesAsync(ct);
@@ -171,16 +183,39 @@ public class TimeEntriesController(AppDbContext db, ICurrentUser currentUser, Pa
         return allowed ? null : ForbidResult();
     }
 
+    /// <summary>A resource's reported rows for one date can never exceed 24 h
+    /// in total (each row alone is only range-checked).</summary>
+    private async Task<bool> DayOverflowAsync(
+        Guid resourceId, DateOnly date, decimal hours, Guid? excludeId, CancellationToken ct)
+    {
+        var others = await Db.TimeEntries
+            .Where(x => x.ResourceId == resourceId && x.Date == date && x.Id != excludeId)
+            .Select(x => x.ActualHours).ToListAsync(ct);
+        return others.Sum() + hours > 24m;
+    }
+
+    private IActionResult DayOverflowError() => BadRequest(new
+    {
+        error = "dayOverflow",
+        message = "The day's reported hours would exceed 24.",
+    });
+
     private async Task<TimeEntryDto> DtoAsync(Guid id, CancellationToken ct) =>
-        ToDto(await Db.TimeEntries
+        ForCaller(ToDto(await Db.TimeEntries
             .Include(x => x.Resource).Include(x => x.Project).Include(x => x.WorkPackage)
             .Include(x => x.Timesheet)
-            .FirstAsync(x => x.Id == id, ct));
+            .FirstAsync(x => x.Id == id, ct)), (await ScopedResourceIdAsync(ct)).HasValue);
+
+    /// <summary>Billable quantities are customer-side (§1.1) — a Resource
+    /// caller sees actual and payable hours only.</summary>
+    private static TimeEntryDto ForCaller(TimeEntryDto dto, bool isResource) =>
+        isResource ? dto with { BillableHours = null, BillableMinimumAdjustmentHours = null } : dto;
 
     private static TimeEntryDto ToDto(TimeEntry x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
         x.BookingId, x.WorkPackageId, x.WorkPackage?.Name, x.Date, x.Category,
         x.ActualHours,
         x.Billing, x.Description, x.PayableHours, x.BillableHours,
-        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status);
+        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status,
+        x.BillableMinimumAdjustmentHours);
 }

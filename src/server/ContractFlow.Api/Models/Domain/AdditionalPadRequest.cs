@@ -30,9 +30,16 @@ public class AdditionalPadRequest
     public string? Reason { get; set; }
     /// <summary>Customer-side reference for the approval (order no, mail).</summary>
     public string? Reference { get; set; }
+    /// <summary>The prepared booking waiting on this request — approval tries
+    /// to commit it straight away, so other bookings can't take the PAD first.</summary>
+    public Guid? BookingId { get; set; }
+    public Booking? Booking { get; set; }
 
     public AdditionalPadStatus Status { get; set; } = AdditionalPadStatus.Submitted;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
     public DateTime? DecidedUtc { get; set; }
+    /// <summary>The customer's authorised representative who approved the
+    /// Additional PAD and its remuneration (free text, evidence).</summary>
+    public string? ApprovedByRepresentative { get; set; }
 }

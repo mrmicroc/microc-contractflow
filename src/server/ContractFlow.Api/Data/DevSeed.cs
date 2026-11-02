@@ -43,7 +43,7 @@ public static class DevSeed
         if (await db.Customers.AnyAsync()) return;
 
         var customer = new Customer { Name = "Example Org", ExternalReference = "EX-100" };
-        var endClient = new EndClient { Name = "North Link" };
+        var endClient = new Customer { Name = "North Link" };
 
         var contract = new Contract
         {
@@ -59,8 +59,14 @@ public static class DevSeed
             EffectiveFrom = new DateOnly(2026, 1, 1),
             Currency = "SEK",
             TimeBilling = TimeBilling.Hourly,
-            PadEnabled = true,
-            PadRate = 100m,
+            PadEnabled = false,
+            // Example stepped policy: ≥ 10 business days free, 5–9 days 50 %,
+            // fewer than 5 days the full booking.
+            CancellationSteps =
+            [
+                new CancellationStep { MinBusinessDaysBefore = 10 },
+                new CancellationStep { MinBusinessDaysBefore = 5, ChargePercent = 50m },
+            ],
             HourlyRate = 10m,
             SaturdayRate = 12m,
             SundayRate = 14m,
@@ -131,7 +137,7 @@ public static class DevSeed
         });
 
         db.Customers.Add(customer);
-        db.EndClients.Add(endClient);
+        db.Customers.Add(endClient);
         db.Contracts.Add(contract);
         db.Projects.Add(project);
         db.Resources.AddRange(consultant, employee);

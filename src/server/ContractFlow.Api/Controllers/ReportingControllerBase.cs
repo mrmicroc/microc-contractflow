@@ -1,3 +1,4 @@
+using System.Globalization;
 using ContractFlow.Api.Data;
 using ContractFlow.Api.Models.Domain;
 using ContractFlow.Api.Services;
@@ -84,7 +85,7 @@ public abstract class ReportingControllerBase(AppDbContext db, ICurrentUser curr
             .Where(t => t.Id == timesheetId)
             .Select(t => (TimesheetStatus?)t.Status)
             .FirstOrDefaultAsync(ct);
-        return status is TimesheetStatus.Submitted or TimesheetStatus.Approved;
+        return status is TimesheetStatus.Submitted or TimesheetStatus.Approved or TimesheetStatus.Invoiced;
     }
 
     protected IActionResult LockedError() => Conflict(new
@@ -92,6 +93,29 @@ public abstract class ReportingControllerBase(AppDbContext db, ICurrentUser curr
         error = "timesheetLocked",
         message = "The row belongs to a submitted timesheet — return it to draft first.",
     });
+
+    /// <summary>True when the resource's timesheet for the ISO week containing
+    /// <paramref name="date"/> is submitted or approved — a new or moved row
+    /// would be stranded outside it (never submittable, never priced).</summary>
+    protected async Task<bool> WeekLockedAsync(Guid resourceId, DateOnly date, CancellationToken ct)
+    {
+        var dt = date.ToDateTime(TimeOnly.MinValue);
+        var year = ISOWeek.GetYear(dt);
+        var week = ISOWeek.GetWeekOfYear(dt);
+        return await Db.Timesheets.AnyAsync(t =>
+            t.ResourceId == resourceId && t.Year == year && t.IsoWeek == week
+            && (t.Status == TimesheetStatus.Submitted || t.Status == TimesheetStatus.Approved
+                || t.Status == TimesheetStatus.Invoiced), ct);
+    }
+
+    protected IActionResult WeekLockedError() => Conflict(new
+    {
+        error = "weekLocked",
+        message = "That week's timesheet is already submitted or approved — return it to draft first.",
+    });
+
+    protected IActionResult MonthClosedError() =>
+        Conflict(new { error = "monthClosed", message = "The project month is closed." });
 
     protected IActionResult ForbidResult() =>
         new ObjectResult(new { error = "Forbidden." }) { StatusCode = 403 };

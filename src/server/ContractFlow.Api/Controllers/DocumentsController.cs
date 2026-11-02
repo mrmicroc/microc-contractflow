@@ -64,6 +64,8 @@ public class DocumentsController(AppDbContext db, ICurrentUser currentUser, IFil
             return BadRequest(new { error = $"File exceeds the {MaxBytes / 1024 / 1024} MB limit." });
         if (!AllowedContentTypes.Contains(file.ContentType ?? ""))
             return BadRequest(new { error = $"Content type '{file.ContentType}' is not allowed." });
+        if (!await MatchesSignatureAsync(file, ct))
+            return BadRequest(new { error = "The file content does not match its declared type." });
 
         var me = await Me(ct);
         var key = await storage.SaveAsync(
@@ -112,6 +114,12 @@ public class DocumentsController(AppDbContext db, ICurrentUser currentUser, IFil
         if (owner.Error is not null) return owner.Error;
         if (!await OwnsAsync(owner.ResourceId, ct)) return ForbidResult();
         if (owner.TimesheetLocked) return LockedError();
+        // Booking evidence is preserved (§6.3): a resource may only withdraw
+        // files they uploaded themselves; admin/PM evidence stays.
+        var me = await Me(ct);
+        if (doc.OwnerType == DocumentOwnerType.Booking && me!.Role == AppRole.Resource
+            && doc.UploadedByUserId != me.Id)
+            return ForbidResult();
 
         Db.Documents.Remove(doc);
         await Db.SaveChangesAsync(ct);
@@ -120,6 +128,25 @@ public class DocumentsController(AppDbContext db, ICurrentUser currentUser, IFil
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
+
+    /// <summary>Magic-byte check — the client-declared content type must match
+    /// the file's leading bytes (text/plain has no signature and passes).</summary>
+    private static async Task<bool> MatchesSignatureAsync(IFormFile file, CancellationToken ct)
+    {
+        var head = new byte[12];
+        await using var s = file.OpenReadStream();
+        var n = await s.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false, ct);
+        bool Starts(params byte[] sig) => n >= sig.Length && head.AsSpan(0, sig.Length).SequenceEqual(sig);
+        return file.ContentType!.ToLowerInvariant() switch
+        {
+            "application/pdf" => Starts(0x25, 0x50, 0x44, 0x46), // %PDF
+            "image/png" => Starts(0x89, 0x50, 0x4E, 0x47),
+            "image/jpeg" => Starts(0xFF, 0xD8, 0xFF),
+            "image/webp" => Starts(0x52, 0x49, 0x46, 0x46) // RIFF....WEBP
+                && n >= 12 && head.AsSpan(8, 4).SequenceEqual("WEBP"u8),
+            _ => true,
+        };
+    }
 
     /// <summary>Read = write roles + Finance (they process receipts).</summary>
     private async Task<bool> CanReadAsync(Guid resourceId, CancellationToken ct)

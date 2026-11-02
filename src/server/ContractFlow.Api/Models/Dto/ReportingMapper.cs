@@ -1,3 +1,4 @@
+using ContractFlow.Api.Services;
 using ContractFlow.Api.Models.Domain;
 
 namespace ContractFlow.Api.Models.Dto;
@@ -6,11 +7,16 @@ namespace ContractFlow.Api.Models.Dto;
 /// the entry controllers and the timesheet detail view.</summary>
 public static class ReportingMapper
 {
-    public static TimeEntryDto Entry(TimeEntry x) => new(
+    /// <param name="hideBillable">True for Resource-role callers — billable
+    /// quantities are customer-side (§1.1/§10) and never shown to them.</param>
+    public static TimeEntryDto Entry(TimeEntry x, bool hideBillable) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project.Name,
         x.BookingId, x.WorkPackageId, x.WorkPackage?.Name, x.Date, x.Category, x.ActualHours,
-        x.Billing, x.Description, x.PayableHours, x.BillableHours,
-        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status);
+        x.Billing, x.Description, x.PayableHours, hideBillable ? null : x.BillableHours,
+        x.MinimumAdjustmentHours, x.TimesheetId, x.Timesheet?.Status,
+        hideBillable ? null : x.BillableMinimumAdjustmentHours);
+
+    public static TimeEntryDto Entry(TimeEntry x) => Entry(x, hideBillable: false);
 
     public static TravelRecordDto Travel(TravelRecord x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.ProjectId, x.Project?.Name,
@@ -35,7 +41,8 @@ public static class ReportingMapper
         t.Entries.Where(e => e.Category != TimeEntryCategory.Break)
             .Sum(e => e.ActualHours));
 
-    public static MobilisationPeriodDto Mobilisation(MobilisationPeriod p) => new(
+    public static MobilisationPeriodDto Mobilisation(MobilisationPeriod p, VisitInfo? visit = null) => new(
         p.Id, p.ProjectId, p.Project.Name, p.ResourceId, p.Resource.DisplayName,
-        p.StartDate, p.EndDate, p.ConfirmedUtc, p.WorkPackageId, p.WorkPackage?.Name);
+        p.StartDate, p.EndDate, p.ConfirmedUtc, p.WorkPackageId, p.WorkPackage?.Name,
+        visit?.Number, visit?.Included, WorkPackageRules.TravelBillable(p, visit));
 }

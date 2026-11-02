@@ -31,6 +31,14 @@ public class SubcontractorStatement
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
     public DateTime? PaidUtc { get; set; }
+    public Guid? PaidByUserId { get; set; }
+    /// <summary>JSON string array of generation warnings (rows in another
+    /// currency than the statement are left out, never silently summed).</summary>
+    public string? WarningsJson { get; set; }
+    /// <summary>Set when a foreign-currency row had no month rate — it stays
+    /// out of the total and the statement can't be finalized until the rate
+    /// is entered and the draft regenerated.</summary>
+    public bool MissingExchangeRate { get; set; }
 }
 
 public enum StatementLineKind
@@ -62,4 +70,9 @@ public class StatementLine
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
     public Guid? SourceId { get; set; }
+    /// <summary>Foreign-currency source: the amount and currency as reported,
+    /// and the month rate used — null when already in the statement currency.</summary>
+    public decimal? OriginalAmount { get; set; }
+    public string? OriginalCurrency { get; set; }
+    public decimal? ExchangeRate { get; set; }
 }

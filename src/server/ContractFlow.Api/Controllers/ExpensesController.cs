@@ -40,10 +40,10 @@ public class ExpensesController(
     {
         var (resourceId, error) = await WritableResourceAsync(req.ResourceId, ct);
         if (error is not null) return error;
-        var projectError = await ValidateAsync(req.ProjectId, req.BookingId, resourceId!.Value, req.Date, ct);
+        var projectError = await ValidateAsync(req, resourceId!.Value, ct);
         if (projectError is not null) return projectError;
-        if (req.IncludedInRate && (req.ReimbursableToResource || req.RechargeableToCustomer))
-            return BadRequest(new { error = "An expense included in the rate cannot also be reimbursed or recharged." });
+        if (await WeekLockedAsync(resourceId.Value, req.Date, ct)) return WeekLockedError();
+        if (await DuplicateWarningAsync(req, resourceId.Value, null, ct) is { } dupe) return dupe;
 
         var me = await Me(ct);
         var row = new Expense
@@ -75,10 +75,11 @@ public class ExpensesController(
         if (row is null) return NotFound();
         if (!await OwnsAsync(row.ResourceId, ct)) return ForbidResult();
         if (await LockedAsync(row.TimesheetId, ct)) return LockedError();
-        var projectError = await ValidateAsync(req.ProjectId, req.BookingId, row.ResourceId, req.Date, ct);
+        var projectError = await ValidateAsync(req, row.ResourceId, ct);
         if (projectError is not null) return projectError;
-        if (req.IncludedInRate && (req.ReimbursableToResource || req.RechargeableToCustomer))
-            return BadRequest(new { error = "An expense included in the rate cannot also be reimbursed or recharged." });
+        if (await ClosedAsync(row.ProjectId, row.Date, ct)) return MonthClosedError();
+        if (await WeekLockedAsync(row.ResourceId, req.Date, ct)) return WeekLockedError();
+        if (await DuplicateWarningAsync(req, row.ResourceId, row.Id, ct) is { } dupe) return dupe;
 
         row.ProjectId = req.ProjectId;
         row.BookingId = req.BookingId;
@@ -103,37 +104,62 @@ public class ExpensesController(
         if (row is null) return NotFound();
         if (!await OwnsAsync(row.ResourceId, ct)) return ForbidResult();
         if (await LockedAsync(row.TimesheetId, ct)) return LockedError();
-        await RemoveOwnerDocumentsAsync(DocumentOwnerType.Expense, id, ct);
+        if (await ClosedAsync(row.ProjectId, row.Date, ct)) return MonthClosedError();
+        var docs = await Db.Documents
+            .Where(d => d.OwnerType == DocumentOwnerType.Expense && d.OwnerId == id)
+            .ToListAsync(ct);
+        Db.Documents.RemoveRange(docs);
         Db.Expenses.Remove(row);
         await Db.SaveChangesAsync(ct);
+        // Stored receipt files go only once the rows are gone — a failed save
+        // must never leave document rows pointing at deleted files.
+        foreach (var d in docs) await storage.DeleteAsync(d.StorageKey, ct);
         return NoContent();
     }
 
-    private async Task RemoveOwnerDocumentsAsync(
-        DocumentOwnerType ownerType, Guid ownerId, CancellationToken ct)
+    private async Task<IActionResult?> ValidateAsync(ExpenseRequest req, Guid resourceId, CancellationToken ct)
     {
-        var docs = await Db.Documents
-            .Where(d => d.OwnerType == ownerType && d.OwnerId == ownerId)
-            .ToListAsync(ct);
-        foreach (var d in docs) await storage.DeleteAsync(d.StorageKey, ct);
-        Db.Documents.RemoveRange(docs);
-    }
-
-    private async Task<IActionResult?> ValidateAsync(
-        Guid? projectId, Guid? bookingId, Guid resourceId, DateOnly date, CancellationToken ct)
-    {
-        if (projectId.HasValue)
+        if (req.IncludedInRate && (req.ReimbursableToResource || req.RechargeableToCustomer))
+            return BadRequest(new { error = "An expense included in the rate cannot also be reimbursed or recharged." });
+        // Customer recharge is per project — without one the expense would
+        // silently never reach an invoice specification.
+        if (req.RechargeableToCustomer && !req.ProjectId.HasValue)
+            return BadRequest(new { error = "A rechargeable expense needs a project." });
+        if (req.ProjectId.HasValue)
         {
-            if (!await Db.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct))
+            if (!await Db.Projects.AnyAsync(p => p.Id == req.ProjectId && p.IsActive, ct))
                 return BadRequest(new { error = "Unknown or inactive project." });
-            if (await pad.MonthIsClosedAsync(projectId.Value, date.Year, date.Month, ct))
-                return Conflict(new { error = "monthClosed", message = "The project month is closed." });
+            if (await ClosedAsync(req.ProjectId, req.Date, ct)) return MonthClosedError();
         }
-        if (bookingId.HasValue && !await Db.Bookings.AnyAsync(
-                b => b.Id == bookingId.Value && b.ResourceId == resourceId, ct))
+        if (req.BookingId.HasValue && !await Db.Bookings.AnyAsync(
+                b => b.Id == req.BookingId.Value && b.ResourceId == resourceId, ct))
             return BadRequest(new { error = "Booking does not belong to this resource." });
         return null;
     }
+
+    /// <summary>Duplicate detection (design §6.2): the same resource, date,
+    /// amount and currency already registered warns with 409 possibleDuplicate
+    /// unless the caller confirms — an expense must never be reimbursed or
+    /// recharged twice by accident.</summary>
+    private async Task<IActionResult?> DuplicateWarningAsync(
+        ExpenseRequest req, Guid resourceId, Guid? excludeId, CancellationToken ct)
+    {
+        if (req.ConfirmDuplicate) return null;
+        var currency = req.Currency.ToUpperInvariant();
+        var duplicates = await Db.Expenses
+            .Where(x => x.ResourceId == resourceId && x.Date == req.Date
+                && x.Amount == req.Amount && x.Currency == currency && x.Id != excludeId)
+            .Select(x => x.Id).ToListAsync(ct);
+        return duplicates.Count == 0 ? null : Conflict(new
+        {
+            error = "possibleDuplicate",
+            message = "An expense with the same date, amount and currency already exists.",
+            duplicates,
+        });
+    }
+
+    private async Task<bool> ClosedAsync(Guid? projectId, DateOnly date, CancellationToken ct) =>
+        projectId.HasValue && await pad.MonthIsClosedAsync(projectId.Value, date.Year, date.Month, ct);
 
     private async Task<ExpenseDto> DtoAsync(Guid id, CancellationToken ct) =>
         ToDto(await Db.Expenses

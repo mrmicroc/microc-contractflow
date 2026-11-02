@@ -20,10 +20,10 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
     {
         var me = await currentUser.GetAsync(ct);
         if (me!.Role != AppRole.Resource)
-            return Ok(await db.Projects.Where(p => p.IsActive)
+            return Ok(await WithCurrencyAsync(await db.Projects.Where(p => p.IsActive)
                 .OrderBy(p => p.Name)
-                .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive))
-                .ToListAsync(ct));
+                .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive, null))
+                .ToListAsync(ct), ct));
 
         var resourceId = await db.Resources
             .Where(r => r.UserId == me.Id).Select(r => (Guid?)r.Id).FirstOrDefaultAsync(ct);
@@ -37,11 +37,28 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             .Select(b => b.ProjectId).Distinct().ToListAsync(ct);
         var ids = accessible.Concat(booked).Distinct().ToList();
 
-        return Ok(await db.Projects
+        return Ok(await WithCurrencyAsync(await db.Projects
             .Where(p => ids.Contains(p.Id) && p.IsActive)
             .OrderBy(p => p.Name)
-            .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive))
-            .ToListAsync(ct));
+            .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive, null))
+            .ToListAsync(ct), ct));
+    }
+
+    /// <summary>Adds the currency of each project's contract terms in force
+    /// today (latest version if none has started yet).</summary>
+    private async Task<List<ProjectSummaryDto>> WithCurrencyAsync(
+        List<ProjectSummaryDto> projects, CancellationToken ct)
+    {
+        var contractIds = projects.Select(p => p.ContractId).Distinct().ToList();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var terms = await db.ContractTerms.Where(t => contractIds.Contains(t.ContractId))
+            .Select(t => new { t.ContractId, t.EffectiveFrom, t.Version, t.Currency })
+            .ToListAsync(ct);
+        var currency = terms.GroupBy(t => t.ContractId).ToDictionary(g => g.Key, g =>
+            (g.Where(t => t.EffectiveFrom <= today).OrderByDescending(t => t.EffectiveFrom)
+                 .ThenByDescending(t => t.Version).FirstOrDefault()
+             ?? g.OrderByDescending(t => t.Version).First()).Currency);
+        return projects.Select(p => p with { Currency = currency.GetValueOrDefault(p.ContractId) }).ToList();
     }
 
     [HttpGet]
@@ -73,7 +90,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             var resourceId = await db.Resources
                 .Where(r => r.UserId == me.Id).Select(r => (Guid?)r.Id)
                 .FirstOrDefaultAsync(ct);
-            if (resourceId is null) return Forbid();
+            if (resourceId is null) return Forbidden();
             var gated = await db.ProjectAccesses.AnyAsync(a => a.ProjectId == id, ct);
             var allowed = !gated
                 || await db.ProjectAccesses.AnyAsync(
@@ -82,13 +99,14 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
                     && b.ResourceId == resourceId
                     && b.Status != BookingStatus.Cancelled
                     && b.Status != BookingStatus.Rescheduled, ct);
-            if (!allowed) return Forbid();
+            if (!allowed) return Forbidden();
         }
         return Ok(await db.WorkPackages.Where(w => w.ProjectId == id)
             .Include(w => w.InfoItems)
             .OrderBy(w => w.Name)
             .Select(w => new WorkPackageDto(w.Id, w.ProjectId, w.Name, w.Notes,
-                w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList()))
+                w.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList(),
+                w.PricingMode, w.CountsAsVisit))
             .ToListAsync(ct));
     }
 
@@ -119,6 +137,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             Name = req.Name.Trim(),
             Code = req.Code,
             Description = req.Description,
+            ContractedBaselinePad = req.ContractedBaselinePad,
             IsActive = req.IsActive,
         };
         db.Projects.Add(project);
@@ -142,6 +161,7 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
         project.Name = req.Name.Trim();
         project.Code = req.Code;
         project.Description = req.Description;
+        project.ContractedBaselinePad = req.ContractedBaselinePad;
         project.IsActive = req.IsActive;
         await db.SaveChangesAsync(ct);
 
@@ -170,6 +190,12 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
             {
                 error = "hasDependents",
                 message = "Project has bookings or reported time — they anchor the audit trail and cannot be deleted.",
+            });
+        if (await db.ScheduledCharges.AnyAsync(c => c.ProjectId == id, ct))
+            return Conflict(new
+            {
+                error = "hasDependents",
+                message = "Scheduled charges bill on this project — move or delete them first.",
             });
 
         db.Projects.Remove(project);
@@ -331,15 +357,22 @@ public class ProjectsController(AppDbContext db, ICurrentUser currentUser) : Con
         return NoContent();
     }
 
+    /// <summary>403 body — <c>Forbid()</c> needs an authentication scheme,
+    /// which the dev identity doesn't register (it would throw → 500).</summary>
+    private ObjectResult Forbidden() =>
+        new(new { error = "Forbidden." }) { StatusCode = StatusCodes.Status403Forbidden };
+
     private static ProjectDetailDto ToDto(Project p) => new(
         p.Id, p.ContractId, p.Contract.Name, p.Contract.Customer.Name,
         p.Name, p.Code, p.Description, p.IsActive,
         p.WorkPackages.OrderBy(l => l.Name)
             .Select(l => new WorkPackageDto(l.Id, l.ProjectId, l.Name, l.Notes,
-                l.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList()))
+                l.InfoItems.Select(i => new WorkPackageInfoDto(i.Id, i.Type, i.Description)).ToList(),
+                l.PricingMode, l.CountsAsVisit))
             .ToList(),
         p.EstimatedQuantities
             .Select(q => new EstimatedQuantityDto(
                 q.Id, q.ProjectId, q.Label, q.Quantity, q.Unit, q.Notes))
-            .ToList());
+            .ToList(),
+        p.ContractedBaselinePad);
 }

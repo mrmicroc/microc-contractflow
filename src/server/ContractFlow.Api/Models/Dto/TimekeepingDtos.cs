@@ -9,7 +9,8 @@ public record TimeEntryDto(
     DateOnly Date, TimeEntryCategory Category,
     decimal ActualHours, EntryBilling Billing, string? Description,
     decimal? PayableHours, decimal? BillableHours,
-    decimal? MinimumAdjustmentHours, Guid? TimesheetId, TimesheetStatus? TimesheetStatus);
+    decimal? MinimumAdjustmentHours, Guid? TimesheetId, TimesheetStatus? TimesheetStatus,
+    decimal? BillableMinimumAdjustmentHours = null);
 
 public class TimeEntryRequest
 {
@@ -86,6 +87,9 @@ public class ExpenseRequest
     public bool ReimbursableToResource { get; set; }
     public bool RechargeableToCustomer { get; set; }
     public bool IncludedInRate { get; set; }
+    /// <summary>Saves despite a same-day/amount/currency look-alike — the
+    /// duplicate check warns (409 possibleDuplicate) rather than blocks.</summary>
+    public bool ConfirmDuplicate { get; set; }
 }
 
 public record AllowanceClaimDto(
@@ -109,7 +113,11 @@ public class AllowanceClaimRequest
 public record MobilisationPeriodDto(
     Guid Id, Guid ProjectId, string ProjectName, Guid ResourceId, string ResourceName,
     DateOnly StartDate, DateOnly EndDate, DateTime ConfirmedUtc,
-    Guid? WorkPackageId, string? WorkPackageName);
+    Guid? WorkPackageId, string? WorkPackageName,
+    int? VisitNumber = null, int? IncludedVisits = null, bool AdditionalTravel = false);
+// VisitNumber: the period's place in the contract's visit count (null = not a
+// visit); AdditionalTravel: its travel time bills and travel costs recharge
+// (beyond the included visits, or to a package outside the contract scope).
 
 public record MobilisationSuggestionDto(
     Guid ProjectId, string ProjectName, DateOnly StartDate, DateOnly EndDate);
@@ -159,7 +167,12 @@ public record TimesheetDetailDto(
     IReadOnlyList<TimeEntryDto> Entries,
     IReadOnlyList<TravelRecordDto> Travel,
     IReadOnlyList<ExpenseDto> Expenses,
-    IReadOnlyList<AllowanceClaimDto> Allowances);
+    IReadOnlyList<AllowanceClaimDto> Allowances,
+    IReadOnlyList<TimesheetReviewDto> Reviews);
+
+/// <summary>One step of the review history, oldest first.</summary>
+public record TimesheetReviewDto(
+    TimesheetReviewAction Action, string? Note, Guid? ByUserId, string? ByName, DateTime AtUtc);
 
 public class TimesheetSubmitRequest
 {

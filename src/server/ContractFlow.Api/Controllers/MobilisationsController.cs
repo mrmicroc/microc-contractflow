@@ -29,12 +29,19 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
     {
         var scoped = await ScopedResourceIdAsync(ct);
         var query = Db.MobilisationPeriods
-            .Include(x => x.Project).Include(x => x.Resource).AsQueryable();
+            .Include(x => x.Project).Include(x => x.Resource).Include(x => x.WorkPackage)
+            .AsQueryable();
         if (scoped.HasValue) query = query.Where(x => x.ResourceId == scoped.Value);
         else if (resourceId.HasValue) query = query.Where(x => x.ResourceId == resourceId.Value);
         if (projectId.HasValue) query = query.Where(x => x.ProjectId == projectId.Value);
-        return Ok((await query.OrderBy(x => x.StartDate).ToListAsync(ct))
-            .Select(ReportingMapper.Mobilisation));
+        var periods = await query.OrderBy(x => x.StartDate).ToListAsync(ct);
+
+        // Visit numbering runs over each whole contract, not just this page.
+        var visits = new Dictionary<Guid, VisitInfo>();
+        foreach (var contractId in periods.Select(p => p.Project.ContractId).Distinct())
+            foreach (var (k, v) in await WorkPackageRules.NumberVisitsAsync(Db, contractId, ct))
+                visits[k] = v;
+        return Ok(periods.Select(p => ReportingMapper.Mobilisation(p, visits.GetValueOrDefault(p.Id))));
     }
 
     /// <summary>Suggested periods from attendance evidence — consecutive-day
@@ -128,6 +135,7 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
         if (period is null) return NotFound();
         if (req.FromDate <= period.StartDate || req.FromDate > period.EndDate)
             return BadRequest(new { error = "Split point must lie inside the period." });
+        if (await InvoicedAsync(period.Id, ct)) return InvoicedError();
 
         var me = await Me(ct);
         var second = new MobilisationPeriod
@@ -136,6 +144,8 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
             ResourceId = period.ResourceId,
             StartDate = req.FromDate,
             EndDate = period.EndDate,
+            // Both halves mobilised to the same package — keeps the package fee.
+            WorkPackageId = period.WorkPackageId,
             ConfirmedByUserId = me?.Id,
         };
         period.EndDate = req.FromDate.AddDays(-1);
@@ -160,14 +170,26 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
     public async Task<IActionResult> Merge(Guid id, MobilisationMergeRequest req, CancellationToken ct)
     {
+        if (req.OtherId == id)
+            return BadRequest(new { error = "A period cannot merge with itself." });
         var period = await Db.MobilisationPeriods.FindAsync([id], ct);
         var other = await Db.MobilisationPeriods.FindAsync([req.OtherId], ct);
         if (period is null || other is null) return NotFound();
         if (other.ResourceId != period.ResourceId || other.ProjectId != period.ProjectId)
             return BadRequest(new { error = "Only periods of the same resource and project can merge." });
+        if (await InvoicedAsync(period.Id, ct) || await InvoicedAsync(other.Id, ct))
+            return InvoicedError();
 
-        period.StartDate = other.StartDate < period.StartDate ? other.StartDate : period.StartDate;
-        period.EndDate = other.EndDate > period.EndDate ? other.EndDate : period.EndDate;
+        var start = other.StartDate < period.StartDate ? other.StartDate : period.StartDate;
+        var end = other.EndDate > period.EndDate ? other.EndDate : period.EndDate;
+        // The union range must not swallow a third confirmed period.
+        if (await Db.MobilisationPeriods.AnyAsync(p => p.Id != period.Id && p.Id != other.Id
+                && p.ResourceId == period.ResourceId && p.ProjectId == period.ProjectId
+                && p.StartDate <= end && p.EndDate >= start, ct))
+            return Conflict(new { error = "overlap", message = "The merged range overlaps another confirmed period." });
+
+        period.StartDate = start;
+        period.EndDate = end;
         await Db.TravelRecords
             .Where(t => t.MobilisationPeriodId == other.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.MobilisationPeriodId, period.Id), ct);
@@ -198,11 +220,24 @@ public class MobilisationsController(AppDbContext db, ICurrentUser currentUser)
     {
         var period = await Db.MobilisationPeriods.FindAsync([id], ct);
         if (period is null) return NotFound();
+        if (await InvoicedAsync(period.Id, ct)) return InvoicedError();
         // TravelRecord.MobilisationPeriodId is SetNull — links release on remove.
         Db.MobilisationPeriods.Remove(period);
         await Db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    /// <summary>True when the period's fee sits on a specification that has
+    /// left Draft — reshaping it then would re-bill or orphan the fee.</summary>
+    private Task<bool> InvoicedAsync(Guid periodId, CancellationToken ct) =>
+        Db.InvoiceLines.AnyAsync(l => l.Kind == InvoiceLineKind.Mobilisation
+            && l.SourceId == periodId && l.Invoice.Status != InvoiceStatus.Draft, ct);
+
+    private IActionResult InvoicedError() => Conflict(new
+    {
+        error = "invoiced",
+        message = "The period's fee is on a specification beyond draft.",
+    });
 
     private async Task LinkTravelAsync(MobilisationPeriod period, CancellationToken ct) =>
         await Db.TravelRecords

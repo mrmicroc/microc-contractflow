@@ -45,6 +45,12 @@ public class Booking
     public string? CustomerContact { get; set; }
     /// <summary>Reference to the booking instruction/evidence (mail, order no).</summary>
     public string? EvidenceRef { get; set; }
+    /// <summary>Who at the customer requested/instructed/confirmed the day —
+    /// typically one of the contract's authorised representatives (free text).</summary>
+    public string? InstructedBy { get; set; }
+    /// <summary>When the instruction was given (verbal instructions in a
+    /// meeting count too — the evidence of a Booked Day).</summary>
+    public DateTime? InstructedAtUtc { get; set; }
 
     public BookingStatus Status { get; set; } = BookingStatus.Forecast;
     /// <summary>Separate acknowledgement flag — never releases PAD by itself.</summary>
@@ -62,6 +68,23 @@ public class Booking
     public decimal? CancellationChargeHours { get; set; }
     /// <summary>Resolved fixed cancellation fee in the contract currency.</summary>
     public decimal? CancellationChargeAmount { get; set; }
+    /// <summary>Day-rate contracts: the charged share of a day (1 = full day;
+    /// a full day whose planned hours fit the half-day ceiling bills the
+    /// half-day rate). Null = priced from <see cref="CancellationChargeHours"/>.</summary>
+    public decimal? CancellationChargeDayFraction { get; set; }
+    /// <summary>The whole booking was charged (missed deadline / below the
+    /// lowest rung) — hourly contracts then apply the daily minimum.</summary>
+    public bool CancellationChargeFull { get; set; }
+
+    /// <summary>Agreed start time (local at the work location); null = none
+    /// agreed — the terms' default start applies once the notice deadline
+    /// passes. Changes are kept in <see cref="StartTimeChanges"/>.</summary>
+    public TimeOnly? StartTime { get; set; }
+    public List<BookingStartTimeChange> StartTimeChanges { get; set; } = [];
+
+    /// <summary>Project split of a booked day shared between projects of the
+    /// same contract — empty = the whole day is <see cref="ProjectId"/>'s.</summary>
+    public List<BookingProjectShare> Shares { get; set; } = [];
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }

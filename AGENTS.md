@@ -37,8 +37,8 @@ cd src/server && dotnet build && dotnet test
 ```
 
 ## Test counts (update after adding tests)
-- Backend: 3
-- Frontend: 4 (1 test file)
+- Backend: 426
+- Frontend: 222 (27 test files)
 
 ## Gotchas
 - A running local backend (`dotnet run`) locks `ContractFlow.Api\bin` — stop it
@@ -47,6 +47,11 @@ cd src/server && dotnet build && dotnet test
   key for Release builds. No image library is referenced yet — the choice is
   deferred to Phase 2 (receipts). Evaluate SkiaSharp / Magick.NET / licensed
   ImageSharp then.
+- "Today" comes from the injected `TimeProvider` (Stockholm local date via
+  `LocalClock`). A month can only close once it has ended — tests pin
+  `factory.Clock.Set(...)` and reset it, or seed a `ProjectMonthClose` row.
+- The dev identity is registered only in Development/Testing; any other
+  environment answers 401 everywhere until Entra lands.
 - Dev identity travels in the `X-Dev-User-Id` header (`DevCurrentUser`); without
   it the API falls back to the first active Administrator. When Entra sign-in
   lands, `ICurrentUser` is the seam to re-implement from token claims.

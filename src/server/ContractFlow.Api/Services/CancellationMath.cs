@@ -30,21 +30,36 @@ public static class CancellationMath
                 .OrderBy(s => s.MinBusinessDaysBefore)   // tightest matching rung
                 .LastOrDefault();
             if (hit is null) // less notice than the lowest rung → full charge
-                return new CancellationCharge(plannedHours, null);
-            return new CancellationCharge(hit.ChargeHours, hit.ChargeAmount);
+                return new CancellationCharge(plannedHours, null, Full: true);
+            // A percentage rung charges that share of the full booking: of the
+            // planned hours (hourly / PAD) or of the day (day rate).
+            var share = hit.ChargePercent is > 0m ? hit.ChargePercent.Value / 100m : (decimal?)null;
+            if (share >= 1m && hit.ChargeHours is null && hit.ChargeDayFraction is null)
+                return new CancellationCharge(plannedHours, hit.ChargeAmount, Full: true);
+            return new CancellationCharge(
+                hit.ChargeHours ?? (share is { } s ? Math.Round(plannedHours * s, 2, MidpointRounding.AwayFromZero) : null),
+                hit.ChargeAmount,
+                DayFraction: hit.ChargeDayFraction ?? share);
         }
 
         var timely = businessDaysBefore >= fallbackDeadlineDays;
         return timely
             ? new CancellationCharge(null, null)
-            : new CancellationCharge(plannedHours, null);
+            : new CancellationCharge(plannedHours, null, Full: true);
     }
 
     /// <param name="Hours">Billed hours (PAD contracts convert to PAD
     /// utilisation; null = no hour charge).</param>
     /// <param name="Amount">Fixed cancellation fee (null = none).</param>
-    public record CancellationCharge(decimal? Hours, decimal? Amount)
+    /// <param name="Full">The whole booking is charged (missed deadline / below
+    /// the lowest rung) — on PAD contracts the full commitment is consumed,
+    /// never less than the 1.00 PAD minimum (§4.3, §6.3); on hourly contracts
+    /// the daily minimum applies; on day-rate contracts a full (or half) day.</param>
+    /// <param name="DayFraction">Day-rate contracts: the rung's share of the
+    /// day rate (0–1).</param>
+    public record CancellationCharge(
+        decimal? Hours, decimal? Amount, bool Full = false, decimal? DayFraction = null)
     {
-        public bool IsFree => Hours is not > 0m && Amount is not > 0m;
+        public bool IsFree => Hours is not > 0m && Amount is not > 0m && DayFraction is not > 0m;
     }
 }

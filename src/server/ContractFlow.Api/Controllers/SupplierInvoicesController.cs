@@ -20,7 +20,8 @@ public class SupplierInvoicesController(AppDbContext db, ICurrentUser currentUse
     public record SupplierInvoiceDto(
         Guid Id, Guid ResourceId, string ResourceName, string Number,
         DateOnly InvoiceDate, DateOnly? DueDate, string Currency, decimal TotalAmount,
-        SupplierInvoiceStatus Status, Guid? StatementId, DateTime? PaidUtc);
+        SupplierInvoiceStatus Status, Guid? StatementId, DateTime? PaidUtc,
+        string? ApprovalNote);
 
     public record SupplierInvoiceDetailDto(
         SupplierInvoiceDto Invoice, List<LineDto> Lines, List<BillingService.MatchDiff>? Diffs);
@@ -32,10 +33,11 @@ public class SupplierInvoicesController(AppDbContext db, ICurrentUser currentUse
         List<LineInput>? Lines);
     public record LineInput(StatementLineKind Kind, string Description, decimal Amount);
     public record MatchRequest(Guid StatementId);
+    public record ApproveRequest(string? Note);
 
     private static SupplierInvoiceDto ToDto(SupplierInvoice x) => new(
         x.Id, x.ResourceId, x.Resource.DisplayName, x.Number, x.InvoiceDate, x.DueDate,
-        x.Currency, x.TotalAmount, x.Status, x.StatementId, x.PaidUtc);
+        x.Currency, x.TotalAmount, x.Status, x.StatementId, x.PaidUtc, x.ApprovalNote);
 
     private static LineDto ToDto(SupplierInvoiceLine l) => new(l.Id, l.Kind, l.Description, l.Amount);
 
@@ -127,8 +129,22 @@ public class SupplierInvoicesController(AppDbContext db, ICurrentUser currentUse
             return BadRequest(new { error = "Statement belongs to another resource." });
         if (st.Status == StatementStatus.Draft)
             return BadRequest(new { error = "The statement is still a draft — finalize it first." });
+        if (!string.Equals(st.Currency, x.Currency, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new
+            {
+                error = "currencyMismatch",
+                message = $"The invoice is in {x.Currency} but the statement in {st.Currency}.",
+            });
+        // One active invoice per statement — a second match would pay twice.
+        if (await Db.SupplierInvoices.AnyAsync(o => o.Id != x.Id && o.StatementId == st.Id
+                && o.Status != SupplierInvoiceStatus.Registered, ct))
+            return Conflict(new
+            {
+                error = "statementAlreadyMatched",
+                message = "Another supplier invoice is already matched against this statement.",
+            });
 
-        var diffs = BillingService.MatchInvoice(x.Lines, st.Lines);
+        var diffs = BillingService.MatchInvoice(x.Lines, st.Lines, x.TotalAmount);
         x.StatementId = st.Id;
         x.MatchDiffJson = JsonSerializer.Serialize(diffs);
         x.Status = BillingService.MatchOutcome(diffs);
@@ -136,15 +152,28 @@ public class SupplierInvoicesController(AppDbContext db, ICurrentUser currentUse
         return Ok(new SupplierInvoiceDetailDto(ToDto(x), x.Lines.Select(ToDto).ToList(), diffs));
     }
 
-    /// <summary>Approve a matched (or discrepancy-reviewed) invoice for payment.</summary>
+    /// <summary>Approve a matched (or discrepancy-reviewed) invoice for payment.
+    /// Approving a Discrepancy requires a note explaining why.</summary>
     [HttpPost("{id:guid}/approve")]
     [RequireRole(AppRole.Administrator, AppRole.Finance)]
-    public async Task<IActionResult> Approve(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Approve(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
+        ApproveRequest? req,
+        CancellationToken ct)
     {
         var x = await LoadAsync(id, ct);
         if (x is null) return NotFound();
         if (x.Status is not (SupplierInvoiceStatus.Matched or SupplierInvoiceStatus.Discrepancy))
             return BadRequest(new { error = $"Invoice must be matched first (is {x.Status})." });
+        var note = req?.Note?.Trim();
+        if (x.Status == SupplierInvoiceStatus.Discrepancy && string.IsNullOrEmpty(note))
+            return BadRequest(new
+            {
+                error = "noteRequired",
+                message = "Approving an invoice with a discrepancy requires a note.",
+            });
+        x.ApprovalNote = string.IsNullOrEmpty(note) ? null : note;
         x.Status = SupplierInvoiceStatus.Approved;
         await Db.SaveChangesAsync(ct);
         return Ok(ToDto(x));

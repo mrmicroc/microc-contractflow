@@ -11,6 +11,10 @@ public class Project
     public string? Code { get; set; }
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
+    /// <summary>The project's contracted total baseline allocation in PAD
+    /// (e.g. the sum of a baseline schedule) — the monthly schedule is checked
+    /// against it. Null = not tracked.</summary>
+    public decimal? ContractedBaselinePad { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
     public List<WorkPackage> WorkPackages { get; set; } = [];

@@ -100,8 +100,14 @@ can produce several time reports; one journey can span several Booked Days.
 Grouped, not yet a database schema — but close.
 
 **Commercial structure**
-- `Customer`, optional `EndClient` (distinguish who pays MICROC from the end
-  client in multi-layer chains)
+- `Customer` = one organisation register for both roles. A contract names its
+  **party** (who signs and pays MICROC) and optionally an **end client** from
+  the same register — the organisation the work is ultimately for when an
+  intermediary (e.g. a larger consultancy) holds the contract. No end client =
+  direct contract. One organisation can be the party on one contract and the
+  end client on another; reports group by the *effective* end client (end
+  client, else the party), and invoice specifications carry the end client
+  and its reference, frozen at generation.
 - `Contract` → versioned `ContractTerms` (rates, PAD rules, cancellation rules,
   travel/expense policy, currency, indexation — effective-dated, never
   rewritten)
@@ -193,13 +199,16 @@ utilised 2.50, committed 4.00 → free 2.50. All eight categories (baseline,
 carry-over, committed, utilised, free, additional, expired, next-month-borrowed)
 are shown individually and reconcilable.
 
-### 4.3 Contract rules (configurable per contract; first config = the SSE model)
+### 4.3 Contract rules (configurable per contract; first config = the initial PAD contract)
 
 - 1 PAD = 8 h; a confirmed Booked Day commits **min 1.00 PAD** per inspector;
   longer days proportionally more; standalone hourly activities consume
   actual/8 with no minimum.
-- **Carry-over**: only unused *baseline* generates it; max 20 % of unused
-  baseline rounded up to whole PAD, capped at actual unused; moves only to the
+- **Carry-over**: only unused *baseline* generates it; max 20 % of the
+  *unused* baseline rounded up to whole PAD, capped at actual unused
+  (baseline 12, 3 used → 9 unused → 1.8 → 2 carried; 11.5 used → 0.5 unused →
+  0.5 carried). Basis (unused or whole baseline), percentage and rounding step
+  are contract settings; moves only to the
   immediately following month; **carry-over is consumed before baseline**;
   cannot be carried again; expires at end of receiving month; project-specific;
   may enter a month with zero baseline.
@@ -257,7 +266,8 @@ years later.
 
 Worked examples that become tests (from the spec):
 - 6 h across projects A+B with 8 h minimum → A 2.67 h / B 5.33 h.
-- 10 baseline days, 7 used → carry-over 2 (20 % of 10, rounded up), 1 expires.
+- 10 baseline days, 7 used → 3 unused → carry-over 1 (20 % of 3 = 0.6, rounded
+  up), 2 expire. (With the whole-baseline basis: 20 % of 10 → 2 carried, 1 expires.)
 - Saturday 10 h, ordinary 8 → 8 h × Sat rate + 2 h × Sat rate × 1.75.
 - Expense 1 200 + 10 % mark-up → 1 320.
 - Mobilisation fixed fee regardless of actual cost.
@@ -296,7 +306,9 @@ Approval: Draft → Submitted → Under review → Approved / Returned / Rejecte
    → included in SubcontractorStatement
 Duplicate detection warns; an expense can never be reimbursed or recharged twice.
 Three flags per expense line: reimbursable-to-resource / rechargeable-to-customer /
-   included-in-rate — independent booleans.
+   included-in-rate — reimbursable and rechargeable are independent; included-in-rate
+   excludes both (the cost is already covered by the rate). A rechargeable line
+   needs a project.
 Later: supplier invoice registered → matched against statement → diffs shown.
 ```
 
@@ -442,14 +454,25 @@ and receipt files via SMB.
 
 From the Devin doc's list plus what the spec leaves open:
 
-1. **Which contract model first?** The spec names LT360/LT14 (PAD model) as
-   initial projects but also details a TenneT hourly reference. Both engines
+1. **Which contract model first?** The spec names two PAD-model projects as
+   initial projects but also details an hourly reference contract. Both engines
    are designed anyway — confirm PAD-first matches reality. *Also: actual
    contract values (rates, baselines) are entered as configuration — nothing
    real goes into seeds or tests.*
 2. **Rounding**: per day, per invoice line, or per invoice — per contract?
-3. **Unused non-transferable PAD**: expire silently or billed anyway?
-4. **Currencies**: how many, and which date governs the conversion rate?
+3. ~~**Unused non-transferable PAD**: expire silently or billed anyway?~~
+   Decided per contract (`PadInvoicing`): lump-sum PAD contracts bill expired
+   PAD in the month it expires (consumed allocation = opening carry + baseline
+   − carry-out); other contracts bill utilised PAD only.
+4. ~~**Currencies**: how many, and which date governs the conversion rate?~~
+   Decided: any ISO currency per row (expenses, per diem). At month end the
+   rows are summed per currency and converted to the document currency
+   (contract terms for the invoice specification, compensation agreement for
+   the statement) at the rate of the document's month, from a per-month rate
+   table entered by finance. Original amount, currency and rate stay on every
+   converted line; a missing rate keeps the rows out and blocks finalizing; a
+   rate that priced a document beyond draft is locked. Automated import from a
+   central bank is a later option.
 5. **Offline reporting** on sites without coverage — needed or out of scope?
 6. **Per diem**: follow Skatteverket payroll rules, or internal policy per
    subcontractor agreement?

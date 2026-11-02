@@ -9,7 +9,7 @@ namespace ContractFlow.Api.Controllers;
 
 [ApiController]
 [Route("api/contracts")]
-public class ContractsController(AppDbContext db) : ControllerBase
+public class ContractsController(AppDbContext db, BillingService billing) : ControllerBase
 {
     [HttpGet]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager, AppRole.Finance)]
@@ -20,7 +20,7 @@ public class ContractsController(AppDbContext db) : ControllerBase
             query = query.Where(c => c.CustomerId == customerId.Value);
 
         var contracts = await query
-            .Include(c => c.TermsVersions)
+            .Include(c => c.TermsVersions).Include(c => c.ScheduledCharges)
             .OrderBy(c => c.Name)
             .ToListAsync(ct);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -37,14 +37,14 @@ public class ContractsController(AppDbContext db) : ControllerBase
         var contract = await db.Contracts
             .Include(c => c.Customer)
             .Include(c => c.EndClient)
-            .Include(c => c.TermsVersions)
+            .Include(c => c.TermsVersions).Include(c => c.ScheduledCharges)
             .Include(c => c.Projects)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
 
         return Ok(new ContractDetailDto(
             contract.Id, contract.CustomerId, contract.Customer.Name,
-            contract.EndClientId, contract.EndClient?.Name,
+            contract.EndClientId, contract.EndClient?.Name, contract.EndClientReference,
             contract.Name, contract.ExternalReference,
             ComponentsOf(contract, DateOnly.FromDateTime(DateTime.UtcNow)),
             contract.StartDate, contract.EndDate, contract.IsActive,
@@ -54,6 +54,9 @@ public class ContractsController(AppDbContext db) : ControllerBase
             contract.Projects
                 .OrderBy(p => p.Name)
                 .Select(p => new ProjectSummaryDto(p.Id, p.ContractId, p.Name, p.Code, p.IsActive))
+                .ToList(),
+            contract.Representatives
+                .Select(r => new AuthorisedRepresentativeDto(r.Name, r.Email, r.Phone, r.Authority))
                 .ToList()));
     }
 
@@ -76,23 +79,19 @@ public class ContractsController(AppDbContext db) : ControllerBase
     [RequireRole(AppRole.Administrator)]
     public async Task<IActionResult> Create(ContractRequest req, CancellationToken ct)
     {
-        if (!await db.Customers.AnyAsync(c => c.Id == req.CustomerId, ct))
-            return BadRequest(new { error = "Unknown customer." });
-        if (req.EndClientId.HasValue &&
-            !await db.EndClients.AnyAsync(e => e.Id == req.EndClientId.Value, ct))
-            return BadRequest(new { error = "Unknown end client." });
-        if (req.EndDate.HasValue && req.EndDate.Value < req.StartDate)
-            return BadRequest(new { error = "End date cannot precede start date." });
+        if (await ValidatePartiesAsync(req, ct) is { } invalid) return invalid;
 
         var contract = new Contract
         {
             CustomerId = req.CustomerId,
-            EndClientId = req.EndClientId,
+            EndClientId = EndClientOf(req),
+            EndClientReference = EndClientOf(req) is null ? null : req.EndClientReference,
             Name = req.Name.Trim(),
             ExternalReference = req.ExternalReference,
             StartDate = req.StartDate,
             EndDate = req.EndDate,
             IsActive = req.IsActive,
+            Representatives = Representatives(req),
         };
         db.Contracts.Add(contract);
         await db.SaveChangesAsync(ct);
@@ -109,24 +108,20 @@ public class ContractsController(AppDbContext db) : ControllerBase
     {
         var contract = await db.Contracts.FindAsync([id], ct);
         if (contract is null) return NotFound();
-        if (!await db.Customers.AnyAsync(c => c.Id == req.CustomerId, ct))
-            return BadRequest(new { error = "Unknown customer." });
-        if (req.EndClientId.HasValue &&
-            !await db.EndClients.AnyAsync(e => e.Id == req.EndClientId.Value, ct))
-            return BadRequest(new { error = "Unknown end client." });
-        if (req.EndDate.HasValue && req.EndDate.Value < req.StartDate)
-            return BadRequest(new { error = "End date cannot precede start date." });
+        if (await ValidatePartiesAsync(req, ct) is { } invalid) return invalid;
 
         contract.CustomerId = req.CustomerId;
-        contract.EndClientId = req.EndClientId;
+        contract.EndClientId = EndClientOf(req);
+        contract.EndClientReference = EndClientOf(req) is null ? null : req.EndClientReference;
         contract.Name = req.Name.Trim();
         contract.ExternalReference = req.ExternalReference;
         contract.StartDate = req.StartDate;
         contract.EndDate = req.EndDate;
         contract.IsActive = req.IsActive;
+        contract.Representatives = Representatives(req);
         await db.SaveChangesAsync(ct);
 
-        var fresh = await db.Contracts.Include(c => c.TermsVersions)
+        var fresh = await db.Contracts.Include(c => c.TermsVersions).Include(c => c.ScheduledCharges)
             .FirstAsync(c => c.Id == id, ct);
         return Ok(new ContractSummaryDto(fresh.Id, fresh.CustomerId, fresh.Name,
             fresh.ExternalReference,
@@ -208,6 +203,16 @@ public class ContractsController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "Unsupported holiday calendar." });
         if (req.Currency.Length != 3 || !req.Currency.All(char.IsAsciiLetter))
             return BadRequest(new { error = "Currency must be a three-letter code." });
+        if (req.CancellationSteps.Any(s => s.ChargeDayFraction is < 0m or > 1m))
+            return BadRequest(new { error = "A cancellation day fraction must lie between 0 and 1." });
+        if (req.CancellationSteps.Any(s => s.ChargePercent is < 0m or > 100m))
+            return BadRequest(new { error = "A cancellation percentage must lie between 0 and 100." });
+        if (req.ExpenseMarkupError() is { } markupError)
+            return BadRequest(new { error = markupError });
+        // Effective-dated, never rewritten (§3): a version may not reach back
+        // into a month a non-draft specification already billed.
+        if (await billing.TermsChangeBlockedAsync(id, req.EffectiveFrom, null, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
 
         var nextVersion = await db.ContractTerms
             .Where(t => t.ContractId == id)
@@ -228,19 +233,16 @@ public class ContractsController(AppDbContext db) : ControllerBase
             OvertimeAfterHours = req.OvertimeAfterHours,
             OvertimePercent = req.OvertimePercent,
             MobilisationFee = req.MobilisationFee,
+            IncludedVisits = req.IncludedVisits,
             ExpenseMarkupPercent = req.ExpenseMarkupPercent,
             TimeBilling = req.TimeBilling,
             PadEnabled = req.PadEnabled,
-            FixedPriceEnabled = req.FixedPriceEnabled,
             DayRate = req.DayRate,
             SaturdayDayRate = req.SaturdayDayRate,
             SundayDayRate = req.SundayDayRate,
             HolidayDayRate = req.HolidayDayRate,
             HalfDayRate = req.HalfDayRate,
             HalfDayMaxHours = req.HalfDayMaxHours,
-            FixedPriceAmount = req.FixedPriceAmount,
-            FixedPriceDate = req.FixedPriceDate,
-            FixedPriceNote = req.FixedPriceNote,
             PadHoursPerDay = req.PadHoursPerDay,
             CarryOverMonths = req.CarryOverMonths,
             CancellationSteps = req.CancellationSteps
@@ -249,6 +251,8 @@ public class ContractsController(AppDbContext db) : ControllerBase
                     MinBusinessDaysBefore = s.MinBusinessDaysBefore,
                     ChargeHours = s.ChargeHours,
                     ChargeAmount = s.ChargeAmount,
+                    ChargeDayFraction = s.ChargeDayFraction,
+                    ChargePercent = s.ChargePercent,
                 })
                 .OrderByDescending(s => s.MinBusinessDaysBefore)
                 .ToList(),
@@ -261,6 +265,8 @@ public class ContractsController(AppDbContext db) : ControllerBase
             Indexation = req.Indexation,
             Notes = req.Notes,
         };
+        req.ApplyPadRules(terms);
+        req.ApplyExpenseMarkups(terms);
         db.ContractTerms.Add(terms);
         await db.SaveChangesAsync(ct);
 
@@ -275,14 +281,45 @@ public class ContractsController(AppDbContext db) : ControllerBase
         var terms = await db.ContractTerms
             .FirstOrDefaultAsync(t => t.Id == termId && t.ContractId == id, ct);
         if (terms is null) return NotFound();
+        if (await billing.TermsChangeBlockedAsync(id, terms.EffectiveFrom, terms.Id, ct) is { } why)
+            return Conflict(new { error = "billedHistory", message = why });
 
         db.ContractTerms.Remove(terms);
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
+    /// <summary>Party and end client both come from the organisation
+    /// register; an end client equal to the party means a direct contract.</summary>
+    private async Task<IActionResult?> ValidatePartiesAsync(ContractRequest req, CancellationToken ct)
+    {
+        if (!await db.Customers.AnyAsync(c => c.Id == req.CustomerId, ct))
+            return BadRequest(new { error = "Unknown customer." });
+        if (EndClientOf(req) is { } endClientId &&
+            !await db.Customers.AnyAsync(c => c.Id == endClientId, ct))
+            return BadRequest(new { error = "Unknown end client." });
+        if (req.EndDate.HasValue && req.EndDate.Value < req.StartDate)
+            return BadRequest(new { error = "End date cannot precede start date." });
+        return null;
+    }
+
+    /// <summary>Stored end client — null on a direct contract (none given, or
+    /// the party itself picked).</summary>
+    private static List<AuthorisedRepresentative> Representatives(ContractRequest req) =>
+        req.Representatives
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+            .Select(r => new AuthorisedRepresentative
+            {
+                Name = r.Name.Trim(), Email = r.Email, Phone = r.Phone, Authority = r.Authority,
+            })
+            .ToList();
+
+    private static Guid? EndClientOf(ContractRequest req) =>
+        req.EndClientId == req.CustomerId ? null : req.EndClientId;
+
     /// <summary>Billing-component keys active on the terms version in force on
-    /// <paramref name="date"/> — "hourly" / "dailyRate" / "pad" / "fixedPrice".
+    /// <paramref name="date"/> — "hourly" / "dailyRate" / "pad", plus "scheduledCharges"
+    /// when the contract carries one-off dated amounts (needs ScheduledCharges loaded).
     /// Empty when no version is in force yet.</summary>
     public static List<string> ComponentsOf(Contract contract, DateOnly date)
     {
@@ -295,26 +332,27 @@ public class ContractsController(AppDbContext db) : ControllerBase
         if (t.TimeBilling == TimeBilling.Hourly) list.Add("hourly");
         if (t.TimeBilling == TimeBilling.DailyRate) list.Add("dailyRate");
         if (t.PadEnabled) list.Add("pad");
-        if (t.FixedPriceEnabled) list.Add("fixedPrice");
+        if (contract.ScheduledCharges.Count > 0) list.Add("scheduledCharges");
         return list;
     }
 
     private static ContractTermsDto ToDto(ContractTerms t) => new(
         t.Id, t.ContractId, t.Version, t.EffectiveFrom, t.CreatedUtc,
-        t.Currency, t.TimeBilling, t.PadEnabled, t.FixedPriceEnabled,
+        t.Currency, t.TimeBilling, t.PadEnabled,
         t.PadRate, t.HourlyRate, t.SaturdayRate, t.SundayRate,
         t.HolidayRate, t.OvertimeAfterHours, t.OvertimePercent, t.MobilisationFee,
         t.ExpenseMarkupPercent,
         t.DayRate, t.SaturdayDayRate, t.SundayDayRate, t.HolidayDayRate,
         t.HalfDayRate, t.HalfDayMaxHours,
-        t.FixedPriceAmount, t.FixedPriceDate, t.FixedPriceNote,
         t.PadHoursPerDay, t.MinPadPerBookedDay,
         t.CarryOverMaxPercent, t.CarryOverMonths,
         t.CancellationDeadlineBusinessDays,
         t.CancellationSteps
             .Select(s => new CancellationStepDto(
-                s.MinBusinessDaysBefore, s.ChargeHours, s.ChargeAmount))
+                s.MinBusinessDaysBefore, s.ChargeHours, s.ChargeAmount, s.ChargeDayFraction, s.ChargePercent))
             .ToList(),
         t.HolidayCalendar, t.MinBillableHoursPerDay,
-        t.TravelExpensePolicy, t.Indexation, t.Notes);
+        t.TravelExpensePolicy, t.Indexation, t.Notes, t.IncludedVisits,
+        PadRulesDto.From(t),
+        t.ExpenseMarkups.Select(m => new ExpenseMarkupDto(m.Category, m.Percent)).ToList());
 }

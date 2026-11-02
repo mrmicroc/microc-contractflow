@@ -23,8 +23,17 @@ public class InvoiceSpecification
     public Project Project { get; set; } = null!;
     public int Year { get; set; }
     public int Month { get; set; }
+    /// <summary>0 = the month's original spec; 1.. = supplements billing rows
+    /// approved after an earlier revision left draft.</summary>
+    public int Revision { get; set; }
 
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
+    /// <summary>Party and end client as they stood when the spec was last
+    /// generated — an issued spec never changes when the register is edited.
+    /// Null on specs generated before the snapshot existed (read live).</summary>
+    public string? CustomerName { get; set; }
+    public string? EndClientName { get; set; }
+    public string? EndClientReference { get; set; }
     public required string Currency { get; set; }
     public decimal TotalAmount { get; set; }
     public string? Notes { get; set; }
@@ -34,7 +43,17 @@ public class InvoiceSpecification
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedByUserId { get; set; }
     public DateTime? IssuedUtc { get; set; }
+    public Guid? IssuedByUserId { get; set; }
     public DateTime? PaidUtc { get; set; }
+    public Guid? PaidByUserId { get; set; }
+    /// <summary>JSON string array of generation warnings (currency mismatch,
+    /// unreviewed rate cells, PAD without rate…) — rows behind a warning are
+    /// left out of the total, never silently summed.</summary>
+    public string? WarningsJson { get; set; }
+    /// <summary>Set when a foreign-currency row had no month rate — it stays
+    /// out of the total and the spec can't be finalized or issued until the
+    /// rate is entered and the draft regenerated.</summary>
+    public bool MissingExchangeRate { get; set; }
 }
 
 public enum InvoiceLineKind
@@ -47,14 +66,29 @@ public enum InvoiceLineKind
     Mobilisation,
     /// <summary>Utilised PAD × PAD rate (PAD-component contracts).</summary>
     Pad,
-    /// <summary>One-off fixed price (lump-sum component) on its dated month.</summary>
+    /// <summary>Legacy: the former one-off "fixed price" terms component —
+    /// kept so historical specifications still read. New one-off amounts are
+    /// <see cref="ScheduledCharge"/> lines.</summary>
     FixedPrice,
+    /// <summary>A contract's one-off dated amount (milestone, instalment).</summary>
+    ScheduledCharge,
+    /// <summary>Travel time / travel costs billed because the mobilisation
+    /// was additional (beyond the included visits, or to a package outside
+    /// the contract's scope).</summary>
+    Travel,
     /// <summary>Cancellation charge — hours or a fixed fee resolved by the
     /// terms' cancellation ladder (non-PAD contracts; PAD contracts charge via
     /// utilised PAD instead).</summary>
     Cancellation,
     /// <summary>Free-text/manual line (adjustments stay explicit).</summary>
     Manual,
+    /// <summary>Customer-approved Additional PAD consumed beyond the month's
+    /// allocation — always separate from the allocation line (SourceId = the
+    /// approving request).</summary>
+    AdditionalPad,
+    /// <summary>Additional PAD incurred automatically (a booked day continuing
+    /// past every other source, or unbooked services beyond free PAD).</summary>
+    AutoAdditionalPad,
 }
 
 public class InvoiceLine
@@ -73,6 +107,14 @@ public class InvoiceLine
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
-    /// <summary>Source row, for drill-down (TimeEntry day-group → null; Expense → its id).</summary>
+    /// <summary>Source row, for drill-down and double-billing guards: Expense,
+    /// MobilisationPeriod or cancelled Booking id (hours lines → null; their
+    /// entries point back via TimeEntry.InvoiceSpecificationId).</summary>
     public Guid? SourceId { get; set; }
+    /// <summary>Foreign-currency source: the amount and currency as reported,
+    /// and the month rate used — null when the source was already in the
+    /// spec currency (design §9.3: originals kept beside the conversion).</summary>
+    public decimal? OriginalAmount { get; set; }
+    public string? OriginalCurrency { get; set; }
+    public decimal? ExchangeRate { get; set; }
 }

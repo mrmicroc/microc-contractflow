@@ -1,4 +1,5 @@
-import type { BookingStatus } from './types';
+import { monthRange } from './dates';
+import type { Booking, BookingRequestBody, BookingStatus } from './types';
 
 /** Actions the UI can offer per booking status + caller rights. */
 export type BookingAction =
@@ -7,8 +8,9 @@ export type BookingAction =
 
 /**
  * Mirrors the server's transition rules (BookingsController):
- * - manage (Admin/PM): full lifecycle incl. confirm/cancel/reschedule
- * - owner (the booking's resource): acknowledge/start/complete only
+ * - manage (Admin/PM): full lifecycle incl. confirm/complete/cancel/reschedule
+ * - owner (the booking's resource): acknowledge/start only — completing
+ *   consumes customer PAD, which follows MICROC approval (§6.1)
  */
 export function availableActions(
   status: BookingStatus,
@@ -28,16 +30,15 @@ export function availableActions(
       }
       break;
     case 'confirmed':
-      if (canManage || isOwner) { actions.add('acknowledge'); actions.add('start'); actions.add('complete'); }
-      if (canManage) { actions.add('cancel'); actions.add('reschedule'); }
+      if (canManage || isOwner) { actions.add('acknowledge'); actions.add('start'); }
+      if (canManage) { actions.add('complete'); actions.add('cancel'); actions.add('reschedule'); }
       break;
     case 'acknowledged':
-      if (canManage || isOwner) { actions.add('start'); actions.add('complete'); }
-      if (canManage) { actions.add('cancel'); actions.add('reschedule'); }
+      if (canManage || isOwner) actions.add('start');
+      if (canManage) { actions.add('complete'); actions.add('cancel'); actions.add('reschedule'); }
       break;
     case 'inProgress':
-      if (canManage || isOwner) actions.add('complete');
-      if (canManage) { actions.add('cancel'); actions.add('reschedule'); }
+      if (canManage) { actions.add('complete'); actions.add('cancel'); actions.add('reschedule'); }
       break;
     default:
       break; // terminal statuses — no actions
@@ -99,4 +100,150 @@ export function statusClasses(status: BookingStatus): string {
     case 'cancelled': return 'bg-slate-200 text-slate-500 line-through';
     case 'rescheduled': return 'bg-slate-200 text-slate-500 line-through';
   }
+}
+
+export type CalendarView = 'month' | 'week' | 'day';
+
+/**
+ * The date window the planning calendar loads for a view: the real month
+ * (28–31 days — never "-31" on short months), the Monday–Sunday week around
+ * the anchor, or the anchor day itself.
+ */
+export function viewRange(
+  view: CalendarView, ym: { year: number; month: number }, anchorIso: string,
+): { from: string; to: string } {
+  if (view === 'month') return monthRange(ym.year, ym.month);
+  if (view === 'week') {
+    const w = weekDates(anchorIso);
+    return { from: w[0], to: w[6] };
+  }
+  return { from: anchorIso, to: anchorIso };
+}
+
+/** The editable subset of a booking update (the Plan edit form). */
+export interface BookingEdits {
+  date: string;
+  plannedHours: number | null;
+  workDescription: string;
+  activityRef: string;
+  status: BookingRequestBody['status'];
+  /** Optional — omitted means "keep the booking's value". */
+  customerContact?: string;
+  evidenceRef?: string;
+  instructedBy?: string;
+  /** "HH:mm"; '' clears the agreed start time; omitted keeps it. */
+  startTime?: string;
+}
+
+/**
+ * Full PUT body for a booking edit. The server replaces fields wholesale, so
+ * every field the form doesn't touch (work package, customer contact,
+ * evidence ref, resource, project) is carried over from the booking.
+ */
+export function bookingUpdateBody(b: Booking, edits: BookingEdits): BookingRequestBody {
+  return {
+    projectId: b.projectId,
+    resourceId: b.resourceId,
+    workPackageId: b.workPackageId,
+    date: edits.date,
+    plannedHours: edits.plannedHours ?? b.plannedHours,
+    activityRef: edits.activityRef.trim() || null,
+    workDescription: edits.workDescription.trim() || null,
+    customerContact: edits.customerContact === undefined
+      ? b.customerContact : edits.customerContact.trim() || null,
+    evidenceRef: edits.evidenceRef === undefined
+      ? b.evidenceRef : edits.evidenceRef.trim() || null,
+    status: edits.status,
+    instructedBy: edits.instructedBy === undefined
+      ? b.instructedBy ?? null : edits.instructedBy.trim() || null,
+    instructedAtUtc: b.instructedAtUtc ?? null,
+    ...startTimeEdit(b.startTime ?? null, edits.startTime),
+  };
+}
+
+/** Start-time part of an update: unchanged → nothing sent (the server keeps
+ * it); '' on a booking with a start time → clear; a new value → "HH:mm:00". */
+export function startTimeEdit(
+  current: string | null, edited: string | undefined,
+): Pick<BookingRequestBody, 'startTime' | 'clearStartTime'> {
+  if (edited === undefined) return {};
+  const now = edited.trim();
+  if (!now) return current ? { clearStartTime: true } : {};
+  const value = `${now.slice(0, 5)}:00`;
+  return current && current.slice(0, 5) === now.slice(0, 5) ? {} : { startTime: value };
+}
+
+/**
+ * The committed booking a time row on `date` + `projectId` reports against —
+ * so booked (PAD-covered) days are linked and never billed twice as hours.
+ * Terminal and pre-commitment bookings never match; ambiguous days (several
+ * candidates) don't auto-link.
+ */
+export function matchBooking(
+  bookings: Booking[], date: string, projectId: string, resourceId?: string,
+): Booking | null {
+  const live = bookings.filter((b) =>
+    b.date === date && b.projectId === projectId
+    && (!resourceId || b.resourceId === resourceId)
+    && !isTerminal(b.status) && !PRE_COMMITMENT.includes(b.status));
+  return live.length === 1 ? live[0] : null;
+}
+
+/** PAD consequences the cancel/reschedule endpoints report. */
+export const PAD_EFFECTS = ['none', 'released', 'utilised', 'partial', 'charged'] as const;
+
+/** i18n key describing a cancellation's PAD consequence (unknown → none). */
+export function padEffectKey(effect: string | null | undefined): string {
+  return `booking.padEffect.${(PAD_EFFECTS as readonly string[]).includes(effect ?? '') ? effect : 'none'}`;
+}
+
+/** i18n key for what happened to a reschedule's replacement booking — the
+ * user must learn when it stayed unconfirmed (insufficient PAD, closed month
+ * or a pre-commitment original). */
+export function rescheduleOutcomeKey(r: {
+  replacementConfirmed: boolean; insufficientPad?: boolean; replacement?: { status: BookingStatus };
+}): string {
+  if (r.replacementConfirmed) return 'booking.rescheduleConfirmed';
+  if (r.insufficientPad) return 'booking.rescheduleInsufficientPad';
+  if (r.replacement && PRE_COMMITMENT.includes(r.replacement.status))
+    return 'booking.rescheduleKeptStatus';
+  return 'booking.rescheduleNotConfirmed';
+}
+
+/** Continuation-overrun split returned by POST /complete (§4.3 ①–④). */
+export interface OverrunSplit {
+  fromCurrentFree: number;
+  fromAdditional: number;
+  fromNextMonthBaseline: number;
+  autoAdditional: number;
+  nextMonthConflict: boolean;
+}
+
+export const OVERRUN_SOURCES = [
+  'fromCurrentFree', 'fromAdditional', 'fromNextMonthBaseline', 'autoAdditional',
+] as const;
+
+/** The non-zero overrun sources in allocation order — what the planner is
+ * told after completing a booking that ran over its commitment. */
+export function overrunParts(s: OverrunSplit | null | undefined):
+  { source: (typeof OVERRUN_SOURCES)[number]; amount: number }[] {
+  if (!s) return [];
+  return OVERRUN_SOURCES
+    .map((source) => ({ source, amount: s[source] }))
+    .filter((p) => p.amount > 0);
+}
+
+/** Additional PAD a refused confirm still needs: needed − free (free never
+ * counts below zero), rounded up to 2 decimals so the request covers it. */
+export function additionalPadShortfall(neededPad: number, freePad: number): number {
+  const short = neededPad - Math.max(0, freePad);
+  return short <= 0 ? 0 : Math.ceil(short * 100 - 1e-9) / 100;
+}
+
+/** Conflict-warning tooltip text for a booking chip. */
+export function bookingTooltip(
+  b: Booking, warningLabel: (code: string) => string,
+): string {
+  const base = `${b.resourceName} · ${b.projectName}`;
+  return b.warnings.length ? `${base}\n⚠ ${b.warnings.map(warningLabel).join(', ')}` : base;
 }

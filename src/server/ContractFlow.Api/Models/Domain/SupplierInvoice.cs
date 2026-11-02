@@ -43,6 +43,8 @@ public class SupplierInvoice
     /// ([{kind, invoiced, statement, diff}]) — kept so a regenerated statement
     /// doesn't silently rewrite history.</summary>
     public string? MatchDiffJson { get; set; }
+    /// <summary>Why a Discrepancy was approved anyway — required then.</summary>
+    public string? ApprovalNote { get; set; }
 
     public List<SupplierInvoiceLine> Lines { get; set; } = [];
 

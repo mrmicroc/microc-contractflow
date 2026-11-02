@@ -163,7 +163,13 @@ public class BookingsTests(ContractFlowWebApplicationFactory factory)
         Assert.Equal(1m, dash!.CommittedOpen);
         Assert.Equal(4m, dash.Free);
 
-        var completed = await admin.PostAsync($"/api/bookings/{booking.Id}/complete", null);
+        // Completion never runs ahead of the booked date.
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await admin.PostAsync($"/api/bookings/{booking.Id}/complete", null)).StatusCode);
+        factory.Clock.Set(new DateOnly(2027, 4, 7));
+        HttpResponseMessage completed;
+        try { completed = await admin.PostAsync($"/api/bookings/{booking.Id}/complete", null); }
+        finally { factory.Clock.Reset(); }
         var result = await completed.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("completed", result.GetProperty("booking").GetProperty("status").GetString());
         Assert.Equal(1m, result.GetProperty("padUtilised").GetDecimal());

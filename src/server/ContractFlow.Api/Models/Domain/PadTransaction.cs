@@ -48,6 +48,15 @@ public class PadTransaction
     public int? OriginMonth { get; set; }
     /// <summary>The request behind AdditionalApproved rows, when any.</summary>
     public Guid? AdditionalPadRequestId { get; set; }
+    /// <summary>The unbooked time entry behind Utilise/AutoAdditional rows
+    /// written at timesheet approval (time without a booked day consuming
+    /// PAD). A reopened timesheet appends negative rows with the same id —
+    /// the ledger stays append-only and the entry's net consumption is 0.</summary>
+    public Guid? TimeEntryId { get; set; }
+    /// <summary>AutoAdditional incurred by new services (not by continuing a
+    /// booked day) — needs the customer's Additional PAD approval; a blocking
+    /// close item until approved requests cover it.</summary>
+    public bool RequiresApproval { get; set; }
     public string? Note { get; set; }
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;

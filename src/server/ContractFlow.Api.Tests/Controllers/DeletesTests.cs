@@ -50,31 +50,6 @@ public class DeletesTests(ContractFlowWebApplicationFactory factory)
             (await pm.DeleteAsync($"/api/customers/{ids.CustomerId}")).StatusCode);
     }
 
-    // ── end clients ─────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task EndClient_ReferencedByContract_DeletesAndContractSurvives()
-    {
-        var admin = Admin;
-        var ec = await (await admin.PostAsJsonAsync("/api/endclients",
-            new { name = "End Client X" })).Content.ReadFromJsonAsync<Scaffold.IdRef>();
-        var ids = await GraphAsync("ec-ref");
-        // re-point the scaffold contract at the end client
-        var contract = await admin.GetFromJsonAsync<JsonElement>($"/api/contracts/{ids.ContractId}");
-        await admin.PutAsJsonAsync($"/api/contracts/{ids.ContractId}", new
-        {
-            customerId = ids.CustomerId,
-            endClientId = ec!.Id,
-            name = contract.GetProperty("name").GetString(),
-            startDate = "2026-01-01",
-        });
-
-        Assert.Equal(HttpStatusCode.NoContent,
-            (await admin.DeleteAsync($"/api/endclients/{ec.Id}")).StatusCode);
-        var after = await admin.GetFromJsonAsync<JsonElement>($"/api/contracts/{ids.ContractId}");
-        Assert.Equal(JsonValueKind.Null, after.GetProperty("endClientId").ValueKind);
-    }
-
     // ── contracts & terms ───────────────────────────────────────────────────
 
     [Fact]

@@ -3,7 +3,11 @@ import { useTranslation } from 'react-i18next';
 import {
   createContract, deleteContract, errorMessage, getContract, updateContract,
 } from '@/lib/api';
-import type { ContractSummary, CustomerDetail, EndClient } from '@/lib/types';
+import { confirmAction } from '@/lib/confirm';
+import { contractPartiesBody, endClientOptions } from '@/lib/organisations';
+import type {
+  AuthorisedRepresentative, ContractSummary, CustomerDetail, CustomerSummary,
+} from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { isAdmin, useMe } from '@/lib/useMe';
 import {
@@ -12,14 +16,15 @@ import {
 
 export function ContractSection({
   customer,
-  endClients,
+  organisations,
   selectedId,
   onSelect,
   onChanged,
   onDeleted,
 }: {
   customer: CustomerDetail;
-  endClients: EndClient[];
+  /** The whole organisation register — party and end-client choices. */
+  organisations: CustomerSummary[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onChanged: () => void;
@@ -30,52 +35,65 @@ export function ContractSection({
   const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [f, setF] = useState({
-    name: '', externalReference: '',
-    startDate: '', endDate: '', endClientId: '', isActive: true,
+  const emptyForm = () => ({
+    customerId: customer.id, name: '', externalReference: '',
+    startDate: '', endDate: '', endClientId: '', endClientReference: '', isActive: true,
+    // Kept as loaded — the representatives panel edits them; an update is
+    // replace-all, so editing the header must carry them through unchanged.
+    representatives: [] as AuthorisedRepresentative[],
   });
+  const [f, setF] = useState(emptyForm);
 
   const openNew = () => {
     setEditId(null);
-    setF({
-      name: '', externalReference: '',
-      startDate: '', endDate: '', endClientId: '', isActive: true,
-    });
+    setF(emptyForm());
     setFormOpen(true);
   };
 
   const openEdit = async (id: string) => {
-    const c = await getContract(id);
+    setError(null);
+    let c;
+    try { c = await getContract(id); }
+    catch (e) { setError(errorMessage(e)); return; }
     setEditId(id);
     setF({
+      customerId: c.customerId,
       name: c.name,
       externalReference: c.externalReference ?? '',
       startDate: c.startDate,
       endDate: c.endDate ?? '',
       endClientId: c.endClientId ?? '',
+      endClientReference: c.endClientReference ?? '',
       isActive: c.isActive,
+      representatives: c.representatives ?? [],
     });
     setFormOpen(true);
   };
 
   const save = async () => {
     const body = {
-      customerId: customer.id,
-      endClientId: f.endClientId || null,
+      ...contractPartiesBody(f),
       name: f.name.trim(),
       externalReference: f.externalReference.trim() || null,
       startDate: f.startDate,
       endDate: f.endDate || null,
       isActive: f.isActive,
+      representatives: f.representatives,
     };
-    if (editId) await updateContract(editId, body);
-    else await createContract(body);
+    setError(null);
+    try {
+      if (editId) await updateContract(editId, body);
+      else await createContract(body);
+    } catch (e) {
+      setError(errorMessage(e));
+      return;
+    }
     setFormOpen(false);
     onChanged();
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try {
       await deleteContract(id);
@@ -114,15 +132,34 @@ export function ContractSection({
               <input type="date" className={inputCls} value={f.endDate}
                 onChange={(e) => setF({ ...f, endDate: e.target.value })} />
             </Field>
-            <Field label={t('contracts.endClient')} help={t('contracts.hEndClient')}>
-              <select className={inputCls} value={f.endClientId}
-                onChange={(e) => setF({ ...f, endClientId: e.target.value })}>
-                <option value="">{t('contracts.endClientSameAsCustomer')}</option>
-                {endClients.map((e) => (
-                  <option key={e.id} value={e.id}>{e.name}</option>
+            <Field label={t('contracts.party')} help={t('contracts.hParty')}>
+              <select className={inputCls} value={f.customerId}
+                onChange={(e) => setF({
+                  ...f,
+                  customerId: e.target.value,
+                  // The new party can't also be the end client.
+                  endClientId: f.endClientId === e.target.value ? '' : f.endClientId,
+                })}>
+                {organisations.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
               </select>
             </Field>
+            <Field label={t('contracts.endClient')} help={t('contracts.hEndClient')}>
+              <select className={inputCls} value={f.endClientId}
+                onChange={(e) => setF({ ...f, endClientId: e.target.value })}>
+                <option value="">{t('contracts.endClientDirect')}</option>
+                {endClientOptions(organisations, f.customerId).map((o) => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+            </Field>
+            {f.endClientId && (
+              <Field label={t('contracts.endClientReference')} help={t('contracts.hEndClientReference')}>
+                <input className={inputCls} maxLength={100} value={f.endClientReference}
+                  onChange={(e) => setF({ ...f, endClientReference: e.target.value })} />
+              </Field>
+            )}
           </div>
           <div className="mt-3 flex gap-2">
             <button className={btnCls} disabled={!f.name.trim() || !f.startDate}
@@ -201,6 +238,48 @@ export function ContractSection({
           )}
         </tbody>
       </table>
+
+      {customer.endClientContracts.length > 0 && (
+        <div className="mt-5">
+          <h4 className="text-sm font-semibold text-slate-700">{t('contracts.asEndClientTitle')}</h4>
+          <p className="mb-1.5 text-xs text-slate-500">{t('contracts.asEndClientHelp')}</p>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className={cn(thCls, 'w-6')}></th>
+                <th className={thCls}>{t('common.name')}</th>
+                <th className={thCls}>{t('contracts.viaIntermediary')}</th>
+                <th className={thCls}>{t('contracts.endClientReference')}</th>
+                <th className={thCls}>{t('contracts.startDate')}</th>
+                <th className={thCls}>{t('contracts.endDate')}</th>
+                <th className={thCls}>{t('common.active')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {customer.endClientContracts.map((c) => (
+                <tr
+                  key={c.id}
+                  onClick={() => onSelect(c.id)}
+                  className={cn(
+                    'cursor-pointer border-b border-slate-100 hover:bg-blue-50/50',
+                    selectedId === c.id && 'bg-blue-50',
+                  )}
+                >
+                  <td className={cn(tdCls, 'w-6 text-slate-400')}>
+                    {selectedId === c.id ? '▾' : '▸'}
+                  </td>
+                  <td className={cn(tdCls, 'font-medium')}>{c.name}</td>
+                  <td className={tdCls}>{c.customerName}</td>
+                  <td className={tdCls}>{c.endClientReference ?? '—'}</td>
+                  <td className={tdCls}>{c.startDate}</td>
+                  <td className={tdCls}>{c.endDate ?? '—'}</td>
+                  <td className={tdCls}>{c.isActive ? t('common.active') : t('common.inactive')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Panel>
   );
 }

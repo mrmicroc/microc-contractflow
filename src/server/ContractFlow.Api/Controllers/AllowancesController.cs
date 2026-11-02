@@ -37,16 +37,7 @@ public class AllowancesController(AppDbContext db, ICurrentUser currentUser, Pad
     {
         var (resourceId, error) = await WritableResourceAsync(req.ResourceId, ct);
         if (error is not null) return error;
-        if (req.ProjectId.HasValue)
-        {
-            if (!await Db.Projects.AnyAsync(p => p.Id == req.ProjectId && p.IsActive, ct))
-                return BadRequest(new { error = "Unknown or inactive project." });
-            if (await pad.MonthIsClosedAsync(req.ProjectId.Value, req.Date.Year, req.Date.Month, ct))
-                return Conflict(new { error = "monthClosed", message = "The project month is closed." });
-        }
-        if (await Db.AllowanceClaims.AnyAsync(
-                x => x.ResourceId == resourceId && x.Date == req.Date && x.TimesheetId == null, ct))
-            return Conflict(new { error = "duplicate", message = "An unsubmitted claim already exists for that day." });
+        if (await ValidateAsync(req, resourceId!.Value, null, ct) is { } invalid) return invalid;
 
         var me = await Me(ct);
         var row = new AllowanceClaim
@@ -72,9 +63,8 @@ public class AllowancesController(AppDbContext db, ICurrentUser currentUser, Pad
         if (row is null) return NotFound();
         if (!await OwnsAsync(row.ResourceId, ct)) return ForbidResult();
         if (await LockedAsync(row.TimesheetId, ct)) return LockedError();
-        if (req.ProjectId.HasValue && !await Db.Projects.AnyAsync(
-                p => p.Id == req.ProjectId && p.IsActive, ct))
-            return BadRequest(new { error = "Unknown or inactive project." });
+        if (await ClosedAsync(row.ProjectId, row.Date, ct)) return MonthClosedError();
+        if (await ValidateAsync(req, row.ResourceId, row.Id, ct) is { } invalid) return invalid;
 
         row.ProjectId = req.ProjectId;
         row.Date = req.Date;
@@ -93,10 +83,32 @@ public class AllowancesController(AppDbContext db, ICurrentUser currentUser, Pad
         if (row is null) return NotFound();
         if (!await OwnsAsync(row.ResourceId, ct)) return ForbidResult();
         if (await LockedAsync(row.TimesheetId, ct)) return LockedError();
+        if (await ClosedAsync(row.ProjectId, row.Date, ct)) return MonthClosedError();
         Db.AllowanceClaims.Remove(row);
         await Db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    private async Task<IActionResult?> ValidateAsync(
+        AllowanceClaimRequest req, Guid resourceId, Guid? excludeId, CancellationToken ct)
+    {
+        if (req.ProjectId.HasValue)
+        {
+            if (!await Db.Projects.AnyAsync(p => p.Id == req.ProjectId && p.IsActive, ct))
+                return BadRequest(new { error = "Unknown or inactive project." });
+            if (await ClosedAsync(req.ProjectId, req.Date, ct)) return MonthClosedError();
+        }
+        if (await WeekLockedAsync(resourceId, req.Date, ct)) return WeekLockedError();
+        // One per-diem claim per resource and day, whatever state the existing
+        // claim is in — an approved claim plus a fresh draft would pay twice.
+        if (await Db.AllowanceClaims.AnyAsync(
+                x => x.ResourceId == resourceId && x.Date == req.Date && x.Id != excludeId, ct))
+            return Conflict(new { error = "duplicate", message = "A claim already exists for that day." });
+        return null;
+    }
+
+    private async Task<bool> ClosedAsync(Guid? projectId, DateOnly date, CancellationToken ct) =>
+        projectId.HasValue && await pad.MonthIsClosedAsync(projectId.Value, date.Year, date.Month, ct);
 
     private async Task<AllowanceClaimDto> DtoAsync(Guid id, CancellationToken ct) =>
         ToDto(await Db.AllowanceClaims

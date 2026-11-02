@@ -11,8 +11,11 @@ namespace ContractFlow.Api.Controllers;
 /// <summary>
 /// Timesheets — one per resource per ISO week (design §3). Submit gathers that
 /// week's draft rows; approve freezes the computed payable/billable hours on
-/// each entry (the §5 pipeline run twice — agreement rules for pay, contract
-/// rules for billing); return/reject releases the rows back to draft.
+/// each entry through <see cref="DayBilling"/> — the very pipeline the invoice
+/// and statement use, so frozen quantities equal billed/paid ones;
+/// return/reject (with a mandatory comment) releases the rows back to draft;
+/// an admin may reopen an approved week until it is billed, paid or closed.
+/// Every step lands in the review history.
 /// </summary>
 [ApiController]
 [Route("api/timesheets")]
@@ -53,7 +56,7 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         if (sheet is null) return NotFound();
         var scoped = await ScopedResourceIdAsync(ct);
         if (scoped.HasValue && scoped.Value != sheet.ResourceId) return ForbidResult();
-        return Ok(ToDetail(sheet));
+        return Ok(await ToDetailAsync(sheet, scoped.HasValue, ct));
     }
 
     /// <summary>Collect the week's draft rows into a submitted timesheet.</summary>
@@ -96,9 +99,11 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
 
         var existing = await Db.Timesheets.FirstOrDefaultAsync(
             t => t.ResourceId == resourceId && t.Year == req.Year && t.IsoWeek == req.IsoWeek, ct);
-        if (existing?.Status is TimesheetStatus.Submitted or TimesheetStatus.Approved)
+        if (existing?.Status is TimesheetStatus.Submitted or TimesheetStatus.Approved
+            or TimesheetStatus.Invoiced)
             return Conflict(new { error = "alreadySubmitted", message = "That week is already submitted." });
 
+        var me = await Me(ct);
         var sheet = existing ?? new Timesheet
         {
             ResourceId = resourceId!.Value,
@@ -111,6 +116,10 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         sheet.ReviewedByUserId = null;
         sheet.ReviewerNote = null;
         if (existing is null) Db.Timesheets.Add(sheet);
+        Db.TimesheetReviews.Add(new TimesheetReview
+        {
+            TimesheetId = sheet.Id, Action = TimesheetReviewAction.Submitted, ByUserId = me?.Id,
+        });
 
         foreach (var x in entries) x.TimesheetId = sheet.Id;
         foreach (var x in travel) x.TimesheetId = sheet.Id;
@@ -118,12 +127,13 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         foreach (var x in allowances) x.TimesheetId = sheet.Id;
         await Db.SaveChangesAsync(ct);
 
-        return Ok(ToDetail(await LoadAsync(sheet.Id, ct)));
+        return Ok(await ToDetailAsync((await LoadAsync(sheet.Id, ct))!, me?.Role == AppRole.Resource, ct));
     }
 
-    /// <summary>Approve — runs the §5 pipeline twice per attendance day:
-    /// agreement rules → payable hours; contract rules → billable hours. The
-    /// results are frozen on each entry so the month reconciles later.</summary>
+    /// <summary>Approve — prices every attendance day twice through
+    /// <see cref="DayBilling"/>: agreement rules → payable hours; contract
+    /// rules → billable hours (each contract with its own minimum and
+    /// calendar). The results are frozen on each entry.</summary>
     [HttpPost("{id:guid}/approve")]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
     public async Task<IActionResult> Approve(Guid id, CancellationToken ct)
@@ -132,6 +142,10 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         if (sheet is null) return NotFound();
         if (sheet.Status != TimesheetStatus.Submitted)
             return BadRequest(new { error = "Only submitted timesheets can be approved." });
+        // A month closed after submission can no longer take new approved rows.
+        foreach (var (projectId, date) in ProjectDates(sheet))
+            if (await pad.MonthIsClosedAsync(projectId, date.Year, date.Month, ct))
+                return Conflict(new { error = "monthClosed", message = "A project month in that week is closed." });
 
         var me = await Me(ct);
         var entryProjects = sheet.Entries.Select(e => e.ProjectId).Distinct().ToList();
@@ -143,41 +157,63 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         var contractIds = projectContracts.Values.Distinct().ToList();
         var allTerms = await Db.ContractTerms
             .Where(t => contractIds.Contains(t.ContractId)).ToListAsync(ct);
+        var bookingIds = sheet.Entries.Where(e => e.BookingId != null)
+            .Select(e => e.BookingId!.Value).Distinct().ToList();
+        var bookingPackages = await Db.Bookings.Where(b => bookingIds.Contains(b.Id))
+            .ToDictionaryAsync(b => b.Id, b => b.WorkPackageId, ct);
+        var packageIds = sheet.Entries.Select(e => e.WorkPackageId)
+            .Concat(bookingPackages.Values).OfType<Guid>().Distinct().ToList();
+        var outsidePackages = (await Db.WorkPackages
+                .Where(w => packageIds.Contains(w.Id) && w.PricingMode == WorkPackagePricing.OutsideContract)
+                .Select(w => w.Id).ToListAsync(ct))
+            .ToHashSet();
+        var sharedDays = sheet.Entries.Count == 0 ? []
+            : await PadCoverage.SharedDaysAsync(Db, [sheet.ResourceId],
+                sheet.Entries.Min(e => e.Date), sheet.Entries.Max(e => e.Date), ct);
 
         foreach (var day in sheet.Entries.GroupBy(e => e.Date))
         {
-            var splits = day.Where(e => Counted.Contains(e.Category))
-                .GroupBy(e => e.ProjectId)
-                .Select(g => (ProjectId: g.Key, Hours: g.Sum(e => e.ActualHours)))
+            var date = day.Key;
+            // "Booked" = covered by the PAD line (booked day, shared booked
+            // day, or unbooked services consuming PAD) — never priced as hours.
+            var rows = day.Where(e => Counted.Contains(e.Category))
+                .Select(e =>
+                {
+                    var wp = e.BookingId is { } bid ? bookingPackages.GetValueOrDefault(bid) : e.WorkPackageId;
+                    // PAD-covered (booked, shared day or unbooked-consumes-PAD)
+                    // unless the package lies outside the contract — Outside wins.
+                    var covered = PadCoverage.Covers(DayBilling.TermsAt(allTerms, projectContracts[e.ProjectId], date),
+                            e.BookingId != null, e.Billing, sharedDays.Contains((sheet.ResourceId, date, e.ProjectId)))
+                        || e.BookingId != null;
+                    return new DayRow(
+                        e.Id, e.ProjectId, projectContracts[e.ProjectId], wp,
+                        e.Billing, covered, e.ActualHours,
+                        wp is { } w && outsidePackages.Contains(w));
+                })
                 .ToList();
-            if (splits.Count == 0) continue;
 
-            // OT/min parameters resolve from the dominant (project, package)
-            // pair's rule set — single-project days (the common case) are exact.
-            var dominant = day.Where(e => Counted.Contains(e.Category))
-                .GroupBy(e => (e.ProjectId, e.WorkPackageId))
-                .OrderByDescending(x => x.Sum(e => e.ActualHours)).First().Key;
-            var payRates = PayableRateSet(
-                agreements, projectContracts[dominant.ProjectId], dominant.WorkPackageId, day.Key);
-            var billRates = BillableRateSet(allTerms, projectContracts[dominant.ProjectId], day.Key);
-
-            var payDay = TimeMath.CalculateDay(day.Key, splits, payRates);
-            var billDay = TimeMath.CalculateDay(day.Key, splits, billRates);
+            // Hour quantities depend only on the contract's rules, never on the
+            // rate overrides — no override lookup needed here.
+            var bill = DayBilling.BillDay(date, rows,
+                    c => DayBilling.TermsAt(allTerms, c, date), _ => (null, null))
+                .SelectMany(p => p.Entries).ToDictionary(s => s.EntryId);
+            var pay = DayBilling.PayDay(date, rows,
+                    (c, wp) => DayBilling.AgreementAt(agreements, c, wp, date),
+                    c => DayBilling.TermsAt(allTerms, c, date)?.HolidayCalendar)
+                .SelectMany(p => p.Entries).ToDictionary(s => s.EntryId);
 
             foreach (var entry in day)
             {
                 if (!Counted.Contains(entry.Category))
                 {
                     entry.PayableHours = entry.BillableHours = 0m;
-                    entry.MinimumAdjustmentHours = 0m;
+                    entry.MinimumAdjustmentHours = entry.BillableMinimumAdjustmentHours = 0m;
                     continue;
                 }
-                var payLine = payDay.Lines.First(l => l.ProjectId == entry.ProjectId);
-                var billLine = billDay.Lines.First(l => l.ProjectId == entry.ProjectId);
-                entry.PayableHours = ShareOf(entry.ActualHours, payLine);
-                entry.BillableHours = ShareOf(entry.ActualHours, billLine);
-                entry.MinimumAdjustmentHours =
-                    Math.Max(0m, entry.PayableHours.Value - entry.ActualHours);
+                entry.PayableHours = pay[entry.Id].Hours;
+                entry.MinimumAdjustmentHours = pay[entry.Id].MinimumAdjustment;
+                entry.BillableHours = bill[entry.Id].Hours;
+                entry.BillableMinimumAdjustmentHours = bill[entry.Id].MinimumAdjustment;
             }
         }
 
@@ -185,12 +221,23 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         sheet.ReviewedUtc = DateTime.UtcNow;
         sheet.ReviewedByUserId = me?.Id;
         sheet.ReviewerNote = null;
-        await Db.SaveChangesAsync(ct);
+        Db.TimesheetReviews.Add(new TimesheetReview
+        {
+            TimesheetId = sheet.Id, Action = TimesheetReviewAction.Approved, ByUserId = me?.Id,
+        });
+        // Approval and the PAD consumed by unbooked services land together.
+        await pad.InTransactionAsync(async () =>
+        {
+            await Db.SaveChangesAsync(ct);
+            await pad.ConsumeUnbookedAsync(sheet.Entries.Where(e => Counted.Contains(e.Category)), me?.Id, ct);
+            return true;
+        }, ct);
         return Ok(ReportingMapper.Sheet(sheet));
     }
 
     /// <summary>Return to draft — releases the rows for correction. The
-    /// timesheet row itself stays as the record of the returned submission.</summary>
+    /// timesheet row itself stays as the record of the returned submission.
+    /// A comment telling the resource what to fix is required.</summary>
     [HttpPost("{id:guid}/return")]
     [RequireRole(AppRole.Administrator, AppRole.ProjectManager)]
     public async Task<IActionResult> Return(Guid id, TimesheetReviewRequest req, CancellationToken ct)
@@ -201,14 +248,71 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
     public async Task<IActionResult> Reject(Guid id, TimesheetReviewRequest req, CancellationToken ct)
         => await ReleaseAsync(id, TimesheetStatus.Rejected, req.Note, ct);
 
+    /// <summary>
+    /// Audited correction path for an APPROVED week (design §3): an admin
+    /// returns it to draft with a mandatory reason — allowed only while none
+    /// of its project-months is closed and no non-draft invoice specification
+    /// or final statement covers its rows. Draft specs that included the rows
+    /// lose them (regenerate them afterwards).
+    /// </summary>
+    [HttpPost("{id:guid}/reopen")]
+    [RequireRole(AppRole.Administrator)]
+    public async Task<IActionResult> Reopen(Guid id, TimesheetReviewRequest req, CancellationToken ct)
+    {
+        var reason = req.Note?.Trim();
+        if (string.IsNullOrEmpty(reason))
+            return BadRequest(new { error = "noteRequired", message = "A reason is required to reopen an approved timesheet." });
+        var sheet = await LoadAsync(id, ct);
+        if (sheet is null) return NotFound();
+        if (sheet.Status != TimesheetStatus.Approved)
+            return BadRequest(new { error = "Only approved timesheets can be reopened." });
+
+        foreach (var (projectId, date) in ProjectDates(sheet))
+            if (await pad.MonthIsClosedAsync(projectId, date.Year, date.Month, ct))
+                return Conflict(new { error = "monthClosed", message = "A project month in that week is closed." });
+
+        var entryIds = sheet.Entries.Select(e => e.Id).ToList();
+        var specIds = sheet.Entries.Where(e => e.InvoiceSpecificationId != null)
+            .Select(e => e.InvoiceSpecificationId!.Value).Distinct().ToList();
+        var sourceIds = sheet.Expenses.Select(x => x.Id).ToList();
+        var invoiced = await Db.InvoiceSpecifications.AnyAsync(s =>
+                specIds.Contains(s.Id) && s.Status != InvoiceStatus.Draft, ct)
+            || await Db.InvoiceLines.AnyAsync(l =>
+                l.SourceId != null && sourceIds.Contains(l.SourceId.Value)
+                && l.Invoice.Status != InvoiceStatus.Draft, ct);
+        if (invoiced)
+            return Conflict(new { error = "invoiced", message = "Rows of this week are on a non-draft invoice specification." });
+
+        var months = sheet.Entries.Select(e => e.Date)
+            .Concat(sheet.TravelRecords.Select(x => x.Date))
+            .Concat(sheet.Expenses.Select(x => x.Date))
+            .Concat(sheet.AllowanceClaims.Select(x => x.Date))
+            .Select(d => (d.Year, d.Month)).Distinct().ToList();
+        foreach (var (year, month) in months)
+            if (await Db.SubcontractorStatements.AnyAsync(s => s.ResourceId == sheet.ResourceId
+                    && s.Year == year && s.Month == month && s.Status != StatementStatus.Draft, ct))
+                return Conflict(new { error = "statementFinal", message = "A final statement covers this week." });
+
+        foreach (var e in sheet.Entries) e.InvoiceSpecificationId = null;
+        // PAD consumed by the week's unbooked services is given back
+        // (append-only reversal rows); re-approval consumes afresh.
+        await pad.ReverseUnbookedAsync(entryIds, (await Me(ct))?.Id, ct);
+        return await ReleaseAsync(id, TimesheetStatus.Returned, reason, ct,
+            TimesheetReviewAction.Reopened, sheet);
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────
 
     private async Task<IActionResult> ReleaseAsync(
-        Guid id, TimesheetStatus status, string? note, CancellationToken ct)
+        Guid id, TimesheetStatus status, string? note, CancellationToken ct,
+        TimesheetReviewAction? action = null, Timesheet? loaded = null)
     {
-        var sheet = await LoadAsync(id, ct);
+        note = note?.Trim();
+        if (string.IsNullOrEmpty(note))
+            return BadRequest(new { error = "noteRequired", message = "A comment for the resource is required." });
+        var sheet = loaded ?? await LoadAsync(id, ct);
         if (sheet is null) return NotFound();
-        if (sheet.Status != TimesheetStatus.Submitted)
+        if (loaded is null && sheet.Status != TimesheetStatus.Submitted)
             return BadRequest(new { error = "Only submitted timesheets can be reviewed." });
 
         var me = await Me(ct);
@@ -216,6 +320,7 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         {
             e.TimesheetId = null;
             e.PayableHours = e.BillableHours = e.MinimumAdjustmentHours = null;
+            e.BillableMinimumAdjustmentHours = null;
         }
         foreach (var x in sheet.TravelRecords) x.TimesheetId = null;
         foreach (var x in sheet.Expenses) x.TimesheetId = null;
@@ -225,59 +330,44 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
         sheet.ReviewedUtc = DateTime.UtcNow;
         sheet.ReviewedByUserId = me?.Id;
         sheet.ReviewerNote = note;
+        Db.TimesheetReviews.Add(new TimesheetReview
+        {
+            TimesheetId = sheet.Id, Note = note, ByUserId = me?.Id,
+            Action = action ?? (status == TimesheetStatus.Rejected
+                ? TimesheetReviewAction.Rejected : TimesheetReviewAction.Returned),
+        });
         await Db.SaveChangesAsync(ct);
         return Ok(ReportingMapper.Sheet(sheet));
     }
 
-    /// <summary>The entry's proportional share of its project line's effective
-    /// hours — carries its slice of any minimum-hours adjustment.</summary>
-    private static decimal ShareOf(decimal actual, DayLine line) =>
-        line.ActualHours > 0
-            ? TimeMath.Round2(actual * line.EffectiveHours / line.ActualHours)
-            : actual;
+    private static IEnumerable<(Guid ProjectId, DateOnly Date)> ProjectDates(Timesheet sheet) =>
+        sheet.Entries.Select(x => (x.ProjectId, x.Date))
+            .Concat(sheet.TravelRecords.Where(x => x.ProjectId != null).Select(x => (x.ProjectId!.Value, x.Date)))
+            .Concat(sheet.Expenses.Where(x => x.ProjectId != null).Select(x => (x.ProjectId!.Value, x.Date)))
+            .Concat(sheet.AllowanceClaims.Where(x => x.ProjectId != null).Select(x => (x.ProjectId!.Value, x.Date)))
+            .Distinct();
 
-    /// <summary>Rate set from the compensation agreement version in force on
-    /// the day — exact work-package scope first, then contract, then default.</summary>
-    private static DayRateSet PayableRateSet(
-        List<CompensationAgreement> agreements, Guid contractId, Guid? workPackageId, DateOnly date)
+    private async Task<TimesheetDetailDto> ToDetailAsync(Timesheet sheet, bool hideBillable, CancellationToken ct)
     {
-        var a = agreements
-            .Where(x => x.EffectiveFrom <= date && (
-                (workPackageId != null && x.WorkPackageId == workPackageId) ||
-                (x.WorkPackageId == null && (x.ContractId == contractId || x.ContractId == null))))
-            .OrderByDescending(x => x.WorkPackageId != null)
-            .ThenByDescending(x => x.ContractId != null)
-            .ThenByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.Version)
-            .FirstOrDefault();
-        return new DayRateSet(
-            a?.HourlyRate, a?.SaturdayRate, a?.SundayRate, a?.HolidayRate,
-            a?.OvertimeAfterHours ?? 8, a?.OvertimePercent ?? 150m,
-            a?.MinPayableHoursPerDay);
+        var reviewerIds = sheet.Reviews.Where(r => r.ByUserId != null).Select(r => r.ByUserId!.Value)
+            .Distinct().ToList();
+        var names = await Db.Users.Where(u => reviewerIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+        return new TimesheetDetailDto(
+            ReportingMapper.Sheet(sheet),
+            sheet.Entries.OrderBy(e => e.Date).Select(e => ReportingMapper.Entry(e, hideBillable)).ToList(),
+            sheet.TravelRecords.OrderBy(x => x.Date).Select(ReportingMapper.Travel).ToList(),
+            sheet.Expenses.OrderBy(x => x.Date).Select(ReportingMapper.Expense).ToList(),
+            sheet.AllowanceClaims.OrderBy(x => x.Date).Select(ReportingMapper.Allowance).ToList(),
+            sheet.Reviews.OrderBy(r => r.AtUtc).Select(r => new TimesheetReviewDto(
+                r.Action, r.Note, r.ByUserId,
+                r.ByUserId is { } uid ? names.GetValueOrDefault(uid) : null, r.AtUtc)).ToList());
     }
-
-    private static DayRateSet BillableRateSet(
-        List<ContractTerms> terms, Guid contractId, DateOnly date)
-    {
-        var t = terms
-            .Where(x => x.ContractId == contractId && x.EffectiveFrom <= date)
-            .OrderByDescending(x => x.EffectiveFrom).ThenByDescending(x => x.Version)
-            .FirstOrDefault();
-        return new DayRateSet(
-            t?.HourlyRate, t?.SaturdayRate, t?.SundayRate, t?.HolidayRate,
-            t?.OvertimeAfterHours ?? 8, t?.OvertimePercent ?? 150m,
-            t?.MinBillableHoursPerDay);
-    }
-
-    private static TimesheetDetailDto ToDetail(Timesheet? sheet) => new(
-        ReportingMapper.Sheet(sheet!),
-        sheet!.Entries.OrderBy(e => e.Date).Select(ReportingMapper.Entry).ToList(),
-        sheet.TravelRecords.OrderBy(x => x.Date).Select(ReportingMapper.Travel).ToList(),
-        sheet.Expenses.OrderBy(x => x.Date).Select(ReportingMapper.Expense).ToList(),
-        sheet.AllowanceClaims.OrderBy(x => x.Date).Select(ReportingMapper.Allowance).ToList());
 
     private Task<Timesheet?> LoadAsync(Guid id, CancellationToken ct) =>
         Db.Timesheets
             .Include(t => t.Resource)
+            .Include(t => t.Reviews)
             .Include(t => t.Entries).ThenInclude(e => e.Project)
             .Include(t => t.Entries).ThenInclude(e => e.Resource)
             .Include(t => t.TravelRecords).ThenInclude(x => x.Resource)
@@ -286,6 +376,7 @@ public class TimesheetsController(AppDbContext db, ICurrentUser currentUser, Pad
             .Include(t => t.Expenses).ThenInclude(x => x.Project)
             .Include(t => t.AllowanceClaims).ThenInclude(x => x.Resource)
             .Include(t => t.AllowanceClaims).ThenInclude(x => x.Project)
+            .AsSplitQuery()
             // entry.Timesheet is populated by fix-up — no back-include needed.
             .FirstOrDefaultAsync(t => t.Id == id, ct);
 }

@@ -1,14 +1,18 @@
 using ContractFlow.Api.Models.Domain;
+using ContractFlow.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ContractFlow.Api.Data;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+/// <param name="auditActor">Resolves who is saving for the audit trail;
+/// absent (design-time tooling) ⇒ rows are recorded as system writes.</param>
+public class AppDbContext(DbContextOptions<AppDbContext> options, IAuditActor? auditActor = null)
+    : DbContext(options)
 {
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Customer> Customers => Set<Customer>();
-    public DbSet<EndClient> EndClients => Set<EndClient>();
     public DbSet<Contract> Contracts => Set<Contract>();
+    public DbSet<ScheduledCharge> ScheduledCharges => Set<ScheduledCharge>();
     public DbSet<ContractTerms> ContractTerms => Set<ContractTerms>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<WorkPackage> WorkPackages => Set<WorkPackage>();
@@ -23,6 +27,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<CompensationAgreement> CompensationAgreements => Set<CompensationAgreement>();
     public DbSet<Booking> Bookings => Set<Booking>();
     public DbSet<PadTransaction> PadTransactions => Set<PadTransaction>();
+    public DbSet<BookingProjectShare> BookingProjectShares => Set<BookingProjectShare>();
+    public DbSet<BookingStartTimeChange> BookingStartTimeChanges => Set<BookingStartTimeChange>();
     public DbSet<AdditionalPadRequest> AdditionalPadRequests => Set<AdditionalPadRequest>();
     public DbSet<ProjectMonthClose> ProjectMonthCloses => Set<ProjectMonthClose>();
     public DbSet<TimeEntry> TimeEntries => Set<TimeEntry>();
@@ -31,6 +37,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<AllowanceClaim> AllowanceClaims => Set<AllowanceClaim>();
     public DbSet<Timesheet> Timesheets => Set<Timesheet>();
+    public DbSet<TimesheetReview> TimesheetReviews => Set<TimesheetReview>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<InvoiceSpecification> InvoiceSpecifications => Set<InvoiceSpecification>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
@@ -38,6 +45,45 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<StatementLine> StatementLines => Set<StatementLine>();
     public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
     public DbSet<SupplierInvoiceLine> SupplierInvoiceLines => Set<SupplierInvoiceLine>();
+    public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
+
+    /// <summary>Optional justification stamped on the audit rows of the next
+    /// save — set by an endpoint that takes a reason; cleared after saving.</summary>
+    public string? AuditReason { get; set; }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        AppendAuditAsync(CancellationToken.None).GetAwaiter().GetResult();
+        try { return base.SaveChanges(acceptAllChangesOnSuccess); }
+        finally { AuditReason = null; }
+    }
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        await AppendAuditAsync(cancellationToken);
+        try { return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
+        finally { AuditReason = null; }
+    }
+
+    /// <summary>Adds AuditEntry rows for the pending changes — same save, same
+    /// transaction, so a change is never persisted without its audit row.</summary>
+    private async Task AppendAuditAsync(CancellationToken ct)
+    {
+        ChangeTracker.DetectChanges();
+        var rows = AuditTrail.Collect(ChangeTracker);
+        if (rows.Count == 0) return;
+
+        var actor = auditActor is null ? null : await auditActor.ResolveAsync(ct);
+        foreach (var row in rows)
+        {
+            row.UserId = actor?.Id;
+            row.UserDisplayName = actor?.DisplayName;
+            row.Reason = AuditReason;
+        }
+        AuditEntries.AddRange(rows);
+    }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -63,23 +109,37 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             });
         });
 
-        builder.Entity<EndClient>(e =>
-        {
-            e.Property(c => c.Name).HasMaxLength(200);
-            e.Property(c => c.Country).HasMaxLength(2);
-            e.Property(c => c.AddressLine).HasMaxLength(200);
-            e.Property(c => c.PostalCode).HasMaxLength(20);
-            e.Property(c => c.City).HasMaxLength(100);
-        });
-
         builder.Entity<Contract>(e =>
         {
             e.Property(c => c.Name).HasMaxLength(200);
             e.Property(c => c.ExternalReference).HasMaxLength(100);
+            e.Property(c => c.EndClientReference).HasMaxLength(100);
             e.HasOne(c => c.Customer).WithMany(cu => cu.Contracts)
                 .HasForeignKey(c => c.CustomerId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(c => c.EndClient).WithMany(ec => ec.Contracts)
-                .HasForeignKey(c => c.EndClientId).OnDelete(DeleteBehavior.SetNull);
+            // Same register as the party; an organisation in use as an end
+            // client can't be deleted (Restrict — no second cascade path).
+            e.HasOne(c => c.EndClient).WithMany(cu => cu.EndClientContracts)
+                .HasForeignKey(c => c.EndClientId).OnDelete(DeleteBehavior.Restrict);
+            e.OwnsMany(c => c.Representatives, r =>
+            {
+                r.ToJson();
+                r.Property(x => x.Name).HasMaxLength(200);
+                r.Property(x => x.Email).HasMaxLength(320);
+                r.Property(x => x.Phone).HasMaxLength(50);
+                r.Property(x => x.Authority).HasMaxLength(300);
+            });
+        });
+
+        builder.Entity<ScheduledCharge>(e =>
+        {
+            e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.Description).HasMaxLength(300);
+            e.HasIndex(x => new { x.ContractId, x.Date });
+            e.HasOne(x => x.Contract).WithMany(c => c.ScheduledCharges)
+                .HasForeignKey(x => x.ContractId).OnDelete(DeleteBehavior.Cascade);
+            // A project with charges can't silently orphan them (no second cascade path).
+            e.HasOne(x => x.Project).WithMany()
+                .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<ContractTerms>(e =>
@@ -105,8 +165,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 s.ToJson();
                 s.Property(x => x.ChargeHours).HasPrecision(9, 2);
                 s.Property(x => x.ChargeAmount).HasPrecision(18, 2);
+                s.Property(x => x.ChargeDayFraction).HasPrecision(9, 4);
             });
-            e.Property(t => t.FixedPriceAmount).HasPrecision(18, 2);
+            e.OwnsMany(t => t.ExpenseMarkups, m =>
+            {
+                m.ToJson();
+                m.Property(x => x.Category).HasConversion<string>();
+                m.Property(x => x.Percent).HasPrecision(9, 4);
+            });
             e.Property(t => t.HourlyRate).HasPrecision(18, 2);
             e.Property(t => t.SaturdayRate).HasPrecision(18, 2);
             e.Property(t => t.SundayRate).HasPrecision(18, 2);
@@ -124,6 +190,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(p => p.Name).HasMaxLength(200);
             e.Property(p => p.Code).HasMaxLength(50);
+            e.Property(p => p.ContractedBaselinePad).HasPrecision(18, 4);
             e.HasOne(p => p.Contract).WithMany(c => c.Projects)
                 .HasForeignKey(p => p.ContractId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -139,6 +206,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         builder.Entity<WorkPackage>(e =>
         {
             e.Property(l => l.Name).HasMaxLength(200);
+            e.Property(l => l.PricingMode).HasConversion<string>().HasMaxLength(20);
             e.HasOne(l => l.Project).WithMany(p => p.WorkPackages)
                 .HasForeignKey(l => l.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -251,6 +319,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(b => b.PlannedHours).HasPrecision(9, 4);
             e.Property(b => b.CancellationChargeHours).HasPrecision(9, 4);
             e.Property(b => b.CancellationChargeAmount).HasPrecision(18, 2);
+            e.Property(b => b.CancellationChargeDayFraction).HasPrecision(9, 4);
+            e.Property(b => b.InstructedBy).HasMaxLength(200);
             e.Property(b => b.ActivityRef).HasMaxLength(100);
             e.Property(b => b.EvidenceRef).HasMaxLength(200);
             e.Property(b => b.CustomerContact).HasMaxLength(200);
@@ -273,6 +343,49 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(t => t.ProjectId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(t => t.Booking).WithMany()
                 .HasForeignKey(t => t.BookingId).OnDelete(DeleteBehavior.SetNull);
+            // One commitment per booking and project (a shared booked day
+            // commits once in each project's ledger) and one approval row per
+            // request — a concurrent double confirm/approve fails here instead
+            // of reserving PAD twice.
+            e.HasIndex(t => new { t.BookingId, t.ProjectId }).IsUnique()
+                .HasFilter("[Type] = 'Commit' AND [BookingId] IS NOT NULL")
+                .HasDatabaseName("IX_PadTransactions_BookingId_Commit");
+            e.HasIndex(t => t.TimeEntryId);
+            e.HasOne<TimeEntry>().WithMany()
+                .HasForeignKey(t => t.TimeEntryId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(t => t.AdditionalPadRequestId).IsUnique()
+                .HasFilter("[Type] = 'AdditionalApproved' AND [AdditionalPadRequestId] IS NOT NULL")
+                .HasDatabaseName("IX_PadTransactions_AdditionalPadRequestId_Approved");
+        });
+
+        builder.Entity<BookingProjectShare>(e =>
+        {
+            e.Property(s => s.PlannedHours).HasPrecision(9, 4);
+            e.HasIndex(s => new { s.BookingId, s.ProjectId }).IsUnique();
+            e.HasOne(s => s.Booking).WithMany(b => b.Shares)
+                .HasForeignKey(s => s.BookingId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(s => s.Project).WithMany()
+                .HasForeignKey(s => s.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<BookingStartTimeChange>(e =>
+        {
+            e.HasIndex(c => new { c.BookingId, c.ChangedUtc });
+            e.HasOne(c => c.Booking).WithMany(b => b.StartTimeChanges)
+                .HasForeignKey(c => c.BookingId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // PAD rules of a terms version (ContractTermsPadRules.cs).
+        builder.Entity<ContractTerms>(e =>
+        {
+            e.Property(t => t.CarryOverBasis).HasConversion<string>().HasMaxLength(20);
+            e.Property(t => t.CarryOverRoundingStep).HasPrecision(9, 4);
+            e.Property(t => t.CarryOverMaxPad).HasPrecision(9, 4);
+            e.Property(t => t.CarryOverRounding).HasConversion<string>().HasMaxLength(10);
+            e.Property(t => t.CarryOverConsumption).HasConversion<string>().HasMaxLength(20);
+            e.Property(t => t.PadInvoicing).HasConversion<string>().HasMaxLength(30);
+            e.Property(t => t.AdditionalPadRate).HasPrecision(18, 2);
+            e.Property(t => t.SharedDayMinimum).HasConversion<string>().HasMaxLength(20);
         });
 
         builder.Entity<AdditionalPadRequest>(e =>
@@ -281,12 +394,35 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(r => r.Quantity).HasPrecision(9, 4);
             e.Property(r => r.Rate).HasPrecision(18, 2);
             e.Property(r => r.Reference).HasMaxLength(200);
+            e.Property(r => r.ApprovedByRepresentative).HasMaxLength(200);
             e.HasOne(r => r.Project).WithMany()
                 .HasForeignKey(r => r.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(r => r.Booking).WithMany()
+                .HasForeignKey(r => r.BookingId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<ExchangeRate>(e =>
+        {
+            e.Property(x => x.FromCurrency).HasMaxLength(3);
+            e.Property(x => x.ToCurrency).HasMaxLength(3);
+            e.Property(x => x.Rate).HasPrecision(18, 6);
+            e.Property(x => x.Note).HasMaxLength(200);
+            e.HasIndex(x => new { x.Year, x.Month, x.FromCurrency, x.ToCurrency }).IsUnique();
+        });
+
+        builder.Entity<AuditEntry>(e =>
+        {
+            e.Property(x => x.EntityType).HasMaxLength(100);
+            e.Property(x => x.Action).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.UserDisplayName).HasMaxLength(200);
+            e.Property(x => x.Reason).HasMaxLength(1000);
+            e.HasIndex(x => new { x.EntityType, x.EntityId });
+            e.HasIndex(x => x.OccurredUtc);
         });
 
         builder.Entity<ProjectMonthClose>(e =>
         {
+            e.Property(c => c.ForcedReason).HasMaxLength(500);
             e.HasIndex(c => new { c.ProjectId, c.Year, c.Month }).IsUnique();
             e.HasOne(c => c.Project).WithMany()
                 .HasForeignKey(c => c.ProjectId).OnDelete(DeleteBehavior.Cascade);
@@ -300,7 +436,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.PayableHours).HasPrecision(9, 2);
             e.Property(x => x.BillableHours).HasPrecision(9, 2);
             e.Property(x => x.MinimumAdjustmentHours).HasPrecision(9, 2);
+            e.Property(x => x.BillableMinimumAdjustmentHours).HasPrecision(9, 2);
             e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => x.InvoiceSpecificationId);
+            e.HasOne<InvoiceSpecification>().WithMany()
+                .HasForeignKey(x => x.InvoiceSpecificationId).OnDelete(DeleteBehavior.SetNull);
             e.HasIndex(x => new { x.ResourceId, x.Date });
             e.HasIndex(x => new { x.ProjectId, x.Date });
             e.HasOne(x => x.Resource).WithMany()
@@ -386,6 +526,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.ResourceId, x.Year, x.IsoWeek }).IsUnique();
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.Reviews).WithOne(r => r.Timesheet)
+                .HasForeignKey(r => r.TimesheetId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<TimesheetReview>(e =>
+        {
+            e.Property(x => x.Action).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.HasIndex(x => new { x.TimesheetId, x.AtUtc });
         });
 
         builder.Entity<Document>(e =>
@@ -404,7 +553,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.TotalAmount).HasPrecision(18, 2);
             e.Property(x => x.Notes).HasMaxLength(500);
-            e.HasIndex(x => new { x.ProjectId, x.Year, x.Month }).IsUnique();
+            e.Property(x => x.WarningsJson).HasMaxLength(4000);
+            e.Property(x => x.CustomerName).HasMaxLength(200);
+            e.Property(x => x.EndClientName).HasMaxLength(200);
+            e.Property(x => x.EndClientReference).HasMaxLength(100);
+            e.HasIndex(x => new { x.ProjectId, x.Year, x.Month, x.Revision }).IsUnique();
             e.HasOne(x => x.Project).WithMany()
                 .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -414,9 +567,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
             e.Property(x => x.Description).HasMaxLength(300);
             e.Property(x => x.Explanation).HasMaxLength(500);
-            e.Property(x => x.Quantity).HasPrecision(18, 2);
+            // 4 decimals: day-rate lines bill fractions like ⅓ day (0.3333).
+            e.Property(x => x.Quantity).HasPrecision(18, 4);
             e.Property(x => x.UnitPrice).HasPrecision(18, 2);
             e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalAmount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalCurrency).HasMaxLength(3);
+            e.Property(x => x.ExchangeRate).HasPrecision(18, 6);
             e.HasOne(x => x.Invoice).WithMany(x => x.Lines)
                 .HasForeignKey(x => x.InvoiceSpecificationId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -427,6 +584,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.TotalAmount).HasPrecision(18, 2);
             e.Property(x => x.Notes).HasMaxLength(500);
+            e.Property(x => x.WarningsJson).HasMaxLength(4000);
             e.HasIndex(x => new { x.ResourceId, x.Year, x.Month }).IsUnique();
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);
@@ -440,6 +598,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Quantity).HasPrecision(18, 2);
             e.Property(x => x.UnitPrice).HasPrecision(18, 2);
             e.Property(x => x.Amount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalAmount).HasPrecision(18, 2);
+            e.Property(x => x.OriginalCurrency).HasMaxLength(3);
+            e.Property(x => x.ExchangeRate).HasPrecision(18, 6);
             e.HasOne(x => x.Statement).WithMany(x => x.Lines)
                 .HasForeignKey(x => x.StatementId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -451,6 +612,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.TotalAmount).HasPrecision(18, 2);
             e.Property(x => x.MatchDiffJson).HasMaxLength(4000);
+            e.Property(x => x.ApprovalNote).HasMaxLength(500);
             e.HasIndex(x => new { x.ResourceId, x.Number }).IsUnique();
             e.HasOne(x => x.Resource).WithMany()
                 .HasForeignKey(x => x.ResourceId).OnDelete(DeleteBehavior.Restrict);

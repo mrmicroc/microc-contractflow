@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import {
   closeMonth,
   createPadRequest,
   deletePadRequest,
+  describeError,
+  errorCode,
+  getBookings,
+  getClosePreview,
   getPadDashboard,
   getPadRequests,
   getProjects,
@@ -13,16 +18,32 @@ import {
 import { numOrNull } from '@/lib/versioned';
 import { invalidNumericFields } from '@/lib/validation';
 import type {
-  AdditionalPadRequest, CloseMonthResult, PadDashboard, ProjectSummary,
+  AdditionalPadRequest, Booking, CloseMonthResult, PadDashboard, ProjectSummary,
 } from '@/lib/types';
+import { viewRange } from '@/lib/bookings';
+import { blockedPreview, canSubmitForce, closeView, type ClosePreview } from '@/lib/monthClose';
 import { cn } from '@/lib/utils';
-import { canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
+import { confirmAction, promptOptional } from '@/lib/confirm';
+import { useFeatures } from '@/lib/features';
+import { localMonth, monthKey, shiftMonth as shiftYm } from '@/lib/dates';
+import { canManage as canManageRole, canSeeCommercial, isAdmin, useMe } from '@/lib/useMe';
 import {
-  btnCls, btnDangerCls, btnSecondaryCls, Field, inputCls, NumInput, Panel, tdCls, thCls,
+  btnCls, btnDangerCls, btnSecondaryCls, ErrorBox, Field, inputCls, NumInput, Panel, tdCls, thCls,
 } from '@/components/forms';
 
-const pad2 = (n: number) => String(n).padStart(2, '0');
 const fmt = (n: number) => n.toFixed(2).replace(/\.?0+$/, '');
+
+/** Where a checklist item gets resolved. */
+const CHECK_LINKS: Record<string, string> = {
+  unresolvedBookings: '/plan',
+  planningLeftovers: '/plan',
+  unsubmittedTime: '/approvals',
+  unapprovedTimesheets: '/approvals',
+  unapprovedExpenses: '/approvals',
+  travelNeedingReview: '/approvals',
+  pendingAdditionalPad: '/approvals',
+  additionalPadAwaitingApproval: '/approvals',
+};
 
 /** Selector for project + month; the data body remounts on change. */
 export function MonthEnd() {
@@ -30,20 +51,13 @@ export function MonthEnd() {
   const me = useMe();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState('');
-  const [ym, setYm] = useState(() => {
-    const d = new Date();
-    return { year: d.getFullYear(), month: d.getMonth() + 1 };
-  });
+  const [ym, setYm] = useState(() => localMonth());
 
   useEffect(() => {
     void getProjects().then(setProjects).catch(() => setProjects([]));
   }, []);
 
-  const shiftMonth = (d: number) =>
-    setYm(({ year, month }) => {
-      const next = new Date(year, month - 1 + d, 1);
-      return { year: next.getFullYear(), month: next.getMonth() + 1 };
-    });
+  const shiftMonth = (d: number) => setYm(({ year, month }) => shiftYm(year, month, d));
 
   if (me && !canSeeCommercial(me)) {
     return <div className="mx-auto max-w-6xl px-4 py-8"><p className="text-sm text-slate-500">{t('common.noAccess')}</p></div>;
@@ -61,7 +75,7 @@ export function MonthEnd() {
               {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <button className={btnSecondaryCls} onClick={() => shiftMonth(-1)}>←</button>
-            <span className="min-w-24 text-center text-sm font-medium">{ym.year}-{pad2(ym.month)}</span>
+            <span className="min-w-24 text-center text-sm font-medium">{monthKey(ym.year, ym.month)}</span>
             <button className={btnSecondaryCls} onClick={() => shiftMonth(1)}>→</button>
           </div>
         }
@@ -84,6 +98,8 @@ export function MonthEnd() {
 function MonthEndBody({ projectId, year, month }: { projectId: string; year: number; month: number }) {
   const { t } = useTranslation();
   const me = useMe();
+  // Without the PAD feature the page is the month lock: checklist + close.
+  const pad = useFeatures().pad;
   const [dash, setDash] = useState<PadDashboard | null>(null);
   const [requests, setRequests] = useState<AdditionalPadRequest[]>([]);
   const [baselineAmt, setBaselineAmt] = useState('');
@@ -92,11 +108,25 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
   const [reqForm, setReqForm] = useState({ quantity: '', reason: '', reference: '' });
   const [reqOpen, setReqOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ClosePreview | null>(null);
+  const [forceReason, setForceReason] = useState('');
+  const [bookings, setBookings] = useState<Booking[]>([]);
 
   const reload = useCallback(() => {
-    getPadDashboard(projectId, year, month).then(setDash).catch(() => setDash(null));
+    getPadDashboard(projectId, year, month).then(setDash)
+      .catch((e) => { setDash(null); setError(describeError(e, t)); });
     getPadRequests(projectId, year, month).then(setRequests).catch(() => setRequests([]));
-  }, [projectId, year, month]);
+    getClosePreview(projectId, year, month).then(setPreview).catch(() => setPreview(null));
+    const range = viewRange('month', { year, month }, `${monthKey(year, month)}-01`);
+    getBookings({ projectId, from: range.from, to: range.to }).then(setBookings)
+      .catch(() => setBookings([]));
+  }, [projectId, year, month, t]);
+  const view = preview ? closeView(preview, isAdmin(me)) : null;
+  const bookingLabel = (id: string | null) => {
+    if (!id) return null;
+    const b = bookings.find((x) => x.id === id);
+    return b ? `${b.date} · ${b.resourceName}` : t('monthEnd.linkedBooking');
+  };
   useEffect(() => { void reload(); }, [reload]);
 
   const saveBaseline = async () => {
@@ -110,15 +140,26 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
       setBaselineAmt('');
       setBaselineNote('');
       reload();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(describeError(e, t)); }
   };
 
-  const doClose = async () => {
+  const doClose = async (force = false) => {
+    // Closing releases open commitments, writes carry-over/expiry and locks
+    // the month — never one click away from an accident.
+    if (!confirmAction(t(force ? 'monthEnd.preview.confirmForce' : 'monthEnd.confirmClose',
+      { month: monthKey(year, month) }))) return;
     setError(null);
     try {
-      setCloseResult(await closeMonth(projectId, year, month));
+      setCloseResult(await closeMonth(projectId, year, month,
+        force ? { reason: forceReason.trim() } : undefined));
+      setForceReason('');
       reload();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) {
+      // 409 closeBlocked carries a fresh preview — show it instead of a bare error.
+      const fresh = blockedPreview(e);
+      if (fresh) setPreview(fresh);
+      setError(errorCode(e) === 'closeBlocked' ? t('monthEnd.preview.blockedError') : describeError(e, t));
+    }
   };
 
   const saveRequest = async () => {
@@ -135,23 +176,26 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
       setReqForm({ quantity: '', reason: '', reference: '' });
       setReqOpen(false);
       reload();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setError(describeError(e, t)); }
   };
 
   const actOnRequest = async (id: string, action: 'approve' | 'reject' | 'withdraw') => {
+    if (action !== 'approve' && !confirmAction(t(`monthEnd.confirm.${action}`))) return;
+    const rep = action === 'approve' ? promptOptional(t('approvals.approvedByRepPrompt')) : '';
+    if (rep === undefined) return;
     setError(null);
-    try { await padRequestAction(id, action); reload(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    try { await padRequestAction(id, action, rep); reload(); }
+    catch (e) { setError(describeError(e, t)); }
   };
 
   const removeRequest = async (id: string) => {
-    if (!window.confirm(t('common.confirmDelete'))) return;
+    if (!confirmAction(t('common.confirmDelete'))) return;
     setError(null);
     try { await deletePadRequest(id); reload(); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(describeError(e, t)); }
   };
 
-  const canManage = me !== null && ['Administrator', 'ProjectManager'].includes(me.role);
+  const canManage = canManageRole(me);
 
   const cards: [string, number, string?][] = dash ? [
     ['baseline', dash.baseline, 'text-slate-800'],
@@ -164,11 +208,18 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
     ['expired', dash.expired, 'text-slate-500'],
     ['carryOverOut', dash.carryOverOut, 'text-slate-500'],
   ] : [];
+  // Secondary ledger categories — shown when non-zero so every number in the
+  // ledger is reconcilable from the dashboard (§4.2).
+  const minorCards: [string, number][] = dash ? ([
+    ['released', dash.released],
+    ['borrowedFromThisMonth', dash.borrowedFromThisMonth],
+    ['adjustments', dash.adjustments],
+  ] as [string, number][]).filter(([, v]) => v !== 0) : [];
 
   return (
     <>
-      <Panel title={`${dash?.projectName ?? ''} ${year}-${pad2(month)}`} help={t('monthEnd.dashHelp')}>
-        {error && <p className="mb-2 rounded bg-red-50 px-3 py-1.5 text-sm text-red-700">{error}</p>}
+      <Panel title={`${dash?.projectName ?? ''} ${monthKey(year, month)}`} help={t('monthEnd.dashHelp')}>
+        <ErrorBox message={error} />
         {dash && (
           <>
             {dash.closed && (
@@ -176,7 +227,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                 {t('monthEnd.closed')}
               </span>
             )}
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
+            {pad && (<div className="grid grid-cols-3 gap-2 sm:grid-cols-9">
               {cards.map(([key, value, cls]) => (
                 <div key={key} className="rounded border border-slate-200 bg-slate-50 p-2 text-center">
                   <div className={cn('text-lg', cls)}>{fmt(value)}</div>
@@ -185,12 +236,28 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                   </div>
                 </div>
               ))}
-            </div>
+            </div>)}
+            {pad && minorCards.length > 0 && (
+              <p className="mt-2 flex flex-wrap gap-3 text-xs text-slate-500">
+                {minorCards.map(([key, value]) => (
+                  <span key={key}>{t(`monthEnd.${key}`)}: <span className="font-medium text-slate-700">{fmt(value)}</span></span>
+                ))}
+              </p>
+            )}
           </>
+        )}
+        {closeResult && (
+          <p className="mt-2 rounded bg-green-50 px-3 py-1.5 text-sm text-green-800">
+            {t('monthEnd.closeResult', {
+              carried: fmt(closeResult.carryOverOut),
+              expired: fmt(closeResult.expired),
+              next: monthKey(closeResult.nextYear, closeResult.nextMonth),
+            })}
+          </p>
         )}
       </Panel>
 
-      {dash && isAdmin(me) && !dash.closed && (
+      {pad && dash && isAdmin(me) && !dash.closed && (
         <Panel title={t('monthEnd.setBaseline')} help={t('monthEnd.baselineHelp')}>
           <div className="flex flex-wrap items-end gap-2">
             <Field label={t('monthEnd.baselineAmount')}>
@@ -204,23 +271,96 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
             <button className={btnCls} disabled={!baselineAmt.trim()} onClick={() => void saveBaseline()}>
               {t('common.save')}
             </button>
-            <button className={btnDangerCls} onClick={() => void doClose()}>
-              {t('monthEnd.closeMonth')}
-            </button>
           </div>
-          {closeResult && (
-            <p className="mt-2 rounded bg-green-50 px-3 py-1.5 text-sm text-green-800">
-              {t('monthEnd.closeResult', {
-                carried: fmt(closeResult.carryOverOut),
-                expired: fmt(closeResult.expired),
-                next: `${closeResult.nextYear}-${pad2(closeResult.nextMonth)}`,
-              })}
-            </p>
+        </Panel>
+      )}
+
+      {dash && canSeeCommercial(me) && !dash.closed && (
+        <Panel title={t('monthEnd.closeMonth')} help={t('monthEnd.closeHelp')}>
+          {!preview && <p className="text-sm text-slate-500">{t('common.loading')}</p>}
+          {view && (
+            <div className="space-y-3">
+              {view.orderingErrors.length > 0 && (
+                <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  <p className="font-medium">{t('monthEnd.preview.orderingTitle')}</p>
+                  <ul className="list-disc pl-5">
+                    {view.orderingErrors.map((c) => (
+                      <li key={c}>{t(`monthEnd.preview.ordering.${c}`, { defaultValue: c })}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('monthEnd.preview.checklistTitle')}
+                </p>
+                {view.blocking.length + view.warnings.length === 0 ? (
+                  <p className="text-sm text-green-700">{t('monthEnd.preview.allClear')}</p>
+                ) : (
+                  <ul className="space-y-1 text-sm">
+                    {[...view.blocking, ...view.warnings].map((c) => (
+                      <li key={c.code} className="flex items-center gap-2">
+                        <span className={cn('rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                          c.blocking ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800')}>
+                          {t(c.blocking ? 'monthEnd.preview.blocking' : 'monthEnd.preview.warning')}
+                        </span>
+                        <span>{t(`monthEnd.preview.check.${c.code}`, { count: c.count, defaultValue: c.code })}</span>
+                        {CHECK_LINKS[c.code] && (
+                          <Link className="text-xs text-blue-700 underline" to={CHECK_LINKS[c.code]}>
+                            {t('monthEnd.preview.open')}
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t('monthEnd.preview.stepsTitle')}
+                </p>
+                <table className="w-full border-collapse text-sm">
+                  <tbody>
+                    {view.steps.map((s, i) => (
+                      <tr key={`${s.code}-${i}`} className="border-b border-slate-100">
+                        <td className={tdCls}>{t(`monthEnd.preview.step.${s.code}`, { defaultValue: s.code })}</td>
+                        <td className={cn(tdCls, 'text-right font-medium')}>{fmt(s.amount)}</td>
+                        <td className={cn(tdCls, 'text-xs text-slate-500')}>{s.explanation}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {view.mode === 'close' && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <button className={btnDangerCls} onClick={() => void doClose()}>
+                    {t('monthEnd.closeMonth')}
+                  </button>
+                  <span className="text-xs text-slate-500">{t('monthEnd.closeWarning')}</span>
+                </div>
+              )}
+              {view.mode === 'force' && (
+                <div className="flex flex-wrap items-end gap-2 rounded border border-amber-200 bg-amber-50 p-2">
+                  <Field label={t('monthEnd.preview.forceReason')}>
+                    <input className={cn(inputCls, 'min-w-72')} value={forceReason}
+                      onChange={(e) => setForceReason(e.target.value)} />
+                  </Field>
+                  <button className={btnDangerCls} disabled={!canSubmitForce(forceReason)}
+                    onClick={() => void doClose(true)}>
+                    {t('monthEnd.preview.forceClose')}
+                  </button>
+                  <span className="text-xs text-amber-800">{t('monthEnd.preview.forceHint')}</span>
+                </div>
+              )}
+              {view.mode === 'none' && !isAdmin(me) && (
+                <p className="text-xs text-slate-500">{t('monthEnd.preview.adminOnly')}</p>
+              )}
+            </div>
           )}
         </Panel>
       )}
 
-      {dash && (
+      {pad && dash && (
         <Panel
           title={t('monthEnd.padRequests')}
           help={t('monthEnd.requestsHelp')}
@@ -258,6 +398,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                 <th className={thCls}>{t('monthEnd.quantity')}</th>
                 <th className={thCls}>{t('monthEnd.reason')}</th>
                 <th className={thCls}>{t('monthEnd.reference')}</th>
+                <th className={thCls}>{t('monthEnd.linkedBooking')}</th>
                 <th className={thCls}>{t('booking.statusLabel')}</th>
                 <th className={thCls}>{t('common.actions')}</th>
               </tr>
@@ -268,6 +409,7 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                   <td className={tdCls}>{fmt(r.quantity)}</td>
                   <td className={tdCls}>{r.reason ?? '—'}</td>
                   <td className={tdCls}>{r.reference ?? '—'}</td>
+                  <td className={tdCls}>{bookingLabel(r.bookingId) ?? '—'}</td>
                   <td className={tdCls}>{t(`monthEnd.requestStatus.${r.status}`)}</td>
                   <td className={tdCls}>
                     {r.status === 'submitted' && (
@@ -298,14 +440,14 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                 </tr>
               ))}
               {requests.length === 0 && (
-                <tr><td className={tdCls} colSpan={5}>{t('common.none')}</td></tr>
+                <tr><td className={tdCls} colSpan={6}>{t('common.none')}</td></tr>
               )}
             </tbody>
           </table>
         </Panel>
       )}
 
-      {dash && (
+      {pad && dash && (
         <Panel title={t('monthEnd.transactions')} help={t('monthEnd.txHelp')}>
           <table className="w-full border-collapse">
             <thead>
@@ -323,8 +465,13 @@ function MonthEndBody({ projectId, year, month }: { projectId: string; year: num
                   <td className={cn(tdCls, 'text-right', tx.amount < 0 && 'text-red-600')}>
                     {fmt(tx.amount)}
                   </td>
-                  <td className={tdCls}>{tx.note ?? '—'}</td>
-                  <td className={tdCls}>{tx.createdUtc.slice(0, 16).replace('T', ' ')}</td>
+                  <td className={tdCls}>
+                    {tx.note ?? '—'}
+                    {tx.bookingId && (
+                      <span className="ml-1 text-xs text-slate-400">· {t('monthEnd.fromBooking')}</span>
+                    )}
+                  </td>
+                  <td className={tdCls}>{new Date(tx.createdUtc).toLocaleString()}</td>
                 </tr>
               ))}
               {dash.transactions.length === 0 && (

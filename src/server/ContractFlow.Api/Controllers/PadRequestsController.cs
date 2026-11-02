@@ -40,6 +40,15 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
             return BadRequest(new { error = "Unknown project." });
         if (await pad.MonthIsClosedAsync(req.ProjectId, req.Year, req.Month, ct))
             return Conflict(new { error = "monthClosed" });
+        if (req.BookingId.HasValue)
+        {
+            var booking = await db.Bookings.FindAsync([req.BookingId.Value], ct);
+            if (booking is null || booking.ProjectId != req.ProjectId
+                || booking.Date.Year != req.Year || booking.Date.Month != req.Month)
+                return BadRequest(new { error = "The booking must belong to the request's project and month." });
+            if (!Prepared(booking))
+                return BadRequest(new { error = "Only a prepared (not yet confirmed) booking can wait on a request." });
+        }
 
         var me = await currentUser.GetAsync(ct);
         var request = new AdditionalPadRequest
@@ -51,6 +60,7 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
             Rate = req.Rate,
             Reason = req.Reason,
             Reference = req.Reference,
+            BookingId = req.BookingId,
             Status = AdditionalPadStatus.Submitted,
             CreatedByUserId = me?.Id,
         };
@@ -59,9 +69,15 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
         return Ok(ToDto(request));
     }
 
+    /// <summary>
+    /// Approve — appends AdditionalApproved and, when the request names a
+    /// prepared booking, commits that booking in the same transaction so the
+    /// approved PAD can't be taken by another booking first (§4.3).
+    /// </summary>
     [HttpPost("{id:guid}/approve")]
     [RequireRole(AppRole.Administrator)]
-    public async Task<IActionResult> Approve(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Approve(
+        Guid id, [FromBody] AdditionalPadApproveRequest? req, CancellationToken ct)
     {
         var request = await db.AdditionalPadRequests.FindAsync([id], ct);
         if (request is null) return NotFound();
@@ -71,16 +87,38 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
             return Conflict(new { error = "monthClosed" });
 
         var me = await currentUser.GetAsync(ct);
-        request.Status = AdditionalPadStatus.Approved;
-        request.DecidedUtc = DateTime.UtcNow;
-        await pad.AppendAsync(
-            request.ProjectId, new DateOnly(request.Year, request.Month, 1),
-            PadTransactionType.AdditionalApproved, request.Quantity, me?.Id, ct,
-            additionalPadRequestId: request.Id,
-            note: request.Reason ?? "Additional PAD approved");
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await pad.InTransactionAsync(async () =>
+            {
+                request.Status = AdditionalPadStatus.Approved;
+                request.DecidedUtc = DateTime.UtcNow;
+                request.ApprovedByRepresentative = req?.ApprovedByRepresentative?.Trim();
+                await pad.AppendAsync(
+                    request.ProjectId, new DateOnly(request.Year, request.Month, 1),
+                    PadTransactionType.AdditionalApproved, request.Quantity, me?.Id, ct,
+                    additionalPadRequestId: request.Id,
+                    note: request.Reason ?? "Additional PAD approved");
+
+                if (request.BookingId is { } bookingId
+                    && await db.Bookings.FindAsync([bookingId], ct) is { } booking
+                    && Prepared(booking)
+                    && (await pad.TryCommitAsync(booking, me?.Id, ct)).Ok)
+                    booking.Status = BookingStatus.Confirmed;
+                await db.SaveChangesAsync(ct);
+                return true;
+            }, ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Unique (request, AdditionalApproved) index — a concurrent approve won.
+            return Conflict(new { error = "alreadyDecided", message = "The request was decided concurrently." });
+        }
         return Ok(ToDto(request));
     }
+
+    private static bool Prepared(Booking b) =>
+        b.Status is BookingStatus.Forecast or BookingStatus.Tentative or BookingStatus.Requested;
 
     [HttpPost("{id:guid}/reject")]
     [RequireRole(AppRole.Administrator)]
@@ -133,5 +171,6 @@ public class PadRequestsController(AppDbContext db, PadService pad, ICurrentUser
 
     private static AdditionalPadRequestDto ToDto(AdditionalPadRequest r) => new(
         r.Id, r.ProjectId, r.Year, r.Month, r.Quantity, r.Rate, r.Reason,
-        r.Reference, r.Status, r.CreatedUtc, r.DecidedUtc);
+        r.Reference, r.Status, r.CreatedUtc, r.DecidedUtc, r.BookingId,
+        r.ApprovedByRepresentative);
 }

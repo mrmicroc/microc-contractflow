@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { numOrNull, resolveVersion } from './versioned';
+import { numOr, numOrNull, resolveVersion } from './versioned';
 
 const v = (version: number, effectiveFrom: string) => ({ version, effectiveFrom });
 
@@ -42,5 +42,26 @@ describe('numOrNull', () => {
 
   it('returns null for non-numeric input', () => {
     expect(numOrNull('abc')).toBeNull();
+    expect(numOrNull('1e5')).toBeNull();
+  });
+
+  it('accepts the Swedish decimal comma', () => {
+    expect(numOrNull('8,5')).toBe(8.5);
+    expect(numOrNull(' 12,5 ')).toBe(12.5);
+    expect(numOrNull('4800,50')).toBe(4800.5);
+  });
+
+  it('keeps an explicit zero', () => {
+    expect(numOrNull('0')).toBe(0);
+    expect(numOrNull('0,0')).toBe(0);
+  });
+});
+
+describe('numOr', () => {
+  it('falls back only when empty or invalid', () => {
+    expect(numOr('', 20)).toBe(20);
+    expect(numOr('x', 20)).toBe(20);
+    expect(numOr('0', 20)).toBe(0);
+    expect(numOr('7,5', 8)).toBe(7.5);
   });
 });

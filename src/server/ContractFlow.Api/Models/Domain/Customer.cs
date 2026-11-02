@@ -1,8 +1,11 @@
 namespace ContractFlow.Api.Models.Domain;
 
 /// <summary>
-/// The party that pays MICROC. May differ from the end client in multi-layer
-/// chains — see <see cref="EndClient"/>.
+/// An organisation MICROC does business with — one register for both roles:
+/// the contract party that pays MICROC (<see cref="Contracts"/>) and/or the
+/// end client the work is ultimately for when an intermediary holds the
+/// contract (<see cref="EndClientContracts"/>). The same organisation can be
+/// a direct customer on one contract and an end client on another.
 /// </summary>
 public class Customer
 {
@@ -23,7 +26,10 @@ public class Customer
     public bool IsActive { get; set; } = true;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
+    /// <summary>Contracts where this organisation is the party (pays MICROC).</summary>
     public List<Contract> Contracts { get; set; } = [];
+    /// <summary>Contracts held by an intermediary where this organisation is the end client.</summary>
+    public List<Contract> EndClientContracts { get; set; } = [];
 }
 
 /// <summary>A named contact at a customer — orderer, invoice recipient, etc.</summary>

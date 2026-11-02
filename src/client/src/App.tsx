@@ -10,24 +10,16 @@ import { MonthEnd } from '@/pages/MonthEnd';
 import { MyWork } from '@/pages/MyWork';
 import { Plan } from '@/pages/Plan';
 import { Projects } from '@/pages/Projects';
+import { Reports } from '@/pages/Reports';
 import { Resources } from '@/pages/Resources';
+import { Settings } from '@/pages/Settings';
 import { cn } from '@/lib/utils';
-
-const NAV_ITEMS: { to: string; key: string }[] = [
-  { to: '/', key: 'nav.dashboard' },
-  { to: '/plan', key: 'nav.plan' },
-  { to: '/projects', key: 'nav.projects' },
-  { to: '/resources', key: 'nav.resources' },
-  { to: '/my', key: 'nav.myWork' },
-  { to: '/approvals', key: 'nav.approvals' },
-  { to: '/month-end', key: 'nav.monthEnd' },
-  { to: '/economy', key: 'nav.economy' },
-  { to: '/reports', key: 'nav.reports' },
-  { to: '/settings', key: 'nav.settings' },
-];
+import { visibleNav } from '@/lib/roles';
+import { useMe } from '@/lib/useMe';
 
 export default function App() {
   const { t } = useTranslation();
+  const me = useMe();
 
   return (
     <BrowserRouter>
@@ -39,7 +31,7 @@ export default function App() {
               <p className="text-[11px] leading-tight text-slate-400">{t('appTagline')}</p>
             </div>
             <nav className="flex flex-wrap items-center gap-1">
-              {NAV_ITEMS.map((item) => (
+              {visibleNav(me?.role).map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}
@@ -71,9 +63,8 @@ export default function App() {
             <Route path="/approvals" element={<Approvals />} />
             <Route path="/month-end" element={<MonthEnd />} />
             <Route path="/economy" element={<Economy />} />
-            {NAV_ITEMS.filter((i) => !['/', '/plan', '/projects', '/resources', '/my', '/approvals', '/month-end', '/economy'].includes(i.to)).map((item) => (
-              <Route key={item.to} path={item.to} element={<Placeholder titleKey={item.key} />} />
-            ))}
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Placeholder titleKey="nav.dashboard" />} />
           </Routes>
         </main>

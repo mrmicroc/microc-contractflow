@@ -42,6 +42,7 @@ public class TravelRecordsController(AppDbContext db, ICurrentUser currentUser, 
         var projectError = await ValidateProjectAndBookingAsync(
             req.ProjectId, req.BookingId, resourceId!.Value, req.Date, ct);
         if (projectError is not null) return projectError;
+        if (await WeekLockedAsync(resourceId.Value, req.Date, ct)) return WeekLockedError();
 
         var me = await Me(ct);
         var row = new TravelRecord
@@ -74,6 +75,8 @@ public class TravelRecordsController(AppDbContext db, ICurrentUser currentUser, 
         var projectError = await ValidateProjectAndBookingAsync(
             req.ProjectId, req.BookingId, row.ResourceId, req.Date, ct);
         if (projectError is not null) return projectError;
+        if (await ClosedAsync(row.ProjectId, row.Date, ct)) return MonthClosedError();
+        if (await WeekLockedAsync(row.ResourceId, req.Date, ct)) return WeekLockedError();
 
         row.ProjectId = req.ProjectId;
         row.BookingId = req.BookingId;
@@ -96,6 +99,7 @@ public class TravelRecordsController(AppDbContext db, ICurrentUser currentUser, 
         if (row is null) return NotFound();
         if (!await OwnsAsync(row.ResourceId, ct)) return ForbidResult();
         if (await LockedAsync(row.TimesheetId, ct)) return LockedError();
+        if (await ClosedAsync(row.ProjectId, row.Date, ct)) return MonthClosedError();
         Db.TravelRecords.Remove(row);
         await Db.SaveChangesAsync(ct);
         return NoContent();
@@ -108,14 +112,16 @@ public class TravelRecordsController(AppDbContext db, ICurrentUser currentUser, 
         {
             if (!await Db.Projects.AnyAsync(p => p.Id == projectId && p.IsActive, ct))
                 return BadRequest(new { error = "Unknown or inactive project." });
-            if (await pad.MonthIsClosedAsync(projectId.Value, date.Year, date.Month, ct))
-                return Conflict(new { error = "monthClosed", message = "The project month is closed." });
+            if (await ClosedAsync(projectId, date, ct)) return MonthClosedError();
         }
         if (bookingId.HasValue && !await Db.Bookings.AnyAsync(
                 b => b.Id == bookingId.Value && b.ResourceId == resourceId, ct))
             return BadRequest(new { error = "Booking does not belong to this resource." });
         return null;
     }
+
+    private async Task<bool> ClosedAsync(Guid? projectId, DateOnly date, CancellationToken ct) =>
+        projectId.HasValue && await pad.MonthIsClosedAsync(projectId.Value, date.Year, date.Month, ct);
 
     private async Task<TravelRecordDto> DtoAsync(Guid id, CancellationToken ct) =>
         ToDto(await Db.TravelRecords

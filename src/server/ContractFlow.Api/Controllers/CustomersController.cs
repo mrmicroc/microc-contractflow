@@ -19,7 +19,7 @@ public class CustomersController(AppDbContext db) : ControllerBase
             .OrderBy(c => c.Name)
             .Select(c => new CustomerSummaryDto(
                 c.Id, c.Name, c.ExternalReference, c.VatNumber, c.Country,
-                c.IsActive, c.Contracts.Count))
+                c.IsActive, c.Contracts.Count, c.EndClientContracts.Count))
             .ToListAsync(ct);
         return Ok(customers);
     }
@@ -30,6 +30,8 @@ public class CustomersController(AppDbContext db) : ControllerBase
     {
         var customer = await db.Customers
             .Include(c => c.Contracts).ThenInclude(c => c.TermsVersions)
+            .Include(c => c.Contracts).ThenInclude(c => c.ScheduledCharges)
+            .Include(c => c.EndClientContracts).ThenInclude(c => c.Customer)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (customer is null) return NotFound();
 
@@ -46,6 +48,12 @@ public class CustomersController(AppDbContext db) : ControllerBase
                 .Select(c => new ContractSummaryDto(
                     c.Id, c.CustomerId, c.Name, c.ExternalReference,
                     ContractsController.ComponentsOf(c, today),
+                    c.StartDate, c.EndDate, c.IsActive))
+                .ToList(),
+            customer.EndClientContracts
+                .OrderBy(c => c.Name)
+                .Select(c => new EndClientContractDto(
+                    c.Id, c.Name, c.CustomerId, c.Customer.Name, c.EndClientReference,
                     c.StartDate, c.EndDate, c.IsActive))
                 .ToList()));
     }
@@ -97,7 +105,8 @@ public class CustomersController(AppDbContext db) : ControllerBase
         return Ok(new CustomerSummaryDto(customer.Id, customer.Name,
             customer.ExternalReference, customer.VatNumber, customer.Country,
             customer.IsActive,
-            await db.Contracts.CountAsync(c => c.CustomerId == id, ct)));
+            await db.Contracts.CountAsync(c => c.CustomerId == id, ct),
+            await db.Contracts.CountAsync(c => c.EndClientId == id, ct)));
     }
 
     private static List<ContactPerson> ToContacts(CustomerRequest req) =>
@@ -115,11 +124,11 @@ public class CustomersController(AppDbContext db) : ControllerBase
     {
         var customer = await db.Customers.FindAsync([id], ct);
         if (customer is null) return NotFound();
-        if (await db.Contracts.AnyAsync(c => c.CustomerId == id, ct))
+        if (await db.Contracts.AnyAsync(c => c.CustomerId == id || c.EndClientId == id, ct))
             return Conflict(new
             {
                 error = "hasDependents",
-                message = "Customer has contracts — delete or reassign them first.",
+                message = "The organisation is the party or end client on contracts — reassign them first.",
             });
 
         db.Customers.Remove(customer);

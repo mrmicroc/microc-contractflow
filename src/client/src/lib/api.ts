@@ -1,5 +1,10 @@
 import { DEV_USER_HEADER, getDevUserId } from './currentUser';
+import { auditQuery, type AuditEntry, type AuditFilters } from './audit';
+import type { OverrunSplit } from './bookings';
+import type { ClosePreview } from './monthClose';
+import type { RateBody } from './currency';
 import type {
+  ExchangeRate,
   AdditionalPadRequest,
   AllowanceClaim,
   AllowanceRequestBody,
@@ -12,6 +17,11 @@ import type {
   Competency,
   CompetencyRequestBody,
   ContractDetail,
+  ContractVisits,
+  ScheduledCharge,
+  ScheduledChargeRequestBody,
+  BaselineSchedule,
+  BaselineMonth,
   ContractRequestBody,
   ContractWorkPackage,
   ContractSummary,
@@ -20,8 +30,6 @@ import type {
   CustomerDetail,
   CustomerRequestBody,
   CustomerSummary,
-  EndClient,
-  EndClientRequestBody,
   EstimatedQuantity,
   EstimatedQuantityRequestBody,
   MetaEntry,
@@ -57,6 +65,7 @@ import type {
   Timesheet,
   TimesheetDetail,
   TimesheetStatus,
+  UnbilledRow,
   TravelRecord,
   TravelRecordRequestBody,
 } from './types';
@@ -97,16 +106,9 @@ async function apiUpload<T>(path: string, file: File, label?: string): Promise<T
   return (await res.json()) as T;
 }
 
-/** Extracts a readable message from an API error body ({error, message}). */
-export function errorMessage(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  try {
-    const parsed = JSON.parse(raw) as { message?: string; error?: string };
-    return parsed.message ?? parsed.error ?? raw;
-  } catch {
-    return raw;
-  }
-}
+// Error parsing lives in lib/errors (pure, tested); re-exported here so
+// pages keep importing from one place.
+export { describeError, errorCode, errorMessage } from './errors';
 
 export interface UserDto {
   id: string;
@@ -130,11 +132,6 @@ export const updateCustomer = (id: string, b: CustomerRequestBody) =>
   apiPut<CustomerSummary>(`/api/customers/${id}`, b);
 export const deleteCustomer = (id: string) => apiDelete(`/api/customers/${id}`);
 
-export const getEndClients = () => apiGet<EndClient[]>('/api/endclients');
-export const createEndClient = (b: EndClientRequestBody) => apiPost<EndClient>('/api/endclients', b);
-export const updateEndClient = (id: string, b: EndClientRequestBody) =>
-  apiPut<EndClient>(`/api/endclients/${id}`, b);
-export const deleteEndClient = (id: string) => apiDelete(`/api/endclients/${id}`);
 
 export const getContracts = (customerId?: string) =>
   apiGet<ContractSummary[]>(`/api/contracts${customerId ? `?customerId=${customerId}` : ''}`);
@@ -151,6 +148,19 @@ export const getEffectiveTerms = (contractId: string, on?: string) =>
   apiGet<ContractTerms>(`/api/contracts/${contractId}/terms/effective${on ? `?on=${on}` : ''}`);
 export const createContractTerms = (contractId: string, b: ContractTermsRequestBody) =>
   apiPost<ContractTerms>(`/api/contracts/${contractId}/terms`, b);
+// ── One-off scheduled charges, visits (contract level) ─────────────────────
+
+export const getScheduledCharges = (contractId: string) =>
+  apiGet<ScheduledCharge[]>(`/api/contracts/${contractId}/charges`);
+export const createScheduledCharge = (contractId: string, b: ScheduledChargeRequestBody) =>
+  apiPost<ScheduledCharge>(`/api/contracts/${contractId}/charges`, b);
+export const updateScheduledCharge = (contractId: string, id: string, b: ScheduledChargeRequestBody) =>
+  apiPut<ScheduledCharge>(`/api/contracts/${contractId}/charges/${id}`, b);
+export const deleteScheduledCharge = (contractId: string, id: string) =>
+  apiDelete(`/api/contracts/${contractId}/charges/${id}`);
+export const getContractVisits = (contractId: string) =>
+  apiGet<ContractVisits>(`/api/contracts/${contractId}/visits`);
+
 export const deleteContractTerms = (contractId: string, termId: string) =>
   apiDelete(`/api/contracts/${contractId}/terms/${termId}`);
 
@@ -248,11 +258,43 @@ export const getBookings = (q: { from?: string; to?: string; projectId?: string;
 export const createBooking = (b: BookingRequestBody) => apiPost<Booking>('/api/bookings', b);
 export const updateBooking = (id: string, b: Partial<BookingRequestBody>) =>
   apiPut<Booking>(`/api/bookings/${id}`, b);
+export const getBooking = (id: string) => apiGet<Booking>(`/api/bookings/${id}`);
+/** Result of a booking action — cancel carries the PAD consequence. */
+export interface BookingActionResult {
+  booking?: Booking;
+  padEffect?: string | null;
+  padAmount?: number | null;
+  insufficientPad?: boolean;
+}
 export const bookingAction = (id: string, action: 'confirm' | 'acknowledge' | 'start' | 'complete' | 'cancel') =>
-  apiPost<unknown>(`/api/bookings/${id}/${action}`, {});
+  apiPost<BookingActionResult | Booking>(`/api/bookings/${id}/${action}`, {});
+export interface CompleteResult {
+  booking: Booking;
+  padUtilised: number;
+  overrun: OverrunSplit | null;
+  /** Shared day: each project's utilisation (and overrun) — one row otherwise. */
+  perProject?: { projectId: string; padUtilised: number; overrun: OverrunSplit | null }[];
+}
+/** Admin/PM completion; actual hours beyond the commitment run the §4.3
+ * continuation allocation and come back as the overrun split. A shared day
+ * takes the actual hours per project instead. */
+export const completeBooking = (
+  id: string, actualHours?: number | null, actualHoursByProject?: Record<string, number> | null,
+) =>
+  apiPost<CompleteResult>(`/api/bookings/${id}/complete`,
+    actualHoursByProject && Object.keys(actualHoursByProject).length
+      ? { actualHoursByProject }
+      : actualHours ? { actualHours } : {});
+export interface RescheduleResult {
+  original: Booking;
+  replacement: Booking;
+  replacementConfirmed: boolean;
+  insufficientPad?: boolean;
+  padEffect: string | null;
+  padAmount?: number | null;
+}
 export const rescheduleBooking = (id: string, date: string, plannedHours?: number) =>
-  apiPost<{ original: Booking; replacement: Booking; replacementConfirmed: boolean; padEffect: string }>(
-    `/api/bookings/${id}/reschedule`, { date, plannedHours });
+  apiPost<RescheduleResult>(`/api/bookings/${id}/reschedule`, { date, plannedHours });
 export const deleteBooking = (id: string) => apiDelete(`/api/bookings/${id}`);
 
 // ── PAD ─────────────────────────────────────────────────────────────────────
@@ -261,8 +303,16 @@ export const getPadDashboard = (projectId: string, year: number, month: number) 
   apiGet<PadDashboard>(`/api/projects/${projectId}/pad/${year}/${month}`);
 export const setBaseline = (projectId: string, year: number, month: number, amount: number, note?: string) =>
   apiPost<PadTransaction>(`/api/projects/${projectId}/pad/${year}/${month}/baseline`, { amount, note });
-export const closeMonth = (projectId: string, year: number, month: number) =>
-  apiPost<CloseMonthResult>(`/api/projects/${projectId}/pad/${year}/${month}/close`, {});
+/** Close the month; `force` + `reason` override blocking checklist items
+ * (never ordering errors). 409 closeBlocked carries the preview. */
+export const closeMonth = (
+  projectId: string, year: number, month: number, force?: { reason: string },
+) =>
+  apiPost<CloseMonthResult>(`/api/projects/${projectId}/pad/${year}/${month}/close`,
+    force ? { force: true, reason: force.reason } : {});
+/** Dry run of the close (§6.4) — ordering, checklist, carry/expiry steps. */
+export const getClosePreview = (projectId: string, year: number, month: number) =>
+  apiGet<ClosePreview>(`/api/projects/${projectId}/pad/${year}/${month}/close/preview`);
 export const getPadRequests = (projectId: string, year?: number, month?: number) => {
   const p = new URLSearchParams({ projectId });
   if (year) p.set('year', String(year));
@@ -272,10 +322,27 @@ export const getPadRequests = (projectId: string, year?: number, month?: number)
 export const createPadRequest = (b: {
   projectId: string; year: number; month: number; quantity: number;
   rate?: number | null; reason?: string | null; reference?: string | null;
+  /** A prepared booking waiting on this request — approval confirms it. */
+  bookingId?: string | null;
 }) => apiPost<AdditionalPadRequest>('/api/pad-requests', b);
-export const padRequestAction = (id: string, action: 'approve' | 'reject' | 'withdraw') =>
-  apiPost<AdditionalPadRequest>(`/api/pad-requests/${id}/${action}`, {});
+export const padRequestAction = (
+  id: string, action: 'approve' | 'reject' | 'withdraw', approvedByRepresentative?: string | null,
+) =>
+  apiPost<AdditionalPadRequest>(`/api/pad-requests/${id}/${action}`,
+    action === 'approve' && approvedByRepresentative?.trim()
+      ? { approvedByRepresentative: approvedByRepresentative.trim() } : {});
+
+/** The project's baseline per month + sum vs the contracted total. */
+export const getBaselineSchedule = (projectId: string) =>
+  apiGet<BaselineSchedule>(`/api/projects/${projectId}/pad/baseline-schedule`);
+/** Sets several months at once (admin); 409 monthClosed lists the closed months. */
+export const putBaselineSchedule = (projectId: string, months: BaselineMonth[]) =>
+  apiPut<BaselineSchedule>(`/api/projects/${projectId}/pad/baseline-schedule`, months);
 export const deletePadRequest = (id: string) => apiDelete(`/api/pad-requests/${id}`);
+
+// ── Audit log ───────────────────────────────────────────────────────────────
+
+export const getAudit = (f: AuditFilters) => apiGet<AuditEntry[]>(`/api/audit?${auditQuery(f)}`);
 
 // ── Calendar feed (.ics) ────────────────────────────────────────────────────
 
@@ -359,6 +426,8 @@ export const getAllowances = (q: { from?: string; to?: string; resourceId?: stri
   return apiGet<AllowanceClaim[]>(`/api/allowances${s ? `?${s}` : ''}`);
 };
 export const createAllowance = (b: AllowanceRequestBody) => apiPost<AllowanceClaim>('/api/allowances', b);
+export const updateAllowance = (id: string, b: AllowanceRequestBody) =>
+  apiPut<AllowanceClaim>(`/api/allowances/${id}`, b);
 export const deleteAllowance = (id: string) => apiDelete(`/api/allowances/${id}`);
 
 export const getMobilisations = (q: { projectId?: string; resourceId?: string }) => {
@@ -394,8 +463,9 @@ export const getTimesheets = (q: { resourceId?: string; status?: TimesheetStatus
 export const getTimesheet = (id: string) => apiGet<TimesheetDetail>(`/api/timesheets/${id}`);
 export const submitTimesheet = (year: number, isoWeek: number, resourceId?: string) =>
   apiPost<TimesheetDetail>('/api/timesheets/submit', { year, isoWeek, resourceId });
-export const timesheetAction = (id: string, action: 'approve' | 'return' | 'reject', note?: string) =>
-  apiPost<Timesheet>(`/api/timesheets/${id}/${action}`, { note });
+export const timesheetAction = (
+  id: string, action: 'approve' | 'return' | 'reject' | 'reopen', note?: string,
+) => apiPost<Timesheet>(`/api/timesheets/${id}/${action}`, { note });
 
 export const getDocuments = (ownerType: DocumentOwnerType, ownerId: string) =>
   apiGet<DocumentAttachment[]>(`/api/documents?ownerType=${ownerType}&ownerId=${ownerId}`);
@@ -422,10 +492,15 @@ export const getInvoices = (q: { projectId?: string; year?: number; month?: numb
   return apiGet<InvoiceSpecification[]>(`/api/invoices${s ? `?${s}` : ''}`);
 };
 export const getInvoice = (id: string) => apiGet<InvoiceDetail>(`/api/invoices/${id}`);
-export const generateInvoice = (projectId: string, year: number, month: number) =>
-  apiPost<InvoiceSpecification>('/api/invoices/generate', { projectId, year, month });
-export const invoiceAction = (id: string, action: 'review' | 'finalize' | 'issue' | 'pay') =>
-  apiPost<InvoiceSpecification>(`/api/invoices/${id}/${action}`);
+/** supplement=true bills what was approved after the month's spec left draft. */
+export const generateInvoice = (projectId: string, year: number, month: number, supplement = false) =>
+  apiPost<InvoiceSpecification>('/api/invoices/generate', { projectId, year, month, supplement });
+export const invoiceAction = (
+  id: string, action: 'review' | 'back-to-draft' | 'finalize' | 'issue' | 'pay',
+) => apiPost<InvoiceSpecification>(`/api/invoices/${id}/${action}`);
+export const getUnbilled = (year: number, month: number, projectId?: string) =>
+  apiGet<UnbilledRow[]>(
+    `/api/invoices/unbilled?year=${year}&month=${month}${projectId ? `&projectId=${projectId}` : ''}`);
 export const deleteInvoice = (id: string) => apiDelete(`/api/invoices/${id}`);
 
 export const getStatements = (q: { resourceId?: string; year?: number; month?: number; status?: string } = {}) => {
@@ -460,9 +535,28 @@ export const registerSupplierInvoice = (body: {
 }) => apiPost<SupplierInvoice>('/api/supplier-invoices', body);
 export const matchSupplierInvoice = (id: string, statementId: string) =>
   apiPost<SupplierInvoiceDetail>(`/api/supplier-invoices/${id}/match`, { statementId });
-export const supplierInvoiceAction = (id: string, action: 'approve' | 'pay') =>
-  apiPost<SupplierInvoice>(`/api/supplier-invoices/${id}/${action}`);
+/** approve takes an optional note — required when the match showed a discrepancy. */
+export const supplierInvoiceAction = (id: string, action: 'approve' | 'pay', note?: string) =>
+  apiPost<SupplierInvoice>(`/api/supplier-invoices/${id}/${action}`,
+    action === 'approve' ? { note } : undefined);
 export const deleteSupplierInvoice = (id: string) => apiDelete(`/api/supplier-invoices/${id}`);
 
-export const getMargins = (year: number, month: number) =>
-  apiGet<MarginRow[]>(`/api/reports/margins?year=${year}&month=${month}`);
+/** `endClientId` narrows to one effective end client — its direct contracts
+ * and those an intermediary holds on its behalf. */
+export const getMargins = (year: number, month: number, endClientId?: string | null) =>
+  apiGet<MarginRow[]>(`/api/reports/margins?year=${year}&month=${month}`
+    + (endClientId ? `&endClientId=${endClientId}` : ''));
+
+// ── Exchange rates (month rate table) ──────────────────────────────────────
+
+export const getExchangeRates = (year?: number, month?: number) => {
+  const q = new URLSearchParams();
+  if (year) q.set('year', String(year));
+  if (month) q.set('month', String(month));
+  const qs = q.toString();
+  return apiGet<ExchangeRate[]>(`/api/exchange-rates${qs ? `?${qs}` : ''}`);
+};
+export const createExchangeRate = (body: RateBody) => apiPost<ExchangeRate>('/api/exchange-rates', body);
+export const updateExchangeRate = (id: string, body: RateBody) =>
+  apiPut<ExchangeRate>(`/api/exchange-rates/${id}`, body);
+export const deleteExchangeRate = (id: string) => apiDelete(`/api/exchange-rates/${id}`);
